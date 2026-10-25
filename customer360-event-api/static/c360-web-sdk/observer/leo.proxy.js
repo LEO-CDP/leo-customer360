@@ -61,6 +61,7 @@
 	}
 
 	var TIME_TO_ADD_PROXY_IFRAME = typeof window.leoProxyDelay === 'number' ? window.leoProxyDelay : 300; // delay to avoid blocking page load
+	// Analytics collection consent only; marketing channel/provider opt-ins are stored separately.
 	var consentGranted = window.leoTrackingConsent !== false;
 	var iframeTimer = null;
 	var revokeAckTimer = null;

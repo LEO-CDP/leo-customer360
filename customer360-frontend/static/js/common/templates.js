@@ -83,7 +83,10 @@ window.C360 = window.C360 || {};
   function loadAll() {
     var requests = ALL_NAMES.map(function (name) {
       var path = SOURCE_PATHS[name] || name;
-      return $.get(BASE + path + ".html").done(function (text) {
+      var url = BASE + path + ".html";
+      var cacheBust = C360.config && C360.config.templateCacheBust;
+      if (cacheBust) url += "?cb=" + encodeURIComponent(cacheBust);
+      return $.get(url).done(function (text) {
         raw[name] = text;
         compiled[name] = Handlebars.compile(text);
       });

@@ -15,12 +15,36 @@ Customer 360 API's tenant boundary.
 | `personalization_job` | Compatibility scaffold retained from the removed personalization location |
 | `POST /api/v1/segments/{segment_id}/workflow/run` | Submit a tenant/segment API-triggered run |
 
-The master task executes supported `ranking_recommendation` steps for every
-active profile in the segment, using only that workflow step's selected
-tenant-owned content candidates. It persists recommendations by Dagster run
-and publishes only successful runs. Other model handlers remain explicit
-scaffolds and are reported as unsupported rather than returning placeholder
-success results.
+The master task executes `ranking_recommendation` steps for active profiles
+and `eligibility_policy` rules-engine steps for active profiles matched to the
+tenant-owned segment. Recommendations use only that workflow step's selected
+tenant-owned content candidates. Eligibility evaluation stores per-channel
+readiness in `communication_preferences.eligibility_policy` while preserving
+the original consent fields. Other model handlers remain explicit scaffolds
+and are reported as unsupported rather than returning placeholder success
+results.
+
+The eligibility policy is deterministic, not an LLM/legal-compliance verdict.
+Only literal JSON `true` grants consent. Missing, false, or malformed values
+deny that channel; active applicable suppressions deny it as well. Meta, Google
+Ads, and TikTok require their own explicit `meta_ads_opt_in`,
+`google_ads_opt_in`, or `tiktok_ads_opt_in` field; consent for email or another
+provider is never reused. A `GLOBAL` suppression blocks every channel. A
+campaign-scoped suppression is included only when the workflow configuration
+or trigger event supplies that `campaign_id`. Add the active
+`eligibility_policy` agent to a segment workflow before triggering that
+segment's run.
+
+To evaluate a segment, add the active `eligibility_policy` agent to that
+tenant's segment workflow, then use the existing
+`POST /api/v1/segments/{segment_id}/workflow/run` endpoint with the tenant ID.
+The runner loads active profiles whose `segmentation_tags` contain the
+segment's `segment_tag`, resolves active tenant/profile/identifier
+suppressions (and campaign suppressions when a campaign ID is supplied), runs
+the deterministic rules handler, and merges its versioned result under the
+profile's `communication_preferences.eligibility_policy` key. Existing
+`*_opt_in` source values are not modified. The run summary reports
+`eligibility_profiles_updated`.
 
 ### Troubleshooting no personalization results
 
@@ -49,7 +73,8 @@ candidate/profile counts, SQL rows returned, ranked vs. domain-skipped profile
 counts, reason-code distribution, per-profile `ProfileRankingOutcome` entries
 with `CandidateDiagnostics`, and execution latency (`duration_ms`).
 
-Ranking settings live in each workflow step's existing `configuration` JSON:
+Ranking settings are resolved by merging `cdp_ai_agents.hyperparameters` with
+each workflow step's `configuration` JSON override:
 
 ```json
 {
@@ -105,7 +130,7 @@ runtime fields are:
 - `display_name`, `description`
 - `model_type` — classification, regression, clustering,
   `ranking_recommendation`, forecasting, anomaly detection, uplift modeling,
-  semantic embedding, graph ML, optimization, rules engine, or generative LLM
+  optimization, rules engine, or generative LLM
 - `model_name`
 - `status` — `ACTIVE`, `INACTIVE`, `TRAINING`, `DEPRECATED`, or `FAILED`
 - `schedule_definition`

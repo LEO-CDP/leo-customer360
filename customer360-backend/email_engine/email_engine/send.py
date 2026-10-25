@@ -62,10 +62,9 @@ def _display_name(profile: dict) -> str:
 
 
 def _is_opted_out(profile: dict) -> bool:
-    """Only an explicit ``email_opt_in == false`` blocks a send; a missing flag
-    is treated as eligible (many seeded/imported profiles carry no preference)."""
+    """Fail closed unless the profile has an explicit literal-true email opt-in."""
     prefs = profile.get("communication_preferences")
-    return isinstance(prefs, dict) and prefs.get("email_opt_in") is False
+    return not isinstance(prefs, dict) or prefs.get("email_opt_in") is not True
 
 
 def load_campaign(cur, tenant_id: str, campaign_id: str) -> Optional[dict]:
@@ -411,7 +410,11 @@ def _process_batch(conn, adapter, tenant_id, campaign_id, template_id, template,
                     _upsert_dispatch(cur, status="Suppressed", error_message="on suppression list", **common)
                     summary["suppressed"] += 1
                 elif not email or _is_opted_out(profile):
-                    reason = "no email address" if not email else "email_opt_in is false"
+                    reason = (
+                        "no email address"
+                        if not email
+                        else "email_opt_in is not explicitly true"
+                    )
                     _upsert_dispatch(cur, status="Skipped", error_message=reason, **common)
                     summary["skipped"] += 1
                 else:

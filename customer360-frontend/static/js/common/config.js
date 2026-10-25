@@ -134,7 +134,8 @@ window.C360 = window.C360 || {};
       leoObserverTrackingEndpoint: serverConfig.leoObserverTrackingEndpoint || DEFAULTS.leoObserverTrackingEndpoint,
       leoObserverCdnJS: serverConfig.leoObserverCdnJS || DEFAULTS.leoObserverCdnJS,
       docsAiBase: serverConfig.docsAiBase || DEFAULTS.docsAiBase,
-      docsSiteBase: serverConfig.docsSiteBase || DEFAULTS.docsSiteBase
+      docsSiteBase: serverConfig.docsSiteBase || DEFAULTS.docsSiteBase,
+      templateCacheBust: serverConfig.cacheBust || ""
     };
   }
 
@@ -465,6 +466,24 @@ window.C360 = window.C360 || {};
     return deferred.promise();
   }
 
+  function formatApiErrorDetail(detail) {
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail)) {
+      return detail.map(function (item) {
+        if (item && typeof item === "object") {
+          return item.message || item.msg || JSON.stringify(item);
+        }
+        return String(item);
+      }).join("; ");
+    }
+    if (detail && typeof detail === "object") {
+      var message = detail.message || detail.msg || "";
+      if (detail.field && message) return detail.field + ": " + message;
+      if (message) return message;
+    }
+    return detail ? JSON.stringify(detail) : "";
+  }
+
   function showApiError(context, xhr) {
     // status 0 = no HTTP response reached the browser (network/DNS/TLS, or a blocked
     // CORS preflight). Any other status means the request DID reach the API, so blaming
@@ -472,9 +491,7 @@ window.C360 = window.C360 || {};
     var status = xhr && typeof xhr.status === "number" ? xhr.status : 0;
     var detail = "";
     if (xhr && xhr.responseJSON && xhr.responseJSON.detail) {
-      detail = typeof xhr.responseJSON.detail === "string"
-        ? xhr.responseJSON.detail
-        : JSON.stringify(xhr.responseJSON.detail);
+      detail = formatApiErrorDetail(xhr.responseJSON.detail);
     } else if (xhr && xhr.responseText) {
       detail = String(xhr.responseText).slice(0, 200);
     }
@@ -737,6 +754,7 @@ window.C360 = window.C360 || {};
     get: getConfig,
     current: CONFIG,
     api: api,
+    formatApiErrorDetail: formatApiErrorDetail,
     showApiError: showApiError,
     pingHealth: pingHealth,
     loadSystemMetadata: loadSystemMetadata,
@@ -759,6 +777,7 @@ window.C360 = window.C360 || {};
     docsAsk: docsAsk,
     assistantAsk: assistantAsk,
     assistantConversation: assistantConversation,
+    templateCacheBust: CONFIG.templateCacheBust,
     personaCategoryOptions: PERSONA_CATEGORY_OPTIONS
   };
 

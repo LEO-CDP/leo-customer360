@@ -81,7 +81,7 @@ CREATE INDEX IF NOT EXISTS idx_sys_domain_metadata
     ON customer360.sys_domain
     USING GIN(metadata);
 
-COMMENT ON TABLE customer360.sys_domain IS 'System-defined business domains (e.g., retail, banking, real_estate, travel, media, education).';
+COMMENT ON TABLE customer360.sys_domain IS 'System-defined business domains plus _ for unclassified profiles (e.g., _, retail, banking, real_estate, travel, media, education).';
 
 -- ==========================================================
 -- Tenant Business Domains
@@ -696,7 +696,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_master_profiles (
     -- Validated against active customer360.sys_domain codes at the API layer
     -- (core.utils.domains.validate_domain_value) rather than a hardcoded CHECK,
     -- so new domains can be onboarded via sys_domain without a schema migration.
-    domain TEXT NOT NULL DEFAULT 'retail',
+    domain TEXT NOT NULL DEFAULT '_',
 
     -- ------------------------------------------------------------------------
     -- CORE IDENTITY (PII & DEMOGRAPHICS)
@@ -779,9 +779,12 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_master_profiles (
     -- Schemaless payload for flexible traits extracted dynamically.
     -- Format: {"occupation": "engineer", "income_segment": "high", "preferred_category": "electronics"}
     attributes JSONB DEFAULT '{}'::JSONB,
-    -- Tracks explicit user consent across multiple channels. 
-    -- Essential for omnichannel marketing compliance (e.g., GDPR, PDPA) before activating campaigns.
-    -- Format: {"email_opt_in": true, "sms_opt_in": false, "push_opt_in": true}
+    -- Stores explicit channel/provider consent evidence and derived eligibility.
+    -- Only literal JSON true grants consent; missing or malformed values fail closed.
+    -- Example source flags: email_opt_in, sms_opt_in, push_opt_in, zalo_opt_in,
+    -- whatsapp_opt_in, voice_opt_in, meta_ads_opt_in, google_ads_opt_in, and
+    -- tiktok_ads_opt_in.
+    -- eligibility_policy is a separate evaluated result and never replaces consent.
     communication_preferences JSONB DEFAULT '{}'::JSONB,
 
     -- Analytics-related data sources and metrics.
@@ -1221,7 +1224,7 @@ CREATE TRIGGER trg_sync_domain_attribute_catalog
 -- Landing zone for every inbound source: Adjust (mobile attribution/install
 -- events), OneSignal (engagement/push events), Web Tracking / GA4 (browser
 -- events), and domain-specific sources like POS or Core Banking, for both the
--- retail and banking domains.
+-- unclassified (_), retail, banking, and other business domains.
 CREATE TABLE IF NOT EXISTS customer360.cdp_raw_profiles_stage (
     raw_profile_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
@@ -1237,7 +1240,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_raw_profiles_stage (
     -- normally landed by ingestion pipelines, not an interactive admin user).
     user_id UUID REFERENCES customer360.sys_user(user_id),
     -- Validated against sys_domain at the API layer, see cdp_master_profiles.domain above.
-    domain TEXT NOT NULL DEFAULT 'banking',
+    domain TEXT NOT NULL DEFAULT '_',
     source_system TEXT NOT NULL,        -- 'Adjust' | 'OneSignal' | 'WebTracking' | 'CoreBanking' | 'POS' | ...
     channel TEXT,                       -- 'mobile_app' | 'web' | 'pos' | 'call_center' | ...
 
@@ -1921,9 +1924,12 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_ai_agents (
     display_name VARCHAR(255) NOT NULL,
     description TEXT,
 
-    -- AI / ML / rules execution type
-    model_type VARCHAR(50) NOT NULL CHECK (
-        model_type IN (
+    -- Supported AI / ML / rules execution type
+    model_type VARCHAR(50) NOT NULL,
+
+    -- Keep this list in sync with the application ModelType literals.
+    CONSTRAINT chk_cdp_ai_agents_model_type
+        CHECK (model_type IN (
             'classification',
             'regression',
             'clustering',
@@ -1931,18 +1937,14 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_ai_agents (
             'forecasting',
             'anomaly_detection',
             'uplift_modeling',
-            'semantic_embedding',
-            'graph_ml',
             'optimization',
             'rules_engine',
             'generative_llm'
-        )
-    ),
+        )),
 
     -- Provider model ID, estimator class, or deployed artifact identifier.
     -- Examples:
     --   gpt-6-luna
-    --   text-embedding-3-small
     --   xgboost.XGBClassifier
     --   lightgbm.LGBMRegressor
     model_name VARCHAR(255),

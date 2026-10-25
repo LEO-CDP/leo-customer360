@@ -1,7 +1,8 @@
 """Dagster definitions for the Notification Engine service
 (customer360-backend/notification_engine).
 
-Hosts the Zalo OA token-refresh job + the repo's ``ScheduleDefinition``,
+Hosts the Zalo OA token-refresh job + the S3-first consent-revocation projection
+job and their ``ScheduleDefinition`` objects,
 which keeps each tenant's OAuth token fresh in
 ``crm_connector_config.credentials``. The Zalo ZNS campaign-send job
 (``send_zalo_campaign``) is added to this code location in Phase 2.
@@ -89,15 +90,14 @@ def notification_engine_job() -> None:
 
 @op(retry_policy=RetryPolicy(max_retries=2, delay=15))
 def project_zalo_optouts_op(context: OpExecutionContext) -> dict:
-    """S3-first opt-out projection: apply new zalo-opt-out events from S3 onto
-    cdp_master_profiles.communication_preferences (the only place consent is written)."""
+    """Project verified email/Zalo revocations from S3 into profile preferences."""
     conn = connect()
     try:
         events = read_optout_events(conn)
         summary = project_optout_events(conn, events)
     finally:
         conn.close()
-    context.log.info("zalo opt-out projection: %s", summary)
+    context.log.info("marketing consent revocation projection: %s", summary)
     return summary
 
 

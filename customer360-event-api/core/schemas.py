@@ -20,6 +20,8 @@ EVENT_UUID_ALIASES = {
     "leoexvrid": "experiment_variant_id",
 }
 MAX_IDENTIFIER_LENGTH = 256
+TRUSTED_CONSENT_SOURCE = "verified_consent_callback"
+RESERVED_CONSENT_EVENTS = {"email-unsubscribed", "zalo-opt-out"}
 
 
 def normalize_identifier(value: Any, field_name: str) -> str | None:
@@ -72,6 +74,24 @@ class TrackingLogRequest(BaseModel):
         normalized_events = []
         for event in events:
             normalized_event = dict(event)
+            event_name = (
+                normalized_event.get("event_name")
+                or normalized_event.get("eventType")
+                or normalized_event.get("event")
+            )
+            if isinstance(event_name, str) and event_name.strip().lower() in RESERVED_CONSENT_EVENTS:
+                raise ValueError(
+                    "Consent revocation events must use their verified callback endpoint"
+                )
+            if normalized_event.get("source_system") == TRUSTED_CONSENT_SOURCE:
+                raise ValueError("source_system is reserved for verified consent callbacks")
+            if "consent_update" in normalized_event:
+                raise ValueError("consent_update is reserved for verified consent callbacks")
+            properties = normalized_event.get("properties")
+            if isinstance(properties, dict) and "consent_update" in properties:
+                raise ValueError(
+                    "properties.consent_update is reserved for verified consent callbacks"
+                )
             for field_name in IDENTIFIER_FIELDS:
                 if field_name in normalized_event:
                     normalized_event[field_name] = normalize_identifier(

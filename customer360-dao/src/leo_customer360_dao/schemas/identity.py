@@ -11,11 +11,38 @@ from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from leo_customer360_dao.schemas.segmentation import normalize_audience_tag_list
 
+_SOURCE_CONSENT_FIELDS = {
+    "email_opt_in",
+    "sms_opt_in",
+    "push_opt_in",
+    "zalo_opt_in",
+    "whatsapp_opt_in",
+    "voice_opt_in",
+    "meta_ads_opt_in",
+    "google_ads_opt_in",
+    "tiktok_ads_opt_in",
+}
+
+
+def _validate_source_consent_preferences(
+    value: Optional[dict[str, Any]],
+) -> Optional[dict[str, Any]]:
+    if value is None:
+        return None
+    if "eligibility_policy" in value:
+        raise ValueError(
+            "eligibility_policy is a derived result and cannot be set through profile APIs"
+        )
+    for key in _SOURCE_CONSENT_FIELDS.intersection(value):
+        if type(value[key]) is not bool:
+            raise ValueError(f"{key} must be a JSON boolean")
+    return value
+
 
 class MasterProfileBase(BaseModel):
     tenant_id: uuid.UUID
     user_id: Optional[uuid.UUID] = None
-    domain: str = Field(default="retail")
+    domain: str = Field(default="_")
 
     full_name: Optional[str] = None
     first_name: Optional[str] = None
@@ -83,7 +110,12 @@ class MasterProfileBase(BaseModel):
 
 
 class MasterProfileCreate(MasterProfileBase):
-    pass
+    @field_validator("communication_preferences")
+    @classmethod
+    def _validate_source_consent(
+        cls, value: Optional[dict[str, Any]]
+    ) -> Optional[dict[str, Any]]:
+        return _validate_source_consent_preferences(value)
 
 
 class MasterProfileUpdate(BaseModel):
@@ -150,6 +182,13 @@ class MasterProfileUpdate(BaseModel):
             return None
         return normalize_audience_tag_list(v)
 
+    @field_validator("communication_preferences")
+    @classmethod
+    def _validate_source_consent(
+        cls, value: Optional[dict[str, Any]]
+    ) -> Optional[dict[str, Any]]:
+        return _validate_source_consent_preferences(value)
+
 
 class MasterProfileRead(MasterProfileBase):
     model_config = ConfigDict(from_attributes=True)
@@ -182,7 +221,7 @@ class RawProfileBase(BaseModel):
     data_source_id: Optional[uuid.UUID] = None
     data_source_analytics: Optional[dict[str, dict[str, Any]]] = None
     user_id: Optional[uuid.UUID] = None
-    domain: str = Field(default="retail")
+    domain: str = Field(default="_")
     source_system: str
     channel: Optional[str] = None
 
@@ -359,7 +398,7 @@ class DomainAttributeUpsert(BaseModel):
     domain if it doesn't exist yet). Merges into the existing JSONB rather
     than replacing it, so unrelated attributes are never lost."""
 
-    domain: str = Field(description="Business domain owning this attribute, e.g. 'banking', 'retail'.")
+    domain: str = Field(description="Business domain owning this attribute, e.g. '_', 'banking', or 'retail'.")
     attribute_key: str = Field(min_length=1, max_length=100, pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$")
     attribute_value: Any
 
@@ -506,7 +545,7 @@ class ProfileMergeHistoryRead(ProfileMergeHistoryBase):
 
 class PersonaArchetypeBase(BaseModel):
     tenant_id: uuid.UUID
-    domain: str = Field(default="retail")
+    domain: str = Field(default="_")
 
     persona_code: str
     persona_name: str
@@ -562,7 +601,7 @@ class PersonaArchetypeRead(PersonaArchetypeBase):
 
 class CustomerPersonaBase(BaseModel):
     tenant_id: uuid.UUID
-    domain: str = Field(default="retail")
+    domain: str = Field(default="_")
     master_profile_id: uuid.UUID
     # The shared archetype this profile is matched/assigned to.
     persona_archetype_id: uuid.UUID

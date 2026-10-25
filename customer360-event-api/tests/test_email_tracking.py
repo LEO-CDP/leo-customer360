@@ -130,7 +130,34 @@ def test_unsubscribe_records_event_and_returns_confirmation():
 
     assert response.status_code == 200
     assert "unsubscribed" in response.text
-    assert fake_service.calls[0][1][0]["event_name"] == "email-unsubscribed"
+    _, events, kwargs = fake_service.calls[0]
+    assert events[0]["event_name"] == "email-unsubscribed"
+    assert events[0]["source_system"] == "verified_consent_callback"
+    assert events[0]["properties"]["consent_update"] == {
+        "field": "email_opt_in",
+        "granted": False,
+        "reason": "unsubscribe",
+        "source": "verified_email_callback",
+    }
+    assert kwargs["user_id"] == "p1"
+
+
+def test_unsubscribe_returns_retry_when_s3_persistence_fails():
+    class FailingTrackingService:
+        def ingest(self, *_args, **_kwargs):
+            raise RuntimeError("S3 unavailable")
+
+    app.dependency_overrides[get_tracking_service] = lambda: FailingTrackingService()
+    try:
+        with patch.object(settings, "email_tracking_secret", SECRET):
+            response = TestClient(app).get(
+                f"{EMAIL_PREFIX}/unsubscribe?u={_encode('t1', 'c1', 'p1')}"
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 503
+    assert "retry" in response.text.lower()
 
 
 def test_webhook_hard_bounce_is_saved_and_marked_suppressed():
@@ -162,6 +189,37 @@ def test_webhook_hard_bounce_is_saved_and_marked_suppressed():
     assert response.json() == {"status": "ok", "event": "email-bounced", "suppressed": True}
     assert fake_service.calls[0][1][0]["event_name"] == "email-bounced"
     assert fake_service.calls[0][1][0]["properties"]["suppression_reason"] == "hard_bounce"
+
+
+def test_signed_unsubscribe_webhook_emits_verified_consent_revocation():
+    fake_service = FakeTrackingService()
+    payload = {
+        "token": _encode("t1", "c1", "p1"),
+        "event": "unsubscribe",
+        "message_id": "message-1",
+    }
+    body = json.dumps(payload).encode()
+    app.dependency_overrides[get_tracking_service] = lambda: fake_service
+    try:
+        with patch.object(settings, "email_tracking_secret", SECRET), patch.object(
+            settings, "email_webhook_signing_secret", "test-webhook-secret"
+        ):
+            response = TestClient(app).post(
+                f"{EMAIL_PREFIX}/webhook",
+                content=body,
+                headers={
+                    "content-type": "application/json",
+                    "X-Webhook-Signature": _webhook_sig(body, "test-webhook-secret"),
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    event = fake_service.calls[0][1][0]
+    assert event["source_system"] == "verified_consent_callback"
+    assert event["properties"]["consent_update"]["field"] == "email_opt_in"
+    assert event["properties"]["consent_update"]["granted"] is False
 
 
 def test_webhook_rejects_unsigned_request():

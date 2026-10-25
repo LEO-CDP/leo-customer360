@@ -30,6 +30,11 @@ load_dotenv()
 DB_SCHEMA = os.environ.get("DB_SCHEMA", "customer360")
 logger = logging.getLogger(__name__)
 SUPPORTED_PLATFORMS = frozenset({"meta_ads", "google_ads", "tiktok_ads"})
+PLATFORM_CONSENT_KEYS = {
+    "meta_ads": "meta_ads_opt_in",
+    "google_ads": "google_ads_opt_in",
+    "tiktok_ads": "tiktok_ads_opt_in",
+}
 PLATFORM_ALIASES = {
     "facebook": "meta_ads",
     "facebook_ads": "meta_ads",
@@ -78,6 +83,18 @@ class AudienceProvider(Protocol):
         external_audience_id: str | None = None,
     ) -> ProviderResult:
         """Create/update one external audience and upload its members."""
+
+
+def _has_explicit_platform_consent(profile: dict[str, Any], platform: str) -> bool:
+    """Require literal-true consent for this exact advertising provider."""
+    consent_key = PLATFORM_CONSENT_KEYS.get(platform)
+    if consent_key is None:
+        raise ValueError(f"Unsupported advertising platform consent key: {platform}")
+    preferences = profile.get("communication_preferences")
+    return (
+        isinstance(preferences, dict)
+        and preferences.get(consent_key) is True
+    )
 
 
 class HttpClient:
@@ -622,7 +639,8 @@ def run_data_synch_job(
             matched_count = int((cursor.fetchone() or {}).get("matched_count") or 0)
             cursor.execute(
                 f"""
-                SELECT p.master_profile_id, p.email, p.phone_number
+                SELECT p.master_profile_id, p.email, p.phone_number,
+                       p.communication_preferences
                 FROM {DB_SCHEMA}.cdp_master_profiles p
                 WHERE p.tenant_id = %(tenant_id)s
                   AND p.status_code = 1
@@ -650,6 +668,8 @@ def run_data_synch_job(
             )
             members = []
             for row in cursor:
+                if not _has_explicit_platform_consent(row, platform_code):
+                    continue
                 email_hash = _normalize_email(row["email"])
                 phone_hash = _normalize_phone(row["phone_number"], default_country_code)
                 if email_hash or phone_hash:

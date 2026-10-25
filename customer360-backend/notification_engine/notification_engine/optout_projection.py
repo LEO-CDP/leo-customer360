@@ -1,84 +1,191 @@
-"""Opt-out consent projection (S3-first).
+"""Project verified marketing-consent revocations from S3 onto profile state.
 
-The Zalo webhook records opt-out events to the S3 event lake with a
-``suppression_reason`` -- it does NOT write DB state. This module is the ONLY
-place opt-out is materialized onto profile consent: it applies each opt-out
-event to ``cdp_master_profiles.communication_preferences`` (``zalo_opt_in`` =
-false), the field the send eligibility query reads. Rebuildable by replaying the
-S3 opt-out stream.
-
-``project_optout_events`` is the pure, testable core. Wiring the S3 read (list
-the tenant buckets' new ``zalo-opt-out`` NDJSON records) is the integration glue
--- see ``read_optout_events`` (the analytics code location already ships the
-S3 reader; the same event stream feeds this projection).
+The event API writes verified email/Zalo callback evidence to S3 and never
+connects to Postgres. This backend projection applies only explicit opt-outs,
+then removes the derived eligibility snapshot so the next evaluation recomputes it.
 """
 
+import logging
 from typing import Iterable
+from uuid import UUID
 
 from .db import DB_SCHEMA
 from .rls import set_tenant_context
 
+logger = logging.getLogger(__name__)
 
-def apply_optout(conn, tenant_id, master_profile_id, reason) -> bool:
-    """Set ``zalo_opt_in=false`` (+ reason) on one profile. Returns True if a row
-    was updated. Caller owns the commit."""
+VERIFIED_CONSENT_SOURCE = "verified_consent_callback"
+REVOCATION_CONTRACTS = {
+    "email-unsubscribed": {
+        "channel": "email",
+        "field": "email_opt_in",
+        "reason": "unsubscribe",
+        "evidence_source": "verified_email_callback",
+        "reason_key": "email_opt_out_reason",
+        "source_key": "email_consent_source",
+    },
+    "zalo-opt-out": {
+        "channel": "zalo",
+        "field": "zalo_opt_in",
+        "reason": "opt_out",
+        "evidence_source": "verified_zalo_webhook",
+        "reason_key": "zalo_opt_out_reason",
+        "source_key": "zalo_consent_source",
+    },
+}
+
+
+def apply_optout(
+    conn,
+    tenant_id: str,
+    master_profile_id: str,
+    *,
+    field: str,
+    reason_key: str,
+    source_key: str,
+    reason: str,
+    source: str,
+) -> bool:
+    """Apply one allow-listed channel revocation and clear stale eligibility."""
+    if field not in {"email_opt_in", "zalo_opt_in"}:
+        raise ValueError("unsupported consent revocation field")
+    if reason_key not in {"email_opt_out_reason", "zalo_opt_out_reason"}:
+        raise ValueError("unsupported consent revocation reason field")
+    if source_key not in {"email_consent_source", "zalo_consent_source"}:
+        raise ValueError("unsupported consent source field")
+    tenant_uuid = str(UUID(tenant_id))
+    profile_uuid = str(UUID(master_profile_id))
     with conn.cursor() as cur:
-        set_tenant_context(cur, str(tenant_id))
+        set_tenant_context(cur, tenant_uuid)
         cur.execute(
             f"""UPDATE {DB_SCHEMA}.cdp_master_profiles
                    SET communication_preferences =
-                         COALESCE(communication_preferences, '{{}}'::jsonb)
-                         || jsonb_build_object('zalo_opt_in', false, 'zalo_opt_out_reason', %s),
+                         (
+                             COALESCE(communication_preferences, '{{}}'::jsonb)
+                             - 'eligibility_policy'
+                         )
+                         || jsonb_build_object(
+                             %s, false,
+                             %s, %s,
+                             %s, %s,
+                             'consent_updated_at', now()
+                         ),
                        updated_at = now()
-                 WHERE tenant_id = %s AND master_profile_id = %s""",
-            (reason, str(tenant_id), str(master_profile_id)),
+                 WHERE tenant_id = %s AND master_profile_id = %s
+                   AND (
+                       communication_preferences IS NULL
+                       OR jsonb_typeof(communication_preferences) = 'object'
+                   )
+                   AND (
+                       communication_preferences -> %s IS DISTINCT FROM 'false'::jsonb
+                       OR communication_preferences -> %s
+                            IS DISTINCT FROM to_jsonb(%s::text)
+                       OR communication_preferences ? 'eligibility_policy'
+                   )""",
+            (
+                field,
+                reason_key,
+                reason,
+                source_key,
+                source,
+                tenant_uuid,
+                profile_uuid,
+                field,
+                reason_key,
+                reason,
+            ),
         )
         return cur.rowcount > 0
 
 
 def project_optout_events(conn, events: Iterable[dict]) -> dict:
-    """Apply a stream of decoded opt-out events onto profile consent.
-
-    Each event carries ``tenant_id`` / ``master_profile_id`` / ``suppression_reason``
-    (in ``properties`` or at top level). Commits per event so one bad row never
-    rolls back the rest. Returns ``{'applied', 'skipped'}``.
-    """
+    """Apply verified email/Zalo opt-outs; ordinary delivery failures are not consent."""
     applied = skipped = 0
     for event in events:
-        props = event.get("properties") or event
-        reason = props.get("suppression_reason")
+        if not isinstance(event, dict) or event.get("source_system") != VERIFIED_CONSENT_SOURCE:
+            logger.warning("Skipping consent event without verified source marker")
+            skipped += 1
+            continue
+        props = event.get("properties")
+        if not isinstance(props, dict):
+            logger.warning("Skipping verified consent event with invalid properties")
+            skipped += 1
+            continue
+        contract = REVOCATION_CONTRACTS.get(event.get("event_name"))
+        update = props.get("consent_update")
+        if not contract or not isinstance(update, dict):
+            logger.warning(
+                "Skipping unsupported consent revocation event_name=%r",
+                event.get("event_name"),
+            )
+            skipped += 1
+            continue
+        if (
+            props.get("tracking_channel") != contract["channel"]
+            or update.get("field") != contract["field"]
+            or update.get("granted") is not False
+            or update.get("reason") != contract["reason"]
+            or update.get("source") != contract["evidence_source"]
+        ):
+            logger.warning(
+                "Skipping consent event with mismatched evidence event_name=%r",
+                event.get("event_name"),
+            )
+            skipped += 1
+            continue
         tenant_id = props.get("tenant_id")
         master_profile_id = props.get("master_profile_id")
-        if not (reason and tenant_id and master_profile_id):
+        if not (tenant_id and master_profile_id):
+            logger.warning(
+                "Skipping consent event missing tenant/profile event_name=%r",
+                event.get("event_name"),
+            )
             skipped += 1
             continue
         try:
-            changed = apply_optout(conn, tenant_id, master_profile_id, reason)
+            changed = apply_optout(
+                conn,
+                tenant_id,
+                master_profile_id,
+                field=contract["field"],
+                reason_key=contract["reason_key"],
+                source_key=contract["source_key"],
+                reason=contract["reason"],
+                source=contract["evidence_source"],
+            )
             conn.commit()
             if changed:
                 applied += 1
             else:
                 skipped += 1
-        except Exception:  # noqa: BLE001 - one bad profile must not block the rest
+        except Exception:  # one bad profile must not block independent revocations
             conn.rollback()
+            logger.exception(
+                "Failed to project verified consent revocation event_name=%s",
+                event.get("event_name"),
+            )
             skipped += 1
     return {"applied": applied, "skipped": skipped}
 
 
 def read_optout_events(conn) -> list[dict]:
-    """Read new ``zalo-opt-out`` / ``zalo-failed`` events from the S3 event lake
-    for every tenant with an active Zalo connector, ready to feed ``project_optout_events``."""
+    """Read verified revocations for tenants with active email or Zalo connectors."""
     from .s3_reader import read_optout_events_for_tenants  # lazy: boto3 only at run time
 
     with conn.cursor() as cur:
         # Cross-tenant driver query (no tenant context) -- relies on the backend DB
         # role holding BYPASSRLS; without it RLS fails closed to 0 rows and the
-        # opt-out projection silently no-ops.
+        # consent projection silently no-ops.
         cur.execute(
-            f"""SELECT DISTINCT tenant_id, COALESCE((config->>'optout_lookback_hours')::integer, 6)
+            f"""SELECT tenant_id,
+                       MAX(COALESCE((config->>'optout_lookback_hours')::integer, 6))
                    FROM {DB_SCHEMA}.crm_connector_config
-                  WHERE connector_type = 'CHAT' AND provider = 'ZALO'
-                    AND status = 'ACTIVE' AND is_active = TRUE"""
+                  WHERE status = 'ACTIVE' AND is_active = TRUE
+                    AND (
+                        connector_type = 'EMAIL'
+                        OR (connector_type = 'CHAT' AND provider = 'ZALO')
+                    )
+                  GROUP BY tenant_id"""
         )
         rows = cur.fetchall()
         tenant_ids = [str(row[0]) for row in rows]
@@ -103,12 +210,34 @@ def _demo() -> None:
         def rollback(self): pass
 
     events = [
-        {"properties": {"tenant_id": "t1", "master_profile_id": "p1", "suppression_reason": "opt_out"}},
-        {"properties": {"tenant_id": "t1", "suppression_reason": "opt_out"}},  # missing profile -> skipped
-        {"event_name": "zalo-delivered", "properties": {"tenant_id": "t1", "master_profile_id": "p2"}},  # no reason
+        {
+            "event_name": "email-unsubscribed",
+            "source_system": VERIFIED_CONSENT_SOURCE,
+            "properties": {
+                "tracking_channel": "email",
+                "tenant_id": "11111111-1111-1111-1111-111111111111",
+                "master_profile_id": "aaaaaaaa-0000-0000-0000-000000000001",
+                "consent_update": {
+                    "field": "email_opt_in",
+                    "granted": False,
+                    "reason": "unsubscribe",
+                    "source": "verified_email_callback",
+                },
+            },
+        },
+        {
+            "event_name": "zalo-failed",
+            "source_system": VERIFIED_CONSENT_SOURCE,
+            "properties": {
+                "tracking_channel": "zalo",
+                "tenant_id": "11111111-1111-1111-1111-111111111111",
+                "master_profile_id": "aaaaaaaa-0000-0000-0000-000000000002",
+                "suppression_reason": "permanent_failure",
+            },
+        },
     ]
     summary = project_optout_events(_Conn(), events)
-    assert summary == {"applied": 1, "skipped": 2}, summary
+    assert summary == {"applied": 1, "skipped": 1}, summary
     print("optout_projection self-check OK:", summary)
 
 

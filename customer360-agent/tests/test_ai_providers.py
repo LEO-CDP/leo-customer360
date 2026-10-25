@@ -176,7 +176,7 @@ class AgentSeedModelTests(unittest.TestCase):
             for index, line in enumerate(seed_lines[:-1])
             if line == "    ("
         ]
-        self.assertEqual(len(agent_codes), 12)
+        self.assertEqual(len(agent_codes), 10)
         self.assertEqual(len(agent_codes), len(set(agent_codes)))
         self.assertEqual(agent_codes.count("campaign_planner"), 1)
 
@@ -188,8 +188,6 @@ class AgentSeedModelTests(unittest.TestCase):
             "forecasting",
             "anomaly_detection",
             "uplift_modeling",
-            "semantic_embedding",
-            "graph_ml",
             "optimization",
             "rules_engine",
             "generative_llm",

@@ -9,8 +9,9 @@ from contextlib import contextmanager
 from datetime import date, datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.cache import cache_response, invalidate_prefix
@@ -424,16 +425,56 @@ def update_master_profile(master_profile_id: uuid.UUID, payload: MasterProfileUp
         attributes.update(dict(obj_in.get("attributes") or {}))
         attributes["primary_relationship"] = primary_relationship
         obj_in["attributes"] = attributes
-    if "domain" in obj_in:
-        try:
-            validate_domain_value(db, obj_in.get("domain"))
-        except ValueError as exc:
+    # PATCH clients may include an optional `domain` field with a null value
+    # when an edit form has no selected option. Never overwrite the database
+    # domain with null: cdp_master_profiles.domain is required.
+    domain_was_explicitly_provided = bool(obj_in.get("domain"))
+    requested_domain = obj_in.get("domain") or getattr(obj, "domain", None) or "_"
+    try:
+        validate_domain_value(db, requested_domain)
+    except ValueError as exc:
+        # Older ingested profiles may contain the legacy "unknown" value.
+        # When the PATCH does not explicitly choose a domain, repair that
+        # invalid legacy value with the schema's default instead of blocking
+        # an unrelated consent or contact-information update.
+        if domain_was_explicitly_provided:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-    obj = repository.update_master_profile(obj, obj_in)
-    attribute_domain = obj_in.get("domain") or obj.domain
-    for attribute_key, attribute_value in domain_attributes.items():
-        if repository.upsert_domain_attribute(obj, attribute_domain, attribute_key, attribute_value) is None:
-            raise HTTPException(status_code=422, detail=f"Unknown domain '{attribute_domain}'")
+        requested_domain = "_"
+        try:
+            validate_domain_value(db, requested_domain)
+        except ValueError as fallback_exc:
+            raise HTTPException(status_code=422, detail=str(fallback_exc)) from fallback_exc
+    obj_in["domain"] = requested_domain
+
+    try:
+        obj = repository.update_master_profile(obj, obj_in)
+        attribute_domain = requested_domain
+        for attribute_key, attribute_value in domain_attributes.items():
+            if repository.upsert_domain_attribute(obj, attribute_domain, attribute_key, attribute_value) is None:
+                raise HTTPException(status_code=422, detail=f"Unknown domain '{attribute_domain}'")
+    except IntegrityError as exc:
+        db.rollback()
+        column_name = getattr(getattr(exc.orig, "diag", None), "column_name", None)
+        if column_name == "domain":
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "required_profile_field",
+                    "field": "domain",
+                    "message": "Domain is required and must be a valid profile domain.",
+                },
+            ) from exc
+        logger.exception(
+            "Master profile update violated a database constraint: master_profile_id=%s",
+            master_profile_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "profile_update_conflict",
+                "message": "The profile could not be saved because it conflicts with existing data.",
+            },
+        ) from exc
 
     run_id = None
     try:

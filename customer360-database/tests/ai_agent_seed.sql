@@ -10,9 +10,14 @@ END;
 $$;
 
 SELECT pg_temp.assert_true(
-    (SELECT count(*) = 14 AND bool_and(status = 'INACTIVE')
+    (SELECT count(*) = 13
+        AND bool_and(
+            (status = 'ACTIVE')
+            = (agent_code IN ('product_recommendation', 'eligibility_policy'))
+        )
+        AND bool_and(status IN ('ACTIVE', 'INACTIVE'))
      FROM customer360.cdp_ai_agents),
-    'Fresh bootstrap has 12 core templates and two inactive service prompt agents');
+    'Fresh bootstrap has active recommendation and eligibility agents plus 11 inactive templates/service agents');
 SELECT pg_temp.assert_true(
     NOT EXISTS (
         SELECT 1 FROM customer360.cdp_profile_attributes attribute
@@ -76,7 +81,7 @@ INSERT INTO profile_fixture (
     '11111111-1111-1111-1111-111111111111',
     'aaaaaaaa-0000-0000-0000-000000000001',
     '{"crm": "123", "web": "456"}',
-    '{"email_opt_in": false, "sms_opt_in": "true", "push_opt_in": true}'
+    '{"email_opt_in": false, "sms_opt_in": "true", "push_opt_in": true, "meta_ads_opt_in": true}'
 );
 CREATE TEMP TABLE event_fixture (
     tenant_id UUID, master_profile_id UUID, event_time TIMESTAMPTZ,
@@ -175,6 +180,14 @@ BEGIN
             PERFORM pg_temp.assert_true(result = 'false'::jsonb, 'Consent fails closed');
         ELSIF feature.feature_key = 'profile_push_opt_in' THEN
             PERFORM pg_temp.assert_true(result = 'true'::jsonb, 'Literal true grants consent');
+        ELSIF feature.feature_key = 'profile_meta_ads_opt_in' THEN
+            PERFORM pg_temp.assert_true(result = 'true'::jsonb, 'Explicit provider consent grants ad eligibility');
+        ELSIF feature.feature_key IN (
+            'profile_google_ads_opt_in',
+            'profile_tiktok_ads_opt_in',
+            'profile_zalo_opt_in'
+        ) THEN
+            PERFORM pg_temp.assert_true(result = 'false'::jsonb, 'Missing provider/channel consent fails closed');
         ELSIF feature.feature_key = 'event_count_7d' THEN
             PERFORM pg_temp.assert_true(result = '1'::jsonb, 'Future and other-tenant events excluded');
         END IF;

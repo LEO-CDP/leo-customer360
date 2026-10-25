@@ -48,7 +48,7 @@ Metadata-driven identity stitching, consolidation survivorship rules, and person
 - [CIR Readiness & Improvement Notes](identity-resolution/CIR-improvement.md) — Matching taxonomy (exact, fuzzy, behavioral) vs. schema readiness
 - [CIR Technical Slides (VN)](identity-resolution/CIR-Tech-Slides-VN.md) — Deep dive into `cdp_raw_profiles_stage`, `cdp_master_profiles`, and `CustomerIdentityResolver`
 - [CIR Flow Diagrams](identity-resolution/images/) — Runtime and persona resolution Mermaid/SVG diagrams
-- [12 AI Agent Types for Customer 360](ai-agent/12-agent-types-customer360.md) — Taxonomy of scoring, analytical, and activation AI agents
+- [11 AI Agent Types for Customer 360](ai-agent/agent-types-customer360.md) — Taxonomy of scoring, analytical, and activation AI agents
 
 ## Marketing, Segmentation & Campaign Orchestration
 
@@ -105,4 +105,3 @@ Local development, Docker Compose profiles, production deployment, and PostgreSQ
   - [Jupyter Notebooks](notebooks/) — RAG evaluation and persona roadmap experiments
 - **Tooling:**
   - [CI/CD Telegram Chatbot Plan](tooling/cicd-telegram-chatbot-plan.md) · [Pandoc Notes](tooling/pandoc-notes/) · [LaTeX Template](tooling/template.tex)
-

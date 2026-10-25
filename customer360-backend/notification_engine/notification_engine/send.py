@@ -50,9 +50,46 @@ def _display_name(profile: dict) -> str:
 
 
 def _is_opted_out(profile: dict) -> bool:
-    """Only an explicit ``zalo_opt_in == false`` blocks a send (missing = eligible)."""
+    """Fail closed unless the profile has an explicit literal-true Zalo opt-in."""
     prefs = profile.get("communication_preferences")
-    return isinstance(prefs, dict) and prefs.get("zalo_opt_in") is False
+    return not isinstance(prefs, dict) or prefs.get("zalo_opt_in") is not True
+
+
+def _is_suppressed(cur, tenant_id: str, campaign_id: str, profile: dict) -> bool:
+    """Check profile-, phone-, global-, and campaign-scoped Zalo suppressions."""
+    cur.execute(
+        f"""SELECT EXISTS (
+                SELECT 1
+                FROM {DB_SCHEMA}.crm_suppression_list
+                WHERE tenant_id = %(tenant_id)s
+                  AND status = 'ACTIVE'
+                  AND (expires_at IS NULL OR expires_at > now())
+                  AND (scope = 'GLOBAL' OR campaign_id = %(campaign_id)s)
+                  AND channel IN ('GLOBAL', 'ZALO')
+                  AND (
+                      master_profile_id = %(master_profile_id)s
+                      OR (
+                          identifier_type = 'PROFILE_ID'
+                          AND lower(identifier) = lower(%(master_profile_id)s)
+                      )
+                      OR (
+                          channel = 'ZALO'
+                          AND identifier_type = 'PHONE'
+                          AND identifier = %(phone)s
+                      )
+                  )
+            ) AS is_suppressed""",
+        {
+            "tenant_id": tenant_id,
+            "campaign_id": campaign_id,
+            "master_profile_id": str(profile["master_profile_id"]),
+            "phone": _clean(profile.get("phone_number")),
+        },
+    )
+    row = cur.fetchone()
+    if row is None:
+        raise RuntimeError("Zalo suppression lookup returned no result")
+    return bool(row["is_suppressed"])
 
 
 def load_campaign(cur, tenant_id: str, campaign_id: str) -> Optional[dict]:
@@ -326,8 +363,30 @@ def _process_batch(conn, adapter, tenant_id, campaign_id, crm_template_id, zns_t
             common = dict(tenant_id=tenant_id, campaign_id=campaign_id,
                           master_profile_id=master_profile_id, template_id=crm_template_id,
                           recipient=phone, run_id=run_id)
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                set_tenant_context(cur, tenant_id)
+                suppressed = _is_suppressed(
+                    cur, tenant_id, campaign_id, profile
+                )
+            conn.rollback()
+            if suppressed:
+                with conn.cursor() as cur:
+                    set_tenant_context(cur, tenant_id)
+                    _upsert_dispatch(
+                        cur,
+                        status="Suppressed",
+                        error_message="on suppression list",
+                        **common,
+                    )
+                conn.commit()
+                summary["skipped"] += 1
+                continue
             if not phone or _is_opted_out(profile):
-                reason = "no phone number" if not phone else "zalo_opt_in is false"
+                reason = (
+                    "no phone number"
+                    if not phone
+                    else "zalo_opt_in is not explicitly true"
+                )
                 with conn.cursor() as cur:
                     set_tenant_context(cur, tenant_id)
                     _upsert_dispatch(cur, status="Skipped", error_message=reason, **common)

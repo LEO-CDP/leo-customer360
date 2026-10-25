@@ -63,7 +63,8 @@ INSERT INTO customer360.sys_domain (
     display_order
 )
 VALUES
-('retail',        'Retail & E-Commerce',         'Retail stores, supermarkets, online commerce',             1),
+('_',            'Unclassified / Not set', 'Profile has no reliable business-domain classification.', 0),
+('retail',        'Retail & E-Commerce', 'Retail stores, supermarkets, online commerce',             1),
 ('banking',       'Banking & Financial Services','Retail banking, digital banking and fintech',              2),
 ('insurance',     'Insurance',                   'Life, health, vehicle and general insurance',              3),
 ('healthcare',    'Healthcare',                  'Hospitals, clinics, pharmacies and healthcare providers',  4),
@@ -331,7 +332,7 @@ INSERT INTO customer360.cdp_profile_attributes (
     ('master_profile_id', 'master_profile_id', 'Master Profile ID', 'Primary key of the golden, resolved customer record.', 'SYSTEM', 'cdp_master_profiles', 'UUID', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 10),
     ('tenant_id', 'tenant_id', 'Tenant ID', 'Workspace/tenant scope used for multi-tenant data isolation.', 'SYSTEM', 'cdp_master_profiles', 'UUID', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 20),
     ('user_id', 'user_id', 'User ID', 'Internal system user who owns or manages this profile (nullable).', 'SYSTEM', 'cdp_master_profiles', 'UUID', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 25),
-    ('domain', 'domain', 'Business Domain', 'retail, banking, real_estate, travel, media, or education; drives domain-specific UI and activation logic.', 'SYSTEM', 'cdp_master_profiles', 'TEXT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 30),
+    ('domain', 'domain', 'Business Domain', '_, retail, banking, real_estate, travel, media, or education; _ means no reliable classification and does not imply a business domain.', 'SYSTEM', 'cdp_master_profiles', 'TEXT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 30),
     ('created_at', 'created_at', 'Profile Created At', 'Timestamp the master profile was first created.', 'SYSTEM', 'cdp_master_profiles', 'TIMESTAMP', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'timestamp', NULL, NULL, NULL, 40),
     ('updated_at', 'updated_at', 'Profile Updated At', 'Timestamp of the most recent update to this profile.', 'SYSTEM', 'cdp_master_profiles', 'TIMESTAMP', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'timestamp', NULL, NULL, NULL, 50),
     ('status_code', 'status_code', 'Status Code', 'Active (1), Inactive (0), or Deleted (-1) state of the profile.', 'SYSTEM', 'cdp_master_profiles', 'SMALLINT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 55),
@@ -386,7 +387,7 @@ INSERT INTO customer360.cdp_profile_attributes (
     ('persona_embedding', NULL, 'Persona Embedding', 'LLM-generated centroid embedding used for semantic search / lookalike modeling. Lives on the SHARED cdp_persona_archetypes row (joined via cdp_master_profiles.current_persona_id -> cdp_customer_personas.persona_archetype_id), not on cdp_master_profiles directly.', 'MARKETING', 'cdp_persona_archetypes', 'VECTOR', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'metadata', NULL, NULL, NULL, 350),
     ('segmentation_tags', 'segmentation_tags', 'Segmentation Tags', 'Computed labels for fast Audience Builder queries (e.g. gen_z, frequent_buyer).', 'MARKETING', 'cdp_master_profiles', 'ARRAY', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 360),
     ('audience_tags', 'audience_tags', 'IAB Audience Tags', 'Standardized IAB Audience Taxonomy tag names mapped from segments for audience analytics, personalization, and programmatic advertising.', 'MARKETING', 'cdp_master_profiles', 'ARRAY', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 365),
-    ('communication_preferences', 'communication_preferences', 'Communication Preferences', 'Tracks explicit user consent across multiple channels. Essential for omnichannel marketing compliance (e.g., GDPR, PDPA) before activating campaigns. Format: {"email_opt_in": true, "sms_opt_in": false, "push_opt_in": true}', 'MARKETING', 'cdp_master_profiles', 'JSONB', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'metadata', NULL, NULL, NULL, 370),
+    ('communication_preferences', 'communication_preferences', 'Communication Preferences', 'Stores explicit per-channel/provider consent evidence and derived eligibility. Only literal JSON true grants consent; missing or malformed values fail closed. The eligibility_policy result is separate and never replaces source consent.', 'MARKETING', 'cdp_master_profiles', 'JSONB', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'metadata', NULL, NULL, NULL, 370),
 
     -- LINEAGE
     ('source_systems', 'source_systems', 'Source Systems', 'All external systems that have contributed data to this profile.', 'LINEAGE', 'cdp_master_profiles', 'ARRAY', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 380),

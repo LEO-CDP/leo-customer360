@@ -109,7 +109,7 @@ RAW_PROFILE_COLUMNS = (
 class CustomerIdentityResolver:
     """Links raw profiles to master profiles using dynamically configured
     matching rules stored in ``cdp_profile_attributes``, scoped per tenant
-    and per domain (retail/banking/real_estate/travel/media/education).
+    and per domain (_ for unclassified, plus the full sys_domain catalog).
     """
 
     def __init__(
@@ -233,7 +233,7 @@ class CustomerIdentityResolver:
               AND d.domain_code = %s
             LIMIT 1;
         """
-        cursor.execute(query, (tenant_id, master_id, domain_code or "retail"))
+        cursor.execute(query, (tenant_id, master_id, domain_code or "_"))
         row = cursor.fetchone() or {}
         attrs = row.get("domain_attributes")
         return attrs if isinstance(attrs, dict) else {}
@@ -270,7 +270,7 @@ class CustomerIdentityResolver:
                 domain_attributes = COALESCE(cdp_domain_profiles.domain_attributes, '{{}}'::jsonb) || EXCLUDED.domain_attributes,
                 updated_at = NOW();
         """
-        cursor.execute(query, (tenant_id, master_id, domain_code or "retail", Json(attrs)))
+        cursor.execute(query, (tenant_id, master_id, domain_code or "_", Json(attrs)))
 
     @staticmethod
     def _has_value(value: Any) -> bool:
@@ -645,7 +645,7 @@ class CustomerIdentityResolver:
         # Exact match (scalar or domain attribute)
         if rule.match_rule == "exact":
             if code in DOMAIN_ATTRIBUTE_FIELDS:
-                domain_code = raw_profile.get("domain", "retail")
+                domain_code = raw_profile.get("domain") or "_"
                 return (
                     f"EXISTS (SELECT 1 FROM {self._table('cdp_domain_profiles')} dp "
                     f"JOIN {self._table('sys_domain')} sd ON sd.domain_id = dp.domain_id "
@@ -661,7 +661,7 @@ class CustomerIdentityResolver:
         if rule.match_rule == "fuzzy_trgm":
             threshold = rule.threshold if rule.threshold is not None else 0.7
             if code in DOMAIN_ATTRIBUTE_FIELDS:
-                domain_code = raw_profile.get("domain", "retail")
+                domain_code = raw_profile.get("domain") or "_"
                 return (
                     f"EXISTS (SELECT 1 FROM {self._table('cdp_domain_profiles')} dp "
                     f"JOIN {self._table('sys_domain')} sd ON sd.domain_id = dp.domain_id "
@@ -680,7 +680,7 @@ class CustomerIdentityResolver:
         # Fuzzy matching (dmetaphone)
         if rule.match_rule == "fuzzy_dmetaphone":
             if code in DOMAIN_ATTRIBUTE_FIELDS:
-                domain_code = raw_profile.get("domain", "retail")
+                domain_code = raw_profile.get("domain") or "_"
                 return (
                     f"EXISTS (SELECT 1 FROM {self._table('cdp_domain_profiles')} dp "
                     f"JOIN {self._table('sys_domain')} sd ON sd.domain_id = dp.domain_id "
@@ -762,7 +762,7 @@ class CustomerIdentityResolver:
                 WHERE tenant_id = %s AND domain = %s AND ({where_clause})
                 LIMIT 1;
             """
-            query_params = [raw_profile["tenant_id"], raw_profile.get("domain", "retail")] + params
+            query_params = [raw_profile["tenant_id"], raw_profile.get("domain") or "_"] + params
             cursor.execute(query, tuple(query_params))
             result = cursor.fetchone()
             return result["master_profile_id"] if result else None
@@ -791,7 +791,7 @@ class CustomerIdentityResolver:
             ORDER BY ({score_expr}) DESC
             LIMIT 1;
         """
-        query_params = [score_denominator] + params + [raw_profile["tenant_id"], raw_profile.get("domain", "retail")] + params
+        query_params = [score_denominator] + params + [raw_profile["tenant_id"], raw_profile.get("domain") or "_"] + params
         cursor.execute(query, tuple(query_params))
         result = cursor.fetchone()
         if not result:
@@ -878,7 +878,7 @@ class CustomerIdentityResolver:
                 cursor,
                 str(raw_profile["tenant_id"]),
                 str(master_id),
-                raw_profile.get("domain", "retail"),
+                raw_profile.get("domain") or "_",
             )
             current_master.update(current_domain_attrs)
             set_clauses = []
@@ -906,11 +906,10 @@ class CustomerIdentityResolver:
             set_clauses = [f"{field} = COALESCE({field}, %s)" for field in merge_fields]
             params = [raw_profile.get(field) for field in merge_fields]
 
-        # Always preserve the explicitly-provided domain on the master row so
-        # that profiles stay correctly classified across retail/banking/
-        # real_estate/travel/media/education.
+        # Always preserve the explicitly-provided domain on the master row.
+        # Missing tracking metadata remains neutral ("_"), not retail.
         set_clauses.append("domain = %s")
-        params.append(raw_profile.get("domain", "retail"))
+        params.append(raw_profile.get("domain") or "_")
 
         for raw_field, master_col in ARRAY_IDENTITY_FIELDS.items():
             value = raw_profile.get(raw_field)
@@ -995,7 +994,7 @@ class CustomerIdentityResolver:
                 cursor,
                 str(raw_profile["tenant_id"]),
                 str(master_id),
-                raw_profile.get("domain", "retail"),
+                raw_profile.get("domain") or "_",
             )
 
         current_master_with_domain = dict(current_master) if has_consolidation_metadata else {}
@@ -1016,7 +1015,7 @@ class CustomerIdentityResolver:
                 cursor,
                 str(raw_profile["tenant_id"]),
                 str(master_id),
-                raw_profile.get("domain", "retail"),
+                raw_profile.get("domain") or "_",
                 domain_attr_updates,
             )
 
@@ -1084,9 +1083,9 @@ class CustomerIdentityResolver:
             insert_master_query,
             (
                 raw_profile["tenant_id"],
-                # Domain defaults to "retail" for backwards compatibility if
-                # the source omits it; valid domains now include media/education.
-                raw_profile.get("domain", "retail"),
+                # Unclassified tracking data must not be assigned to a
+                # business domain when the source omits domain metadata.
+                raw_profile.get("domain") or "_",
                 raw_profile.get("full_name"),
                 raw_profile.get("email"),
                 raw_profile.get("phone_number"),
@@ -1163,7 +1162,7 @@ class CustomerIdentityResolver:
                 cursor,
                 str(raw_profile["tenant_id"]),
                 str(new_master_id),
-                raw_profile.get("domain", "retail"),
+                raw_profile.get("domain") or "_",
                 incoming_domain_values,
             )
 

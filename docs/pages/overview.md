@@ -23,7 +23,7 @@ The Overview page is the first tab in the top navigation. It provides a tenant-w
 
 **Charts**
 - **Profiles by Status**: a doughnut chart of raw profiles split by status (`processed`, `in progress`, `new`, `inactive`, `deleted`).
-- **Profiles by Domain**: a bar chart comparing raw and master profile counts across each business domain (`retail`, `banking`, `real_estate`, `travel`, `media`, `education`).
+- **Profiles by Domain**: a bar chart comparing raw and master profile counts across `_` (`Unclassified / Not set`), `banking`, `education`, `healthcare`, `hospitality`, `insurance`, `manufacturing`, `media`, `real_estate`, `retail`, `telecom`, and `travel`.
 - **Raw Profiles by Source System**: the top ten `source_system` producers by raw profile count, labelled with their domain.
 - **Identity Graph Coverage**: the percentage of master profiles carrying each identity channel (`email`, `phone_number`, `device_ids`, `advertising_ids`, `cookie_ids`, `external_ids`, `national_id`).
 
@@ -33,4 +33,3 @@ The Overview page is the first tab in the top navigation. It provides a tenant-w
 - **Where does our customer data come from?** Check the **Raw Profiles by Source System** chart.
 - **How complete is our identity graph?** Inspect **Identity Graph Coverage** to see the fill rate of each identifier type.
 - **Why do the numbers change when I switch the period?** Every KPI and chart is filtered to the selected lookback window; widen the period (up to 365 days) to view longer history.
-

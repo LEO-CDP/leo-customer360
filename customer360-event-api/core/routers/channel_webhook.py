@@ -6,8 +6,8 @@ event to a canonical name, and record it to the S3 event lake via the SAME
 ``TrackingLogService``. Only the event map, signing secret, signature header, and
 channel label differ -- so they share this factory.
 
-S3-first: opt-out is NOT written to Postgres here; it rides the S3 event as a
-``suppression_reason`` that a downstream projection applies to profile consent.
+S3-first: opt-out is NOT written to Postgres here; the verified callback writes
+an explicit ``consent_update`` marker to S3 for the downstream profile projection.
 Reuses ``decode_tracking_token`` (verifies the shared EMAIL_TRACKING_SECRET token).
 """
 
@@ -26,6 +26,15 @@ from core.routers.tracking import build_tracking_request, get_tracking_service, 
 from core.service import TrackingLogService
 
 logger = logging.getLogger(__name__)
+TRUSTED_CONSENT_SOURCE = "verified_consent_callback"
+CONSENT_REVOCATIONS = {
+    ("zalo", "zalo-opt-out"): {
+        "field": "zalo_opt_in",
+        "granted": False,
+        "reason": "opt_out",
+        "source": "verified_zalo_webhook",
+    }
+}
 
 
 def _source_id(tenant_id: str) -> uuid.UUID:
@@ -48,13 +57,30 @@ def record_channel_event(decoded, event_name, service, *, channel, dedup_key, pa
             "event_dedup_key": dedup_key,
             **(payload or {}),
         }
-        request = build_tracking_request(
-            data_source_id=_source_id(decoded["tenant_id"]),
-            user_id=decoded["master_profile_id"],
-            metadata={"source": channel, "campaign_id": decoded["campaign_id"]},
-            events=[{"event_name": event_name, "properties": properties}],
-        )
-        ingest_tracking_request(request, service)
+        event = {
+            "event_name": event_name,
+            "tenant_id": decoded["tenant_id"],
+            "master_profile_id": decoded["master_profile_id"],
+            "properties": properties,
+        }
+        consent_update = CONSENT_REVOCATIONS.get((channel, event_name))
+        if consent_update:
+            event["source_system"] = TRUSTED_CONSENT_SOURCE
+            properties["consent_update"] = dict(consent_update)
+            service.ingest(
+                data_source_id=_source_id(decoded["tenant_id"]),
+                events=[event],
+                user_id=decoded["master_profile_id"],
+                metadata={"source": channel, "campaign_id": decoded["campaign_id"]},
+            )
+        else:
+            request = build_tracking_request(
+                data_source_id=_source_id(decoded["tenant_id"]),
+                user_id=decoded["master_profile_id"],
+                metadata={"source": channel, "campaign_id": decoded["campaign_id"]},
+                events=[event],
+            )
+            ingest_tracking_request(request, service)
         return True
     except Exception:  # webhook responses must stay provider-safe
         logger.warning("failed to persist %s tracking event %s", channel, event_name, exc_info=True)
@@ -93,8 +119,8 @@ def make_webhook_router(*, prefix, secret_attr, event_map, suppress_reasons, cha
 
         msg_id = evt.get(id_field) or evt.get("message_id")
         reason = suppress_reasons.get(name)
-        # S3-first: opt-out carries suppression_reason on the S3 event; a
-        # downstream projection op applies it to profile consent (no DB write here).
+        # S3-first: only the signed callback can add the internal consent marker;
+        # a downstream projection updates profile preferences (no DB write here).
         ok = record_channel_event(
             decoded, name, service, channel=channel,
             dedup_key=f"{channel}:{msg_id}:{name}",

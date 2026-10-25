@@ -11,12 +11,10 @@ from .agent_types import (
     ClusteringPipeline,
     ForecastingPipeline,
     GenerativeLlmPipeline,
-    GraphIntelligencePipeline,
     OptimizationPipeline,
     RankingRecommendationPipeline,
     RegressionPipeline,
     RulesEnginePipeline,
-    SemanticEmbeddingPipeline,
     UpliftModelingPipeline,
 )
 from .agent_types.base import AgentTypePipeline
@@ -30,8 +28,6 @@ PIPELINE_HANDLERS: dict[ModelType, AgentTypePipeline] = {
     "forecasting": ForecastingPipeline(),
     "anomaly_detection": AnomalyDetectionPipeline(),
     "uplift_modeling": UpliftModelingPipeline(),
-    "semantic_embedding": SemanticEmbeddingPipeline(),
-    "graph_ml": GraphIntelligencePipeline(),
     "optimization": OptimizationPipeline(),
     "rules_engine": RulesEnginePipeline(),
     "generative_llm": GenerativeLlmPipeline(),

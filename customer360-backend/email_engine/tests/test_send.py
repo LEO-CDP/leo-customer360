@@ -8,11 +8,11 @@ from email_engine.adapters import DispatchResult
 from email_engine.send import _display_name, _is_opted_out, _process_batch
 
 
-def test_is_opted_out_only_on_explicit_false():
+def test_is_opted_out_unless_explicit_true():
     assert _is_opted_out({"communication_preferences": {"email_opt_in": False}}) is True
     assert _is_opted_out({"communication_preferences": {"email_opt_in": True}}) is False
-    assert _is_opted_out({"communication_preferences": {}}) is False
-    assert _is_opted_out({}) is False
+    assert _is_opted_out({"communication_preferences": {}}) is True
+    assert _is_opted_out({}) is True
 
 
 def test_display_name_joins_first_last():
@@ -38,7 +38,8 @@ def test_process_batch_routes_each_recipient_by_eligibility(mock_conn, mock_curs
 
     template = {"subject": "Hi {{ first_name }}", "html_body": "<p>{{ first_name }}</p>", "text_body": "hi"}
     batch = [
-        {"master_profile_id": "p1", "email": "ok@x.io", "first_name": "A", "communication_preferences": {}},
+        {"master_profile_id": "p1", "email": "ok@x.io", "first_name": "A",
+         "communication_preferences": {"email_opt_in": True}},
         {"master_profile_id": "p2", "email": None, "first_name": "B", "communication_preferences": {}},
         {"master_profile_id": "p3", "email": "supp@x.io", "first_name": "C", "communication_preferences": {}},
         {"master_profile_id": "p4", "email": "done@x.io", "first_name": "D", "communication_preferences": {}},

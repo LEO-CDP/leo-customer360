@@ -437,6 +437,15 @@
                         <input id="alert-phone" name="phone_number" type="tel" class="form-control form-control-sm mb-2" placeholder="Số điện thoại" autocomplete="tel" required>
                         <label for="alert-email" class="visually-hidden">Email</label>
                         <input id="alert-email" name="email" type="email" class="form-control form-control-sm mb-2" placeholder="Email của bạn" autocomplete="email" required>
+                        <div class="form-check mb-2">
+                            <input id="alert-email-marketing-consent" name="email_marketing_consent" class="form-check-input" type="checkbox" required>
+                            <label for="alert-email-marketing-consent" class="form-check-label small">
+                                Tôi đồng ý nhận email tiếp thị. Tôi có thể hủy đăng ký bất cứ lúc nào.
+                            </label>
+                        </div>
+                        <small class="d-block text-muted mb-2">
+                            Consent email marketing riêng với consent tracking. Demo chỉ ghi event, không gửi email hoặc cập nhật hồ sơ.
+                        </small>
                         <button type="submit" class="btn btn-danger btn-sm w-100">Đăng ký nhận tin</button>
                         <small id="alert-form-status" class="d-block text-muted mt-2" aria-live="polite"></small>
                     </form>
@@ -573,13 +582,14 @@
             // Leo Observer SDK: load the real Customer 360 Web SDK for this demo.
             (function () {
                 var defaults = {
-                    dataSourceId: "1a93ae2d-0961-4992-b27d-15a703a44038",
+                    dataSourceId: "15dc39d4-ae42-5c60-9c77-66f05dcae448",
                     logDomain: "c360.example.com"
                 };
                 var storageKeys = {
                     dataSourceId: "c360.demo.leoC360DataSourceId",
                     logDomain: "c360.demo.leoObserverLogDomain"
                 };
+                var legacyDefaultDataSourceId = "1a93ae2d-0961-4992-b27d-15a703a44038";
 
                 function readStoredValue(key, fallback) {
                     try {
@@ -599,6 +609,14 @@
                 }
 
                 var dataSourceId = readStoredValue(storageKeys.dataSourceId, defaults.dataSourceId);
+                if (dataSourceId === legacyDefaultDataSourceId) {
+                    dataSourceId = defaults.dataSourceId;
+                    try {
+                        window.localStorage.setItem(storageKeys.dataSourceId, dataSourceId);
+                    } catch (error) {
+                        console.warn("[C360 SDK] Unable to migrate the demo data source ID", error);
+                    }
+                }
                 var logDomain = normalizeLogDomain(readStoredValue(storageKeys.logDomain, defaults.logDomain));
                 if (!logDomain) logDomain = defaults.logDomain;
 
@@ -1174,6 +1192,11 @@
         function initLotteryAlertForm() {
             $('#lottery-alert-form').on('submit', function (event) {
                 event.preventDefault();
+                const marketingConsent = $('#alert-email-marketing-consent').is(':checked');
+                if (!marketingConsent) {
+                    $('#alert-form-status').text('Vui lòng đồng ý nhận email tiếp thị trước khi đăng ký.');
+                    return;
+                }
                 const fullName = $('#alert-full-name').val().trim();
                 const phoneNumber = $('#alert-phone').val().trim();
                 const email = $('#alert-email').val().trim();
@@ -1186,7 +1209,8 @@
                 C360DemoSDK.trackFormSubmit('lottery-alert', {
                     email: email,
                     phone_number: phoneNumber,
-                    full_name: fullName
+                    full_name: fullName,
+                    email_opt_in: true
                 });
                 C360DemoSDK.identifyUser(subscriber, 'signup');
                 C360DemoSDK.trackConversion({

@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from notification_engine.adapters import MockZNSAdapter, build_zns_adapter  # noqa: E402
 from notification_engine.rendering import render_params, render_value  # noqa: E402
+from notification_engine.send import _is_opted_out, _is_suppressed  # noqa: E402
 from notification_engine.s3_reader import extract_optout_events  # noqa: E402
 from notification_engine.tracking import encode_tracking_token  # noqa: E402
 
@@ -45,19 +46,109 @@ def test_mock_adapter_always_succeeds_with_message_id():
     assert result.provider_message_id
 
 
-# --- S3 opt-out filter ---
-def test_extract_optout_events_keeps_only_zalo_optouts():
+def test_zalo_send_requires_explicit_literal_true_consent():
+    assert _is_opted_out({"communication_preferences": {"zalo_opt_in": True}}) is False
+    assert _is_opted_out({"communication_preferences": {"zalo_opt_in": False}}) is True
+    assert _is_opted_out({"communication_preferences": {"zalo_opt_in": "true"}}) is True
+    assert _is_opted_out({"communication_preferences": {}}) is True
+
+
+def test_zalo_suppression_lookup_is_tenant_campaign_and_channel_scoped():
+    class _Cursor:
+        def __init__(self):
+            self.statement = ""
+            self.params = {}
+
+        def execute(self, statement, params):
+            self.statement = statement
+            self.params = params
+
+        def fetchone(self):
+            return {"is_suppressed": True}
+
+    cursor = _Cursor()
+    profile = {
+        "master_profile_id": "profile-1",
+        "phone_number": "+12025550123",
+    }
+
+    assert _is_suppressed(cursor, "tenant-1", "campaign-1", profile) is True
+    assert "tenant_id" in cursor.statement
+    assert "channel IN ('GLOBAL', 'ZALO')" in cursor.statement
+    assert cursor.params == {
+        "tenant_id": "tenant-1",
+        "campaign_id": "campaign-1",
+        "master_profile_id": "profile-1",
+        "phone": "+12025550123",
+    }
+
+
+# --- S3 verified consent-revocation filter ---
+def test_extract_optout_events_keeps_verified_email_and_zalo_revocations():
     records = [
-        {"event_name": "zalo-opt-out",
-         "properties": {"tracking_channel": "zalo", "tenant_id": "t", "master_profile_id": "p1",
-                        "suppression_reason": "opt_out"}},
-        {"event_name": "zalo-delivered",
-         "properties": {"tracking_channel": "zalo", "tenant_id": "t", "master_profile_id": "p1"}},
-        {"event_name": "email-bounced",
-         "properties": {"tracking_channel": "email", "suppression_reason": "hard_bounce"}},
-        {"event_name": "zalo-failed",
-         "properties": {"tracking_channel": "zalo", "tenant_id": "t", "master_profile_id": "p2",
-                        "suppression_reason": "permanent_failure"}},
+        {
+            "event_name": "email-unsubscribed",
+            "source_system": "verified_consent_callback",
+            "payload": {
+                "properties": {
+                    "tracking_channel": "email",
+                    "tenant_id": "t1",
+                    "master_profile_id": "p1",
+                    "consent_update": {
+                        "field": "email_opt_in",
+                        "granted": False,
+                        "reason": "unsubscribe",
+                        "source": "verified_email_callback",
+                    },
+                }
+            },
+        },
+        {
+            "event_name": "zalo-opt-out",
+            "source_system": "verified_consent_callback",
+            "payload": {
+                "properties": {
+                    "tracking_channel": "zalo",
+                    "tenant_id": "t1",
+                    "master_profile_id": "p2",
+                    "consent_update": {
+                        "field": "zalo_opt_in",
+                        "granted": False,
+                        "reason": "opt_out",
+                        "source": "verified_zalo_webhook",
+                    },
+                }
+            },
+        },
+        {
+            "event_name": "zalo-failed",
+            "source_system": "verified_consent_callback",
+            "payload": {
+                "properties": {
+                    "tracking_channel": "zalo",
+                    "tenant_id": "t1",
+                    "master_profile_id": "p3",
+                    "suppression_reason": "permanent_failure",
+                }
+            },
+        },
+        {
+            "event_name": "email-unsubscribed",
+            "source_system": "tracking",
+            "payload": {
+                "properties": {
+                    "tracking_channel": "email",
+                    "tenant_id": "t1",
+                    "master_profile_id": "spoofed",
+                    "consent_update": {
+                        "field": "email_opt_in",
+                        "granted": False,
+                        "reason": "unsubscribe",
+                        "source": "verified_email_callback",
+                    },
+                }
+            },
+        },
     ]
     out = extract_optout_events(records)
     assert [e["properties"]["master_profile_id"] for e in out] == ["p1", "p2"]
@@ -69,21 +160,99 @@ def test_project_optout_events_counts_applied_vs_skipped():
 
     class _Cur:
         rowcount = 1
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
-        def execute(self, *a, **k): pass
+        def __init__(self):
+            self.calls = []
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def execute(self, *args, **kwargs):
+            self.calls.append((args, kwargs))
 
     class _Conn:
-        def cursor(self): return _Cur()
-        def commit(self): pass
-        def rollback(self): pass
+        def __init__(self):
+            self.cursor_instance = _Cur()
+        def cursor(self):
+            return self.cursor_instance
+        def commit(self):
+            pass
+        def rollback(self):
+            pass
 
     events = [
-        {"properties": {"tenant_id": "t", "master_profile_id": "p1", "suppression_reason": "opt_out"}},
-        {"properties": {"tenant_id": "t", "suppression_reason": "opt_out"}},  # missing profile
-        {"properties": {"tenant_id": "t", "master_profile_id": "p3"}},        # missing reason
+        {
+            "event_name": "email-unsubscribed",
+            "source_system": "verified_consent_callback",
+            "properties": {
+                "tracking_channel": "email",
+                "tenant_id": "11111111-1111-1111-1111-111111111111",
+                "master_profile_id": "aaaaaaaa-0000-0000-0000-000000000001",
+                "consent_update": {
+                    "field": "email_opt_in",
+                    "granted": False,
+                    "reason": "unsubscribe",
+                    "source": "verified_email_callback",
+                },
+            },
+        },
+        {
+            "event_name": "zalo-opt-out",
+            "source_system": "verified_consent_callback",
+            "properties": {
+                "tracking_channel": "zalo",
+                "tenant_id": "11111111-1111-1111-1111-111111111111",
+                "master_profile_id": "aaaaaaaa-0000-0000-0000-000000000002",
+                "consent_update": {
+                    "field": "zalo_opt_in",
+                    "granted": False,
+                    "reason": "opt_out",
+                    "source": "verified_zalo_webhook",
+                },
+            },
+        },
+        {
+            "event_name": "zalo-failed",
+            "source_system": "verified_consent_callback",
+            "properties": {
+                "tracking_channel": "zalo",
+                "tenant_id": "11111111-1111-1111-1111-111111111111",
+                "master_profile_id": "aaaaaaaa-0000-0000-0000-000000000003",
+                "suppression_reason": "permanent_failure",
+            },
+        },
+        {
+            "event_name": "email-unsubscribed",
+            "source_system": "tracking",
+            "properties": {
+                "tracking_channel": "email",
+                "tenant_id": "11111111-1111-1111-1111-111111111111",
+                "master_profile_id": "aaaaaaaa-0000-0000-0000-000000000004",
+            },
+        },
     ]
-    assert project_optout_events(_Conn(), events) == {"applied": 1, "skipped": 2}
+    fake_conn = _Conn()
+    assert project_optout_events(fake_conn, events) == {"applied": 2, "skipped": 2}
+    updates = [
+        call[0]
+        for call in fake_conn.cursor_instance.calls
+        if str(call[0][0]).lstrip().startswith("UPDATE")
+    ]
+    assert len(updates) == 2
+    assert updates[0][1][:5] == (
+        "email_opt_in",
+        "email_opt_out_reason",
+        "unsubscribe",
+        "email_consent_source",
+        "verified_email_callback",
+    )
+    assert updates[1][1][:5] == (
+        "zalo_opt_in",
+        "zalo_opt_out_reason",
+        "opt_out",
+        "zalo_consent_source",
+        "verified_zalo_webhook",
+    )
+    assert all("- 'eligibility_policy'" in call[0] for call in updates)
 
 
 def test_full_zns_render_produces_sent_template_data():

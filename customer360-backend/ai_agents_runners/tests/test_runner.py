@@ -133,6 +133,126 @@ def test_candidate_uuid_array_is_normalized_before_pipeline_input():
     assert "to_json(w.candidate_content_item_ids)" in connection.cursor_instance.executed[0]
 
 
+def test_run_merges_agent_hyperparameters_under_step_configuration():
+    tenant_id = "11111111-1111-1111-1111-111111111111"
+    segment_id = "22222222-2222-2222-2222-222222222222"
+    row = {
+        "tenant_id": tenant_id,
+        "segment_id": segment_id,
+        "agent_code": "product_recommendation",
+        "model_type": "ranking_recommendation",
+        "execution_order": 1,
+        "hyperparameters": {
+            "strategy": "tags",
+            "top_k": 8,
+            "semantic_weight": 0.7,
+            "tag_weight": 0.3,
+            "minimum_score": 0.0,
+        },
+        "configuration": {"top_k": 4, "minimum_score": 0.25},
+        "candidate_content_item_ids": [],
+        "effective_schedule": "0 * * * *",
+    }
+
+    connection = FakeConnection([row])
+    summary = AgentWorkflowMasterTask(lambda: connection).run(
+        trigger="api",
+        tenant_id=tenant_id,
+        segment_id=segment_id,
+    )
+
+    assert "a.hyperparameters" in connection.cursor_instance.executed[0]
+    assert summary.plan[0]["configuration"] == {
+        "strategy": "tags",
+        "top_k": 4,
+        "semantic_weight": 0.7,
+        "tag_weight": 0.3,
+        "minimum_score": 0.25,
+    }
+
+
+def test_execute_eligibility_policy_persists_channel_readiness_for_segment_profiles(
+    monkeypatch,
+):
+    tenant_id = "11111111-1111-1111-1111-111111111111"
+    segment_id = "22222222-2222-2222-2222-222222222222"
+    profile_id = "33333333-3333-3333-3333-333333333333"
+    profile = {
+        "master_profile_id": profile_id,
+        "email": "person@example.test",
+        "phone_number": "+12025550123",
+        "push_tokens": {},
+        "device_ids": [],
+        "communication_preferences": {
+            "email_opt_in": False,
+            "meta_ads_opt_in": True,
+        },
+        "active_suppression_channels": [],
+    }
+    connections = []
+
+    def connection_factory():
+        connection = FakeConnection([profile])
+        connections.append(connection)
+        return connection
+
+    updates = []
+    monkeypatch.setattr(
+        runner,
+        "execute_values",
+        lambda _cursor, query, rows, **_kwargs: updates.append(
+            (query, list(rows))
+        ),
+    )
+    task = AgentWorkflowMasterTask(connection_factory=connection_factory)
+    summary = WorkflowRunSummary(
+        trigger="api",
+        tenant_id=tenant_id,
+        segment_id=segment_id,
+        selected_steps=1,
+        skipped_steps=0,
+        plan=(
+            {
+                "tenant_id": tenant_id,
+                "segment_id": segment_id,
+                "agent_code": "eligibility_policy",
+                "model_type": "rules_engine",
+                "execution_order": 1,
+                "configuration": {},
+                "candidate_content_item_ids": [],
+                "trigger_event": {},
+            },
+        ),
+    )
+
+    result = task.execute(summary, run_id="eligibility-run-1")
+
+    assert result.executed_steps == 1
+    assert result.eligibility_profiles_updated == 1
+    assert result.unsupported_steps == 0
+    assert (
+        "segment.segment_tag = ANY"
+        in connections[0].cursor_instance.calls[1][0]
+    )
+    assert connections[0].cursor_instance.calls[1][1] == (
+        segment_id,
+        None,
+        tenant_id,
+    )
+    update_query, rows = updates[0]
+    stored_policy = json.loads(rows[0][2])
+    assert "eligibility_policy" in update_query
+    assert "|| jsonb_build_object" in update_query
+    assert "email_opt_in" not in update_query
+    assert rows[0][:2] == (tenant_id, profile_id)
+    assert stored_policy["channels"]["email"] == {
+        "eligible": False,
+        "reason_codes": ["consent_not_granted"],
+    }
+    assert stored_policy["channels"]["meta_ads"]["eligible"] is True
+    assert stored_policy["run_id"] == "eligibility-run-1"
+
+
 def test_cron_trigger_skips_steps_that_are_not_due():
     rows = [
         {
@@ -770,4 +890,3 @@ def test_vector_step_validation_and_ensure_content_embeddings_edge_cases(monkeyp
             candidate_ids=[candidate_id],
             model_key="gemini:gemini-embedding-001:384",
         )
-

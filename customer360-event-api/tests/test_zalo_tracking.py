@@ -67,6 +67,13 @@ def test_opt_out_event_recorded_to_s3_with_suppression_reason():
     assert props["tracking_channel"] == "zalo"
     assert props["suppression_reason"] == "opt_out"
     assert props["master_profile_id"] == "p1"
+    assert events[0]["source_system"] == "verified_consent_callback"
+    assert props["consent_update"] == {
+        "field": "zalo_opt_in",
+        "granted": False,
+        "reason": "opt_out",
+        "source": "verified_zalo_webhook",
+    }
 
 
 def test_delivered_event_has_no_suppression_reason():

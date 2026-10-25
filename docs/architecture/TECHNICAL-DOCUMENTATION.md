@@ -245,7 +245,7 @@ agent-specific inference handlers are not yet implemented.
 Raw profile snapshots from external sources, not yet merged.
 - `tenant_id`, `raw_profile_id` (UUID) — primary key.
 - `source_system`: `Google Analytics`, `onesignal`, `pos`, `banking_core`, ...
-- `domain`: validated against the `sys_domain` catalog at the application layer; current seeds include `retail`, `banking`, `travel`, `real_estate`, `media`, and `education`, with additional catalog domains supported.
+- `domain`: validated against the `sys_domain` catalog at the application layer; current seeds include `_`, `banking`, `education`, `healthcare`, `hospitality`, `insurance`, `manufacturing`, `media`, `real_estate`, `retail`, `telecom`, and `travel`, with the labels defined by `sys_domain`.
 - `status_code`: tracks pending / processing / resolved / error state, cross-referenced with `cdp_id_resolution_status`.
 - PII fields (hashed where applicable): `email_sha256`, `phone_sha256`, plain name fields.
 - Identifiers: `device_id`, `advertising_id`, `phone_number`, `national_id`.

@@ -68,8 +68,10 @@ ranking; current ranking uses linked content embeddings.
 ## Initialization And Seeds
 
 `init-cdp-ai-agents.sql` is the unified AI-agent registry seed. It creates
-12 core templates (one per execution type) and two prompt-backed agents for the
-notification and segment endpoints. New entries are `INACTIVE`. Run it before
+11 core agents (one per execution type) and two prompt-backed agents for the
+notification and segment endpoints. `product_recommendation` and
+`eligibility_policy` are active because their runner handlers are implemented;
+the remaining new entries are `INACTIVE`. Run it before
 `init-core-database.sql`. Profile attributes without a specific registered
 producer have `agent_code = NULL`; the seed does not create placeholder agents
 to satisfy ownership metadata.
@@ -77,7 +79,18 @@ to satisfy ownership metadata.
 The seed is atomic and insert-only on conflicts: rerunning it preserves deployed
 configuration, activation state, feature definitions and append-only prompt
 history. It does **not** repair existing rows. Upgrade existing databases using
-reviewed migrations and the versioned prompt publishing API.
+reviewed migrations and the versioned prompt publishing API. Migration
+`013_remove_graph_ml_agent_type.sql` removes the retired graph agent and model
+type from existing databases; it aborts if workflows or profile attributes
+still reference that agent. Migration `014_activate_eligibility_policy.sql`
+activates the implemented rules-engine handler on existing inactive seed rows
+without overriding other operator-managed lifecycle states. Migration
+`015_remove_semantic_embedding_agent_type.sql` removes the semantic-profile seed
+and model type; it aborts if workflows or profile attributes still reference
+that agent. Migration `016_add_unclassified_profile_domain.sql` registers `_`
+(`Unclassified / Not set`), makes it the default for master/raw profile
+domains, and repairs legacy null, empty, or `unknown` profile domains without
+reclassifying valid business domains.
 
 ### Model and feature readiness
 
@@ -92,8 +105,6 @@ invented trained-artifact name:
 | Ranking | `lightgbm.LGBMRanker` |
 | Anomaly detection | `sklearn.ensemble.IsolationForest` |
 | Uplift | `econml.metalearners.XLearner` |
-| Embedding | `text-embedding-3-small` (1536 dimensions) |
-| Graph ML | `torch_geometric.nn.models.GraphSAGE` |
 | Optimization / rules | `NULL` until an engine is selected |
 | Generative LLM | `gpt-6-luna` |
 
@@ -148,6 +159,16 @@ psql -v ON_ERROR_STOP=1 -d seed_test -f customer360-database/tests/ai_agent_seed
 The SQL regression checks execute every catalog SQL fragment, test consent and
 tenant/time boundaries, and verify that rerunning the seed preserves deployed
 configuration and prompt history.
+
+The `eligibility_policy` rules engine evaluates explicit channel consent and
+resolved suppressions for active profiles in its configured segment workflow.
+It writes a versioned per-channel result to
+`communication_preferences.eligibility_policy` without altering the original
+opt-in fields. Email and advertising-audience senders independently require
+literal-true consent at dispatch time; the policy result is not a substitute
+for that final gate and is not a determination of legal compliance. Advertising
+requires its own `meta_ads_opt_in`, `google_ads_opt_in`, or `tiktok_ads_opt_in`
+boolean; consent for email or another provider is never inferred.
 
 `init-core-database.sql` is the remaining seed/setup script. It:
 

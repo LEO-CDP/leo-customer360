@@ -31,6 +31,15 @@ from core.service import TrackingLogService
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/track/email", tags=["Email - Tracking"])
+TRUSTED_CONSENT_SOURCE = "verified_consent_callback"
+CONSENT_REVOCATIONS = {
+    "email-unsubscribed": {
+        "field": "email_opt_in",
+        "granted": False,
+        "reason": "unsubscribe",
+        "source": "verified_email_callback",
+    }
+}
 
 _SIG_LEN = 20
 _TRANSPARENT_GIF = base64.b64decode(
@@ -124,7 +133,7 @@ def _record_event(
     *,
     payload: Optional[dict] = None,
     dedup_key: Optional[str] = None,
-) -> None:
+) -> bool:
     try:
         properties = {
             "tracking_channel": "email",
@@ -137,19 +146,35 @@ def _record_event(
         }
         event = {
             "event_name": event_name,
+            "tenant_id": decoded["tenant_id"],
+            "master_profile_id": decoded["master_profile_id"],
             "properties": properties,
         }
+        consent_update = CONSENT_REVOCATIONS.get(event_name)
+        if consent_update:
+            event["source_system"] = TRUSTED_CONSENT_SOURCE
+            properties["consent_update"] = dict(consent_update)
         if properties.get("url"):
             event["page_url"] = properties["url"]
-        request = build_tracking_request(
-            data_source_id=_source_id(decoded["tenant_id"]),
-            user_id=decoded["master_profile_id"],
-            metadata={"source": "email", "campaign_id": decoded["campaign_id"]},
-            events=[event],
-        )
-        ingest_tracking_request(request, service)
+        if consent_update:
+            service.ingest(
+                data_source_id=_source_id(decoded["tenant_id"]),
+                events=[event],
+                user_id=decoded["master_profile_id"],
+                metadata={"source": "email", "campaign_id": decoded["campaign_id"]},
+            )
+        else:
+            request = build_tracking_request(
+                data_source_id=_source_id(decoded["tenant_id"]),
+                user_id=decoded["master_profile_id"],
+                metadata={"source": "email", "campaign_id": decoded["campaign_id"]},
+                events=[event],
+            )
+            ingest_tracking_request(request, service)
+        return True
     except Exception:  # Tracking responses must remain mail-client safe.
         logger.warning("failed to persist email tracking event %s", event_name, exc_info=True)
+        return False
 
 
 @router.get("/open")
@@ -188,7 +213,17 @@ def unsubscribe(
             "<html><body><p>This unsubscribe link is invalid or expired.</p></body></html>",
             status_code=400,
         )
-    _record_event(decoded, "email-unsubscribed", service, payload={"suppression_reason": "unsubscribe"})
+    if not _record_event(
+        decoded,
+        "email-unsubscribed",
+        service,
+        payload={"suppression_reason": "unsubscribe"},
+    ):
+        return HTMLResponse(
+            "<html><body><p>We could not confirm your unsubscribe. Please retry.</p></body></html>",
+            status_code=503,
+            headers={"Retry-After": "1", **_NO_STORE},
+        )
     return HTMLResponse("<html><body><p>You have been unsubscribed. We're sorry to see you go.</p></body></html>")
 
 
@@ -223,7 +258,7 @@ async def email_webhook(
     if reason == "hard_bounce" and (payload.bounce_type or "").strip().lower() == "soft":
         reason = None
     dedup_id = payload.message_id or f"{decoded['campaign_id']}:{decoded['master_profile_id']}:{event_name}"
-    _record_event(
+    persisted = _record_event(
         decoded,
         event_name,
         service,
@@ -237,6 +272,11 @@ async def email_webhook(
             "suppression_reason": reason,
         },
     )
+    if (event_name == "email-unsubscribed" or reason) and not persisted:
+        return JSONResponse(
+            {"status": "retry", "reason": "failed to persist consent/suppression event"},
+            status_code=503,
+        )
     return {"status": "ok", "event": event_name, "suppressed": bool(reason)}
 
 

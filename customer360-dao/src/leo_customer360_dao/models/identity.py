@@ -46,7 +46,7 @@ class CdpMasterProfile(Base):
     # Data owner: internal sys_user who created/manages this profile (nullable -- most
     # profiles are created by ingestion pipelines, not an interactive admin user).
     user_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id"))
-    domain: Mapped[str] = mapped_column(Text, nullable=False, server_default="retail")
+    domain: Mapped[str] = mapped_column(Text, nullable=False, server_default="_")
 
     full_name: Mapped[Optional[str]] = mapped_column(Text)
     first_name: Mapped[Optional[str]] = mapped_column(Text)
@@ -152,7 +152,7 @@ class CdpRawProfileStage(Base):
     # Data owner: internal sys_user who created/manages this row (nullable -- rows are
     # normally landed by ingestion pipelines, not an interactive admin user).
     user_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id"))
-    domain: Mapped[str] = mapped_column(Text, nullable=False, server_default="retail")
+    domain: Mapped[str] = mapped_column(Text, nullable=False, server_default="_")
     source_system: Mapped[str] = mapped_column(Text, nullable=False)
     channel: Mapped[Optional[str]] = mapped_column(Text)
 

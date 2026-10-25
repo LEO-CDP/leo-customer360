@@ -14,6 +14,30 @@ Demo sử dụng website kết quả xổ số để minh họa các tình huố
 
 > Demo sử dụng dữ liệu xổ số ngẫu nhiên và quảng cáo minh họa. Khi tích hợp thực tế, hãy thay các dữ liệu này bằng dữ liệu nghiệp vụ của website.
 
+## Đồng ý email marketing trong demo
+
+Biểu mẫu **Nhận thông báo kết quả** yêu cầu người dùng chủ động chọn ô đồng ý.
+Nếu chưa chọn, handler không gửi các event đăng ký. Khi đã chọn, demo giữ luồng
+tracking ban đầu và thêm `email_opt_in: true` vào event `form_submit`; SDK vẫn
+áp dụng cơ chế consent tracking riêng của nó.
+
+Đây là event demo được lưu vào S3, không phải cập nhật
+`cdp_master_profiles.communication_preferences` và cũng không gửi email thật.
+Không dùng một event từ public `/tracking/logs` làm nguồn cấp quyền gửi email.
+
+`window.leoTrackingConsent` là lựa chọn riêng cho việc thu thập tracking; giá
+trị này không cấp quyền gửi email marketing. Trong môi trường thật, sau khi
+xác thực người dùng/hồ sơ và lưu bằng chứng đồng ý theo chính sách của tổ chức,
+client có xác thực phải cập nhật `communication_preferences.email_opt_in` qua
+`PATCH /api/v1/master-profiles/{master_profile_id}`. Phải giữ nguyên các khóa
+preferences khác khi cập nhật. Không gửi opt-in dương tính qua public
+`/tracking/logs` và không gửi `eligibility_policy` trong PATCH; đây là kết quả
+dẫn xuất do backend tạo.
+
+Email engine chỉ gửi khi `email_opt_in` là JSON boolean `true` và không có
+suppression đang áp dụng. `eligibility_policy` đánh giá trạng thái theo kênh
+riêng; nó không phải xác nhận tuân thủ GDPR hoặc tư vấn pháp lý.
+
 ## Mục tiêu và tiêu chí đạt
 
 Một lượt kiểm thử đạt khi proxy khởi tạo thành công, thao tác tạo đúng event dự kiến, Tracking Log API chấp nhận batch và payload lưu giữ đúng định danh cùng attribution. Log trong Console chỉ xác nhận SDK đã tạo event; cần kiểm tra thêm request và response trong Network để xác nhận API đã nhận dữ liệu.
@@ -136,6 +160,12 @@ Demo cho phép admin thay đổi data source ID và log domain tại nút **SDK 
 c360.demo.leoC360DataSourceId
 c360.demo.leoObserverLogDomain
 ```
+
+Bản seed local của Customer 360 dùng data source **C360 Tracker** với ID
+`15dc39d4-ae42-5c60-9c77-66f05dcae448`. Nếu dùng source khác, source đó phải
+được đăng ký ACTIVE trong `sys_data_source`; nếu không, event vẫn có thể được
+ghi vào S3 nhưng pipeline analytics sẽ không stage profile để CIR tạo master
+profile.
 
 Quy tắc đọc cấu hình:
 

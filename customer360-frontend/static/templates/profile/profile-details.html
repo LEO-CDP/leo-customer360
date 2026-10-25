@@ -126,12 +126,18 @@
             <div>
               <label class="block text-[11px] text-slate-500 uppercase tracking-wider font-semibold mb-1.5">Domain</label>
               <select name="domain" class="master-profile-edit-field w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-                <option value="retail">Retail Commerce</option>
-                <option value="banking">Retail Banking</option>
-                <option value="real_estate">Real Estate</option>
-                <option value="travel">Travel</option>
-                <option value="media">Media &amp; Entertainment</option>
+                <option value="_">Unclassified / Not set</option>
+                <option value="banking">Banking &amp; Financial Services</option>
                 <option value="education">Education</option>
+                <option value="healthcare">Healthcare</option>
+                <option value="hospitality">Hospitality &amp; Food Service</option>
+                <option value="insurance">Insurance</option>
+                <option value="manufacturing">Manufacturing</option>
+                <option value="media">Media &amp; Entertainment</option>
+                <option value="real_estate">Real Estate</option>
+                <option value="retail">Retail &amp; E-Commerce</option>
+                <option value="telecom">Telecommunications</option>
+                <option value="travel">Travel &amp; Hospitality</option>
               </select>
             </div>
             <div>
@@ -183,7 +189,53 @@
           </div>
         </div>
 
-        <!-- Section 3: IAB Audience Taxonomy Tags (cdp_master_profiles.audience_tags) -->
+        <!-- Section 3: Explicit marketing-consent evidence -->
+        <fieldset id="master-profile-consent-section" class="rounded-xl border border-emerald-200/80 bg-emerald-50/20 p-4">
+          <legend class="px-1 text-xs font-bold uppercase tracking-wider text-slate-800">Recorded Marketing Consent</legend>
+          <p class="mb-3 text-[11px] leading-relaxed text-slate-600">
+            Only check a channel when explicit consent evidence has been verified. Missing or non-boolean consent is treated as not granted. Browser tracking consent is separate from these marketing permissions.
+          </p>
+          <div id="master-profile-consent-fields" class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3" data-dirty="false">
+            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+              <input class="master-profile-consent-field" data-consent-key="email_opt_in" type="checkbox" />
+              <span>Email marketing</span>
+            </label>
+            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+              <input class="master-profile-consent-field" data-consent-key="sms_opt_in" type="checkbox" />
+              <span>SMS</span>
+            </label>
+            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+              <input class="master-profile-consent-field" data-consent-key="push_opt_in" type="checkbox" />
+              <span>Push</span>
+            </label>
+            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+              <input class="master-profile-consent-field" data-consent-key="zalo_opt_in" type="checkbox" />
+              <span>Zalo</span>
+            </label>
+            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+              <input class="master-profile-consent-field" data-consent-key="whatsapp_opt_in" type="checkbox" />
+              <span>WhatsApp</span>
+            </label>
+            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+              <input class="master-profile-consent-field" data-consent-key="voice_opt_in" type="checkbox" />
+              <span>Voice</span>
+            </label>
+            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+              <input class="master-profile-consent-field" data-consent-key="meta_ads_opt_in" type="checkbox" />
+              <span>Meta Ads audience</span>
+            </label>
+            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+              <input class="master-profile-consent-field" data-consent-key="google_ads_opt_in" type="checkbox" />
+              <span>Google Ads audience</span>
+            </label>
+            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+              <input class="master-profile-consent-field" data-consent-key="tiktok_ads_opt_in" type="checkbox" />
+              <span>TikTok audience</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <!-- Section 4: IAB Audience Taxonomy Tags (cdp_master_profiles.audience_tags) -->
         <div id="master-profile-edit-audience-tags-section" class="rounded-xl border border-teal-200/80 bg-teal-50/30 p-4">
           <div class="flex flex-wrap items-center justify-between gap-2 mb-2.5">
             <div>

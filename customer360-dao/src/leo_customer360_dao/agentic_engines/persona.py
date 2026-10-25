@@ -70,14 +70,18 @@ _ADJECTIVES = (
 )
 
 _ROLE_BY_DOMAIN = {
+    "_": ("Web Visitor", "Unclassified Customer", "Anonymous Visitor"),
     "banking": ("Banking Client", "Digital Banking User", "KYC-Verified Client", "Credit Applicant"),
-    "healthcare": ("Healthcare Patient", "Care Member", "Wellness Patient", "Clinic Visitor"),
-    "retail": ("Retail Shopper", "Online Shopper", "Loyalty Member", "App Shopper"),
-    "real_estate": ("Property Seeker", "Real Estate Investor", "Home Buyer", "Tenant"),
-    "travel": ("Traveler", "Frequent Flyer", "Hotel Guest", "Explorer"),
-    "media": ("Content Consumer", "Subscriber", "Viewer", "Listener"),
     "education": ("Learner", "Student", "Course Taker", "Lifelong Learner"),
-    "unknown": ("Web Visitor",),
+    "healthcare": ("Healthcare Patient", "Care Member", "Wellness Patient", "Clinic Visitor"),
+    "hospitality": ("Guest", "Diner", "Hospitality Customer", "Venue Visitor"),
+    "insurance": ("Policy Holder", "Insurance Customer", "Claims Customer", "Protected Customer"),
+    "manufacturing": ("Industrial Buyer", "Manufacturing Customer", "Supply Partner", "Operations Contact"),
+    "media": ("Content Consumer", "Subscriber", "Viewer", "Listener"),
+    "real_estate": ("Property Seeker", "Real Estate Investor", "Home Buyer", "Tenant"),
+    "retail": ("Retail Shopper", "Online Shopper", "Loyalty Member", "App Shopper"),
+    "telecom": ("Telecom Subscriber", "Mobile Customer", "Connectivity User", "Network Customer"),
+    "travel": ("Traveler", "Frequent Flyer", "Hotel Guest", "Explorer"),
 }
 _WEB_VISITOR_SOURCE_SYSTEMS = {"tracking", "web", "webtracking", "web_tracking"}
 
@@ -215,8 +219,8 @@ def _generate_offline(profile: Dict[str, Any], digest: str, suffix: str) -> str:
     """Fully offline, deterministic persona_name generator (no network calls)."""
     digest_int = int(digest, 16)
 
-    domain = (profile.get("domain") or "retail").lower()
-    roles = _ROLE_BY_DOMAIN.get(domain, _ROLE_BY_DOMAIN["retail"])
+    domain = (profile.get("domain") or "_").lower()
+    roles = _ROLE_BY_DOMAIN.get(domain, _ROLE_BY_DOMAIN["_"])
 
     adjective = _ADJECTIVES[digest_int % len(_ADJECTIVES)]
     role = roles[(digest_int // len(_ADJECTIVES)) % len(roles)]
@@ -238,7 +242,7 @@ def _generate_with_genai(profile: Dict[str, Any], suffix: str) -> Optional[str]:
     if client is None:
         return None
 
-    domain = (profile.get("domain") or "retail").lower()
+    domain = (profile.get("domain") or "_").lower()
     channel = profile.get("media_source") or profile.get("source_system") or "an unknown channel"
     prompt = (
         "You are labeling an anonymized customer profile for a Customer Data Platform. "
@@ -278,7 +282,7 @@ def primary_role_label(domain: str) -> str:
     persona_engine.py to build persona_category. Public wrapper over
     ``_ROLE_BY_DOMAIN`` so persona_engine.py doesn't reach into a private
     module attribute."""
-    roles = _ROLE_BY_DOMAIN.get((domain or "retail").lower(), _ROLE_BY_DOMAIN["retail"])
+    roles = _ROLE_BY_DOMAIN.get((domain or "_").lower(), _ROLE_BY_DOMAIN["_"])
     return roles[0]
 
 
@@ -314,7 +318,7 @@ def generate_persona_summary(stats: Dict[str, Any]) -> str:
 
 def _generate_offline_summary(stats: Dict[str, Any]) -> str:
     """Fully offline, deterministic persona_summary generator (no network calls)."""
-    domain = (stats.get("domain") or "retail").replace("_", " ")
+    domain = (stats.get("domain") or "_").replace("_", " ")
     lifecycle_stage = (stats.get("lifecycle_stage") or "unscored").replace("_", " ")
     value_tier = (stats.get("customer_value_tier") or "standard").replace("_", " ")
     risk_level = stats.get("risk_level") or "low"

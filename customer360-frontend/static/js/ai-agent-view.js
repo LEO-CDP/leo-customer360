@@ -33,8 +33,6 @@ window.C360 = window.C360 || {};
     forecasting: "bg-blue-100 text-blue-700",
     anomaly_detection: "bg-rose-100 text-rose-700",
     uplift_modeling: "bg-orange-100 text-orange-700",
-    semantic_embedding: "bg-purple-100 text-purple-700",
-    graph_ml: "bg-teal-100 text-teal-700",
     optimization: "bg-yellow-100 text-yellow-700",
     rules_engine: "bg-slate-100 text-slate-600",
     generative_llm: "bg-violet-100 text-violet-700"
@@ -49,8 +47,6 @@ window.C360 = window.C360 || {};
     forecasting: "\ud83d\udd2e",
     anomaly_detection: "\u26a0\ufe0f",
     uplift_modeling: "\ud83d\udcc8",
-    semantic_embedding: "\ud83d\udcdd",
-    graph_ml: "\ud83d\udd78\ufe0f",
     optimization: "\u2696\ufe0f",
     rules_engine: "\u2699\ufe0f",
     generative_llm: "\ud83e\udd16"

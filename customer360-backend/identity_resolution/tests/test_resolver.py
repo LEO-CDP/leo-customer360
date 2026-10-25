@@ -104,7 +104,7 @@ class TestFindMasterProfile:
 
         assert result is None
 
-    def test_defaults_domain_to_retail_when_missing(self, mock_cursor, mock_conn):
+    def test_defaults_domain_to_unclassified_when_missing(self, mock_cursor, mock_conn):
         mock_cursor.fetchone.return_value = None
         resolver = make_resolver(mock_conn)
         raw_profile = {"raw_profile_id": "r1", "tenant_id": "t1", "email": "a@b.com"}
@@ -113,7 +113,7 @@ class TestFindMasterProfile:
         resolver._find_master_profile(mock_cursor, raw_profile, rules)
 
         _, params = mock_cursor.execute.call_args[0]
-        assert params == ("t1", "retail", "a@b.com")
+        assert params == ("t1", "_", "a@b.com")
 
     def test_skips_rules_when_raw_value_missing(self, mock_cursor, mock_conn):
         resolver = make_resolver(mock_conn)
@@ -181,7 +181,7 @@ class TestFindMasterProfile:
 
         query, params = mock_cursor.execute.call_args[0]
         assert "similarity(full_name, %s) >= %s" in query
-        assert params == ("t1", "retail", "Nguyen Van A", 0.65)
+        assert params == ("t1", "_", "Nguyen Van A", 0.65)
 
     def test_fuzzy_trgm_defaults_threshold_when_missing(self, mock_cursor, mock_conn):
         mock_cursor.fetchone.return_value = None
@@ -192,7 +192,7 @@ class TestFindMasterProfile:
         resolver._find_master_profile(mock_cursor, raw_profile, rules)
 
         _, params = mock_cursor.execute.call_args[0]
-        assert params == ("t1", "retail", "Nguyen Van A", 0.7)
+        assert params == ("t1", "_", "Nguyen Van A", 0.7)
 
     def test_fuzzy_dmetaphone_rule(self, mock_cursor, mock_conn):
         mock_cursor.fetchone.return_value = {"master_profile_id": "master-5"}
@@ -205,7 +205,7 @@ class TestFindMasterProfile:
         assert result == "master-5"
         query, params = mock_cursor.execute.call_args[0]
         assert "dmetaphone(full_name) = dmetaphone(%s)" in query
-        assert params == ("t1", "retail", "Jon Smyth")
+        assert params == ("t1", "_", "Jon Smyth")
 
     def test_unknown_rule_is_skipped(self, mock_cursor, mock_conn):
         resolver = make_resolver(mock_conn)

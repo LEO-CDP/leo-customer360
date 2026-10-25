@@ -7,6 +7,7 @@ import logging
 import os
 import uuid
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Callable, Sequence
@@ -49,6 +50,97 @@ SEGMENT_PROFILE_SQL = f"""
           COALESCE(profile.segmentation_tags, ARRAY[]::text[])
       )
     ORDER BY profile.master_profile_id
+"""
+ELIGIBILITY_PROFILE_SQL = f"""
+    SELECT
+        profile.master_profile_id,
+        profile.email,
+        profile.phone_number,
+        profile.push_tokens,
+        profile.device_ids,
+        profile.communication_preferences,
+        COALESCE(
+            array_agg(DISTINCT suppression.channel ORDER BY suppression.channel)
+                FILTER (WHERE suppression.suppression_id IS NOT NULL),
+            ARRAY[]::text[]
+        ) AS active_suppression_channels
+    FROM {DB_SCHEMA}.cdp_master_profiles AS profile
+    JOIN {DB_SCHEMA}.cdp_segments AS segment
+      ON segment.tenant_id = profile.tenant_id
+     AND segment.segment_id = %s
+     AND segment.is_active = TRUE
+    LEFT JOIN {DB_SCHEMA}.crm_suppression_list AS suppression
+      ON suppression.tenant_id = profile.tenant_id
+     AND suppression.status = 'ACTIVE'
+     AND (suppression.expires_at IS NULL OR suppression.expires_at > now())
+     AND (
+            suppression.scope = 'GLOBAL'
+            OR (
+                suppression.scope = 'CAMPAIGN'
+                AND suppression.campaign_id = %s::uuid
+            )
+     )
+     AND (
+            suppression.master_profile_id = profile.master_profile_id
+            OR (
+                suppression.identifier_type = 'PROFILE_ID'
+                AND lower(suppression.identifier) = lower(profile.master_profile_id::text)
+            )
+            OR (
+                suppression.identifier_type = 'EMAIL'
+                AND lower(suppression.identifier) = lower(profile.email)
+            )
+            OR (
+                suppression.identifier_type = 'PHONE'
+                AND suppression.identifier = profile.phone_number
+            )
+            OR (
+                suppression.identifier_type = 'PUSH_TOKEN'
+                AND EXISTS (
+                    SELECT 1
+                    FROM jsonb_each_text(
+                        CASE
+                            WHEN jsonb_typeof(profile.push_tokens) = 'object'
+                                THEN profile.push_tokens
+                            ELSE '{{}}'::jsonb
+                        END
+                    ) AS push_token(provider, token)
+                    WHERE push_token.token = suppression.identifier
+                )
+            )
+            OR (
+                suppression.identifier_type = 'DEVICE_ID'
+                AND suppression.identifier = ANY(
+                    COALESCE(profile.device_ids, ARRAY[]::text[])
+                )
+            )
+     )
+    WHERE profile.tenant_id = %s
+      AND profile.status_code = 1
+      AND segment.segment_tag = ANY(
+          COALESCE(profile.segmentation_tags, ARRAY[]::text[])
+      )
+    GROUP BY
+        profile.master_profile_id,
+        profile.email,
+        profile.phone_number,
+        profile.push_tokens,
+        profile.device_ids,
+        profile.communication_preferences
+    ORDER BY profile.master_profile_id
+"""
+UPDATE_ELIGIBILITY_POLICY_SQL = f"""
+    UPDATE {DB_SCHEMA}.cdp_master_profiles AS profile
+    SET communication_preferences =
+            COALESCE(profile.communication_preferences, '{{}}'::jsonb)
+            || jsonb_build_object(
+                'eligibility_policy',
+                eligibility.policy_result::jsonb
+            ),
+        updated_at = now()
+    FROM (VALUES %s) AS eligibility(tenant_id, master_profile_id, policy_result)
+    WHERE profile.tenant_id = eligibility.tenant_id::uuid
+      AND profile.master_profile_id = eligibility.master_profile_id::uuid
 """
 LOAD_SELECTED_CONTENT_SQL = f"""
     SELECT
@@ -148,6 +240,7 @@ class WorkflowRunSummary:
     executed_steps: int = 0
     profile_runs_processed: int = 0
     recommendations_written: int = 0
+    eligibility_profiles_updated: int = 0
     unsupported_steps: int = 0
 
     def as_dict(self) -> dict[str, Any]:
@@ -161,6 +254,7 @@ class WorkflowRunSummary:
             "executed_steps": self.executed_steps,
             "profile_runs_processed": self.profile_runs_processed,
             "recommendations_written": self.recommendations_written,
+            "eligibility_profiles_updated": self.eligibility_profiles_updated,
             "unsupported_steps": self.unsupported_steps,
         }
 
@@ -215,6 +309,18 @@ def _candidate_content_ids_from_db(value: Any) -> list[str]:
         raise ValueError("Workflow contains an invalid candidate content ID") from exc
 
 
+def _effective_configuration(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Merge agent default hyperparameters with per-segment step configuration."""
+    hyperparameters = row.get("hyperparameters")
+    step_configuration = row.get("configuration")
+    effective: dict[str, Any] = {}
+    if isinstance(hyperparameters, Mapping):
+        effective.update(hyperparameters)
+    if isinstance(step_configuration, Mapping):
+        effective.update(step_configuration)
+    return effective
+
+
 class AgentWorkflowMasterTask:
     """Resolve and execute active ranking steps for API events and cron ticks."""
 
@@ -267,7 +373,7 @@ class AgentWorkflowMasterTask:
                     "agent_code": row["agent_code"],
                     "model_type": row["model_type"],
                     "execution_order": row["execution_order"],
-                    "configuration": row["configuration"] or {},
+                    "configuration": _effective_configuration(row),
                     "candidate_content_item_ids": _candidate_content_ids_from_db(
                         row["candidate_content_item_ids"]
                     ),
@@ -293,13 +399,21 @@ class AgentWorkflowMasterTask:
         )
 
     def execute(self, summary: WorkflowRunSummary, *, run_id: str) -> WorkflowRunSummary:
-        """Run each configured ranking step for every active member profile."""
+        """Run configured eligibility and ranking steps for active segment profiles."""
         executed_steps = 0
         profile_runs_processed = 0
         recommendations_written = 0
+        eligibility_profiles_updated = 0
         unsupported_steps = 0
         ranking_steps_by_segment: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        eligibility_steps: list[dict[str, Any]] = []
         for step in summary.plan:
+            if (
+                step["model_type"] == "rules_engine"
+                and step["agent_code"] == "eligibility_policy"
+            ):
+                eligibility_steps.append(step)
+                continue
             if step["model_type"] != "ranking_recommendation":
                 unsupported_steps += 1
                 logger.warning(
@@ -310,6 +424,11 @@ class AgentWorkflowMasterTask:
                 continue
             segment_key = (step["tenant_id"], step["segment_id"])
             ranking_steps_by_segment.setdefault(segment_key, []).append(step)
+
+        for step in eligibility_steps:
+            updated = self._evaluate_eligibility_step(step, run_id=run_id)
+            eligibility_profiles_updated += updated
+            executed_steps += 1
 
         for (tenant_id, segment_id), steps in ranking_steps_by_segment.items():
             for step in steps:
@@ -630,8 +749,129 @@ class AgentWorkflowMasterTask:
             executed_steps=executed_steps,
             profile_runs_processed=profile_runs_processed,
             recommendations_written=recommendations_written,
+            eligibility_profiles_updated=eligibility_profiles_updated,
             unsupported_steps=unsupported_steps,
         )
+
+    def _evaluate_eligibility_step(
+        self, step: dict[str, Any], *, run_id: str
+    ) -> int:
+        tenant_id = step["tenant_id"]
+        segment_id = step["segment_id"]
+        configuration = step["configuration"]
+        trigger_event = step["trigger_event"]
+        raw_campaign_id = configuration.get("campaign_id") or trigger_event.get(
+            "campaign_id"
+        )
+        campaign_id = str(uuid.UUID(str(raw_campaign_id))) if raw_campaign_id else None
+        profiles = self._load_eligibility_profiles(
+            tenant_id=tenant_id,
+            segment_id=segment_id,
+            campaign_id=campaign_id,
+        )
+        consent_keys = {
+            "profile_email_opt_in": "email_opt_in",
+            "profile_sms_opt_in": "sms_opt_in",
+            "profile_push_opt_in": "push_opt_in",
+            "profile_zalo_opt_in": "zalo_opt_in",
+            "profile_whatsapp_opt_in": "whatsapp_opt_in",
+            "profile_voice_opt_in": "voice_opt_in",
+            "profile_meta_ads_opt_in": "meta_ads_opt_in",
+            "profile_google_ads_opt_in": "google_ads_opt_in",
+            "profile_tiktok_ads_opt_in": "tiktok_ads_opt_in",
+        }
+        policy_rows: list[tuple[str, str, str]] = []
+        for profile in profiles:
+            preferences = profile["communication_preferences"]
+            if preferences is None:
+                preferences = {}
+            if not isinstance(preferences, dict):
+                raise ValueError(
+                    "Profile communication_preferences must be a JSON object "
+                    f"(tenant={tenant_id}, profile={profile['master_profile_id']})"
+                )
+            input_data = {
+                "master_profile_id": str(profile["master_profile_id"]),
+                "communication_preferences": preferences,
+                "active_suppression_channels": profile[
+                    "active_suppression_channels"
+                ],
+                **{
+                    feature: preferences.get(consent_key) is True
+                    for feature, consent_key in consent_keys.items()
+                },
+            }
+            output = self._pipeline_executor(
+                {
+                    "tenant_id": tenant_id,
+                    "segment_id": segment_id,
+                    "agent_code": step["agent_code"],
+                    "model_type": step["model_type"],
+                    "input_data": input_data,
+                    "configuration": configuration,
+                    "candidate_content_item_ids": [],
+                    "trigger_event": trigger_event,
+                },
+                run_id,
+            )
+            policy_result = dict(output.result)
+            policy_result.update(
+                {
+                    "version": 1,
+                    "evaluated_at": datetime.now(timezone.utc).isoformat(),
+                    "run_id": run_id,
+                }
+            )
+            policy_rows.append(
+                (
+                    tenant_id,
+                    str(profile["master_profile_id"]),
+                    json.dumps(policy_result, separators=(",", ":"), allow_nan=False),
+                )
+            )
+
+        if policy_rows:
+            with self._connection_factory() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT set_config('app.tenant_id', %s, true)",
+                        (tenant_id,),
+                    )
+                    execute_values(
+                        cursor,
+                        UPDATE_ELIGIBILITY_POLICY_SQL,
+                        policy_rows,
+                        template="(%s, %s, %s)",
+                        page_size=500,
+                    )
+        logger.info(
+            "Evaluated channel eligibility (run_id=%s tenant_id=%s segment_id=%s profiles=%d campaign_id=%s)",
+            run_id,
+            tenant_id,
+            segment_id,
+            len(policy_rows),
+            campaign_id or "GLOBAL_ONLY",
+        )
+        return len(policy_rows)
+
+    def _load_eligibility_profiles(
+        self,
+        *,
+        tenant_id: str,
+        segment_id: str,
+        campaign_id: str | None,
+    ) -> list[dict[str, Any]]:
+        with self._connection_factory() as connection:
+            with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute(
+                    "SELECT set_config('app.tenant_id', %s, true)",
+                    (tenant_id,),
+                )
+                cursor.execute(
+                    ELIGIBILITY_PROFILE_SQL,
+                    (segment_id, campaign_id, tenant_id),
+                )
+                return list(cursor.fetchall())
 
     @staticmethod
     def _profile_query_text(profile: dict[str, Any], semantic_query: str) -> str:
@@ -913,6 +1153,7 @@ class AgentWorkflowMasterTask:
                 w.agent_code,
                 w.execution_order,
                 w.configuration,
+                a.hyperparameters,
                 to_json(w.candidate_content_item_ids) AS candidate_content_item_ids,
                 COALESCE(w.schedule_definition, a.schedule_definition) AS effective_schedule,
                 a.model_type

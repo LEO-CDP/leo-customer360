@@ -1,16 +1,16 @@
-# The 12 Agent Types in Customer 360: A 5W1H Taxonomy
+# The 10 Agent Types in Customer 360: A 5W1H Taxonomy
 
 *Reference Document: "Customer_360_AI_Agent_Type_Taxonomy_12.docx"*
 
-This document outlines a canonical taxonomy for predictive ML, segmentation, recommendation, decisioning, graph intelligence, policy execution, and generative AI. It is structured using the 5W1H method (What, Why, Who, Where, When, How) to clarify the execution taxonomy of the 12 Core Agent Types. It also defines the minimum processing contracts used by the Dagster pipeline scaffolds.
+This document outlines a canonical taxonomy for predictive ML, segmentation, recommendation, decisioning, policy execution, and generative AI. It is structured using the 5W1H method (What, Why, Who, Where, When, How) to clarify the execution taxonomy of the 10 Core Agent Types. It also defines the minimum processing contracts used by the Dagster pipeline scaffolds.
 
 ---
 
-## 1. WHAT are the 12 Agent Types?
+## 1. WHAT are the 10 Agent Types?
 
-The 12 Agent Types define the fundamental execution methods of AI agents within the platform. They describe *how* an agent computes, rather than the specific business problem it solves. 
+The 10 Agent Types define the fundamental execution methods of AI agents within the platform. They describe *how* an agent computes, rather than the specific business problem it solves.
 
-Here are the 12 canonical types:
+Here are the 10 canonical types:
 
 | # | Agent Type | SQL Value | Primary Role |
 |---|---|---|---|
@@ -21,30 +21,28 @@ Here are the 12 canonical types:
 | 5 | **Forecasting** | `forecasting` | Predict future customer or business behavior. |
 | 6 | **Anomaly Detection** | `anomaly_detection` | Detect unusual customer behavior, events, or data. |
 | 7 | **Uplift Modeling** | `uplift_modeling` | Identify customers most likely to change due to an intervention. |
-| 8 | **Semantic / Embedding** | `semantic_embedding` | Understand similarity, intent, interests, and content. |
-| 9 | **Graph Intelligence** | `graph_ml` | Analyze identity, relationships, influence, and connections. |
-| 10 | **Optimization / Decisioning**| `optimization` | Choose the best action under business constraints. |
-| 11 | **Rules Engine** | `rules_engine` | Apply deterministic business logic and policies. |
-| 12 | **Generative LLM** | `generative_llm` | Reason, generate, explain, summarize, and orchestrate. |
+| 8 | **Optimization / Decisioning**| `optimization` | Choose the best action under business constraints. |
+| 9 | **Rules Engine** | `rules_engine` | Apply deterministic business logic and policies. |
+| 10 | **Generative LLM** | `generative_llm` | Reason, generate, explain, summarize, and orchestrate. |
 
 These values are the registry's canonical `model_type` values. A concrete agent
 has its own stable `agent_code`; do not create a new type for a business
 capability such as churn prediction, lead scoring, or next-best action.
 
-## 2. WHY exactly 12 Types?
+## 2. WHY exactly 10 Types?
 
 **To keep Agent Type and Business Capability Separate.** 
-The taxonomy expands the `model_type` from an original five-value list to this agreed 12-value list to prevent the registry from becoming a bloated list of business-specific agent names. 
+The taxonomy expands the `model_type` from an original five-value list to this agreed 10-value list to prevent the registry from becoming a bloated list of business-specific agent names.
 
 *   **Agent Type** answers: “How does this agent compute?”
 *   **Business Capability** answers: “What problem does it solve?”
 
-*Design Decision:* Keep exactly 12 Agent Types. Do not add business-specific values (e.g., lead_scoring, churn_prediction) to the `model_type`. 
+*Design Decision:* Keep exactly 10 Agent Types. Do not add business-specific values (e.g., lead_scoring, churn_prediction) to the `model_type`.
 
 ## 3. WHO is involved?
 
-*   **Customers:** The end subjects whose behaviors, identities, and intents are analyzed (e.g., via Clustering or Graph Intelligence).
-*   **Concrete Agents:** The distinct implementations (e.g., Lead Scoring Agent, CLV Prediction Agent) that utilize the 12 core types to serve a specific business capability.
+*   **Customers:** The end subjects whose behaviors, identities, and intents are analyzed (e.g., via Clustering).
+*   **Concrete Agents:** The distinct implementations (e.g., Lead Scoring Agent, CLV Prediction Agent) that utilize the 10 core types to serve a specific business capability.
 *   **Platform Systems:** The registry and databases that store runtime inputs, hyperparameters, prompts, and lifecycle statuses for these agents.
 
 ## 4. WHERE are these agents applied?
@@ -52,7 +50,7 @@ The taxonomy expands the `model_type` from an original five-value list to this a
 These agents are deployed within an **Agentic Customer 360 platform**. 
 The architecture relies on Recommended Registry Semantics to track them:
 *   `agent_code`: Stable identifier for the concrete agent.
-*   `model_type`: One of the 12 execution types.
+*   `model_type`: One of the 10 execution types.
 *   `model_name`: The actual underlying model/LLM.
 *   `cdp_profile_attributes.agent_code`: Links AI-derived Customer 360 attributes back to their producing agent.
 *   `cdp_agent_workflow`: Configures ordered agent execution.
@@ -66,8 +64,6 @@ The architecture relies on Recommended Registry Semantics to track them:
 *   **When** the target is a value or behavior over future time steps -> Use **Forecasting**.
 *   **When** detecting unusual observations or behavioral deviations -> Use **Anomaly Detection**.
 *   **When** evaluating the incremental impact of an intervention -> Use **Uplift Modeling**.
-*   **When** representing meaning, similarity, or intent in vector space -> Use **Semantic / Embedding**.
-*   **When** the signal is in relationships between profiles, entities, or events -> Use **Graph Intelligence**.
 *   **When** choosing an action subject to multiple constraints -> Use **Optimization / Decisioning**.
 *   **When** deterministic, auditable policy logic is required -> Use **Rules Engine**.
 *   **When** you need reasoning, generation, explanation, or orchestration -> Use **Generative LLM**.
@@ -87,7 +83,7 @@ features are sourced, how models are trained, or where results are persisted.
 | `tenant_id` | Yes | UUID that scopes every read and write. |
 | `segment_id` | Yes | UUID of the tenant-owned segment being processed. |
 | `agent_code` | Yes | Non-blank registry code, at most 100 characters. |
-| `model_type` | Yes | Exactly one of the 12 canonical values above. |
+| `model_type` | Yes | Exactly one of the 10 canonical values above. |
 | `input_data` | Yes | JSON object containing prepared features, history, candidates, or context. |
 | `configuration` | No | JSON object containing validated workflow/agent parameters; defaults to `{}`. |
 | `candidate_content_item_ids` | No | Unique UUID list; accepted only for `ranking_recommendation`. The handler must verify every candidate belongs to `tenant_id`. Defaults to `[]`. |
@@ -114,10 +110,8 @@ when consumers depend on them.
 | Forecasting | `forecast_series` | Must be a list; each point should identify its time/period and forecast value. |
 | Anomaly Detection | `anomaly_score`, `is_anomaly` | Score must be finite; flag must be boolean. |
 | Uplift Modeling | `uplift_score` | Must be a finite number; document treatment/control semantics with the implementation. |
-| Semantic / Embedding | `embedding` | Must be a non-empty list of finite numbers. |
-| Graph Intelligence | `relationship_signals` | Must be a JSON object; include graph/model provenance as appropriate. |
 | Optimization | `selected_action` | Must be a string; include decision score/rationale where available. |
-| Rules Engine | `decision`, `decision_trace` | Decision is `allow`, `deny`, or `review`; trace is a list. |
+| Rules Engine | `decision`, `eligible_channels`, `not_ready_channels`, `channels`, `decision_trace` | Decision is `allow`, `deny`, or `review`; channel results require literal-true consent and no applicable active suppression. |
 | Generative LLM | One of `text`, `structured_output`, or `summary` | Validate the selected response schema and any safety/business constraints before returning it. |
 
 ### Common output
@@ -132,7 +126,7 @@ placeholder.
 
 ## 7. WHERE and HOW are pipelines implemented?
 
-The reusable contracts and 12 type-specific handler entry points live in
+The reusable contracts and 11 type-specific handler entry points live in
 `customer360-backend/ai_agents_runners/agent_pipeline/`. The
 `agent_type_pipeline_job` Dagster job accepts a JSON `payload`, validates it,
 dispatches by `model_type`, validates the handler result, and returns the

@@ -74,8 +74,6 @@ ModelTypeValue = Literal[
     "forecasting",
     "anomaly_detection",
     "uplift_modeling",
-    "semantic_embedding",
-    "graph_ml",
     "optimization",
     "rules_engine",
     "generative_llm",

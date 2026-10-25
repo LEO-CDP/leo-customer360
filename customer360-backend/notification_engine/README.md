@@ -5,14 +5,18 @@ Zalo OA token maintenance. It validates approved `zalo_zns` campaigns,
 resolves eligible phone recipients, binds typed template parameters, dispatches
 through the selected adapter, and writes idempotent dispatch-log records.
 
-It also projects Zalo opt-out events from the S3 event lake onto
-`cdp_master_profiles.communication_preferences`.
+It projects verified email unsubscribe and Zalo opt-out events from the S3
+event lake onto `cdp_master_profiles.communication_preferences`. A revocation
+sets only the corresponding opt-in to `false`, preserves other consent fields,
+and removes the cached `eligibility_policy` result so the next segment
+evaluation recomputes channel readiness. Delivery failures are not treated as
+user consent revocations.
 
 ## Dagster interface
 
 - `zalo_token_refresh_job`
 - `notification_engine_job`
-- `zalo_optout_projection_job`
+- `zalo_optout_projection_job` (legacy job name; projects email and Zalo opt-outs)
 - Schedules: `zalo_token_refresh_schedule` and
   `zalo_optout_projection_schedule`, each every five minutes
 

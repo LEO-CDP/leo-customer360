@@ -1,9 +1,10 @@
 """Zalo OA (ZNS) engagement webhook -- S3-first, built from the shared factory.
 
 Zalo posts delivery/seen/click/failure/opt-out callbacks; each is recorded to the
-S3 event lake (opt-out carries a suppression_reason for the downstream consent
-projection). Signature verification is supplied by the deployment's webhook
-security provider; this tracking process does not read tenant configuration.
+S3 event lake. Only a verified ``user_unfollow`` callback carries an explicit
+consent revocation marker for the downstream profile projection. Signature
+verification is supplied by the deployment's webhook security provider; this
+tracking process does not read tenant configuration.
 
 ⚠️ Confirm Zalo's signature scheme + event_name values against current Zalo OA docs.
 """

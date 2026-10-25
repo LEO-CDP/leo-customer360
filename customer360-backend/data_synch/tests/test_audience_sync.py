@@ -17,6 +17,7 @@ class FakeCursor:
         self.result = None
         self.rows = []
         self.statements = []
+        self.profile_preferences = {"meta_ads_opt_in": True}
 
     def execute(self, statement, params=None):
         sql = " ".join(str(statement).split())
@@ -47,6 +48,9 @@ class FakeCursor:
                 "credentials": {"access_token": "secret"},
             }
             self.rows = []
+        elif "select count(*) as matched_count" in lowered:
+            self.result = {"matched_count": 1}
+            self.rows = []
         elif "from customer360.cdp_master_profiles" in lowered:
             self.result = None
             self.rows = [
@@ -54,6 +58,7 @@ class FakeCursor:
                     "master_profile_id": PROFILE_ID,
                     "email": "Person@example.com",
                     "phone_number": "+84901234567",
+                    "communication_preferences": self.profile_preferences,
                 }
             ]
         else:
@@ -119,6 +124,46 @@ def test_identifiers_are_normalized_and_hashed():
     )
     assert audience_sync._normalize_phone("+84 (901) 234-567") == audience_sync._hash_identifier("+84901234567")
     assert audience_sync._normalize_phone("0901234567") is None
+
+
+@pytest.mark.parametrize(
+    "preferences, expected",
+    [
+        ({"meta_ads_opt_in": True}, True),
+        ({"meta_ads_opt_in": False}, False),
+        ({"meta_ads_opt_in": "true"}, False),
+        ({"google_ads_opt_in": True}, False),
+        ({}, False),
+        (None, False),
+    ],
+)
+def test_provider_consent_requires_literal_true_for_exact_platform(
+    preferences, expected
+):
+    assert audience_sync._has_explicit_platform_consent(
+        {"communication_preferences": preferences},
+        "meta_ads",
+    ) is expected
+
+
+def test_missing_provider_consent_prevents_audience_upload(monkeypatch):
+    connection = FakeConnection()
+    connection.cursor_instance.profile_preferences = {}
+    provider = FakeProvider()
+    monkeypatch.setattr(audience_sync, "_connect", lambda: connection)
+
+    result = audience_sync.run_data_synch_job(
+        tenant_id=TENANT_ID,
+        campaign_id=CAMPAIGN_ID,
+        platform="meta_ads",
+        segment_id=SEGMENT_ID,
+        provider_factory=lambda *_args: provider,
+    )
+
+    assert result["matched_count"] == 1
+    assert result["eligible_count"] == 0
+    assert result["uploaded_count"] == 0
+    assert provider.calls == []
 
 
 def test_run_data_synch_job_hashes_profiles_and_returns_provider_result(monkeypatch):

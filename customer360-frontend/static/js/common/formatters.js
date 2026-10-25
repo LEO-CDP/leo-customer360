@@ -124,7 +124,20 @@ window.C360 = window.C360 || {};
 
   // Default domain labels used as a fallback until the API labels are loaded.
   // The authoritative list is served by customer360-api at /metadata/domains.
-  var DEFAULT_DOMAIN_LABELS = { banking: "Retail Banking", healthcare: "Healthcare", retail: "Retail Commerce", real_estate: "Real Estate", travel: "Travel", media: "Media & Entertainment", education: "Education" };
+  var DEFAULT_DOMAIN_LABELS = {
+    _: "Unclassified / Not set",
+    banking: "Banking & Financial Services",
+    education: "Education",
+    healthcare: "Healthcare",
+    hospitality: "Hospitality & Food Service",
+    insurance: "Insurance",
+    manufacturing: "Manufacturing",
+    media: "Media & Entertainment",
+    real_estate: "Real Estate",
+    retail: "Retail & E-Commerce",
+    telecom: "Telecommunications",
+    travel: "Travel & Hospitality"
+  };
   var DOMAIN_LABELS = $.extend({}, DEFAULT_DOMAIN_LABELS);
 
   function setDomainLabels(labels) {
@@ -142,9 +155,9 @@ window.C360 = window.C360 || {};
 
   var CHANNEL_ICONS = { mobile_app: "📱", web: "💻", internet_banking: "🏦", pos: "🛍️", call_center: "☎️", live_chat: "💬", branch_visit: "🏢", email: "✉️" };
   var CATEGORY_ICONS = { FINANCE: "💰", STOCK_TRADING: "📈", FEEDBACK: "⭐", GENERAL: "🔑", COMMERCE: "🛒", TRAVEL: "✈️", REAL_ESTATE: "🏠", EDUCATION: "🎓", SERVICE_INDUSTRY: "🛎️" };
-  var DOMAIN_ICONS = { banking: "💰", healthcare: "🏥", retail: "🛒", real_estate: "🏠", travel: "✈️", media: "🎬", education: "🎓", all: "🌐" };
+  var DOMAIN_ICONS = { _: "•", banking: "💰", education: "🎓", healthcare: "🏥", hospitality: "🍽️", insurance: "🛡️", manufacturing: "🏭", media: "🎬", real_estate: "🏠", retail: "🛒", telecom: "📡", travel: "✈️", all: "🌐" };
   var DOMAIN_ICON_BG = {
-    banking: "bg-blue-100", healthcare: "bg-cyan-100", retail: "bg-amber-100", real_estate: "bg-emerald-100", travel: "bg-sky-100", media: "bg-pink-100", education: "bg-lime-100", all: "bg-indigo-100"
+    _: "bg-slate-100", banking: "bg-blue-100", education: "bg-lime-100", healthcare: "bg-cyan-100", hospitality: "bg-orange-100", insurance: "bg-violet-100", manufacturing: "bg-stone-100", media: "bg-pink-100", real_estate: "bg-emerald-100", retail: "bg-amber-100", telecom: "bg-indigo-100", travel: "bg-sky-100", all: "bg-indigo-100"
   };
 
   function domainIcon(domain) { return DOMAIN_ICONS[domain] || "🏷️"; }

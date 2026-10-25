@@ -194,7 +194,7 @@ class SysUserInfo(Base):
 
 
 class SysDomain(Base):
-    """System-defined business domain catalog (e.g. retail, banking, travel)."""
+    """System-defined business domain catalog, including _ for unclassified profiles."""
 
     __tablename__ = "sys_domain"
 

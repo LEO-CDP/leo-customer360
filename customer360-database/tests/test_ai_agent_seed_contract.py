@@ -44,19 +44,20 @@ class AiAgentSeedContractTests(unittest.TestCase):
             if "pd.Timedelta(days=" in expression:
                 self.assertIn("<= as_of", expression)
 
-    def test_model_identifiers_are_real_and_templates_are_inactive(self):
+    def test_model_identifiers_and_active_handlers_are_real(self):
         seed_body = self.seed_sql.split("WITH seed_agents", 1)[1].split(
             "INSERT INTO customer360.cdp_ai_agents", 1
         )[0]
         identifiers = re.findall(
             r"^\s*'(classification|regression|clustering|ranking_recommendation|"
-            r"forecasting|anomaly_detection|uplift_modeling|semantic_embedding|"
-            r"graph_ml|optimization|rules_engine|generative_llm)',\s*"
+            r"forecasting|anomaly_detection|uplift_modeling|"
+            r"optimization|rules_engine|generative_llm)',\s*"
             r"('([^']+)'|NULL),\s*'([^']+)'",
             seed_body,
             re.MULTILINE,
         )
         actual = {kind: model or None for kind, _, model, _ in identifiers}
+        actual_status = {kind: status for kind, _, _, status in identifiers}
         self.assertEqual(actual, {
             "classification": "xgboost.XGBClassifier",
             "regression": "lightgbm.LGBMRegressor",
@@ -65,15 +66,51 @@ class AiAgentSeedContractTests(unittest.TestCase):
             "forecasting": "lightgbm.LGBMRegressor",
             "anomaly_detection": "sklearn.ensemble.IsolationForest",
             "uplift_modeling": "econml.metalearners.XLearner",
-            "semantic_embedding": "text-embedding-3-small",
-            "graph_ml": "torch_geometric.nn.models.GraphSAGE",
             "optimization": None,
             "rules_engine": None,
             "generative_llm": "gpt-6-luna",
         })
-        self.assertTrue(all(status == "INACTIVE" for *_, status in identifiers))
-        self.assertIn("'embedding_dimension', 1536", seed_body)
+        self.assertEqual(
+            actual_status,
+            {
+                kind: (
+                    "ACTIVE"
+                    if kind in {"ranking_recommendation", "rules_engine"}
+                    else "INACTIVE"
+                )
+                for kind in actual
+            },
+        )
+        self.assertIn("'strategy', 'tags'", seed_body)
+        self.assertIn("'top_k', 8", seed_body)
+        self.assertIn("'semantic_weight', 0.7", seed_body)
+        self.assertIn("'tag_weight', 0.3", seed_body)
+        self.assertIn("'minimum_score', 0.0", seed_body)
+        self.assertIn("'consent_requires_literal_true', true", seed_body)
+        self.assertIn("'advertising_consent_is_provider_specific', true", seed_body)
         self.assertIn("'response_format', jsonb_build_object('type', 'json_object')", seed_body)
+
+    def test_runner_requirements_include_sql_referenced_ml_libraries(self):
+        requirements_text = (
+            self.repository_root
+            / "customer360-backend"
+            / "ai_agents_runners"
+            / "requirements.txt"
+        ).read_text(encoding="utf-8")
+        for package in (
+            "numpy",
+            "pandas",
+            "scikit-learn",
+            "lightgbm",
+            "xgboost",
+            "econml",
+        ):
+            with self.subTest(package=package):
+                self.assertRegex(
+                    requirements_text,
+                    rf"(?m)^{re.escape(package)}(?:[><=~!]|$)",
+                )
+        self.assertNotRegex(requirements_text, r"(?mi)^torch(?:-geometric)?(?:[><=~!]|$)")
 
     def test_bootstrap_preserves_existing_configuration_and_prompt_history(self):
         self.assertNotIn("DO UPDATE SET", self.seed_sql)
@@ -204,23 +241,70 @@ class AiAgentSeedContractTests(unittest.TestCase):
             re.findall(r"'([a-z0-9_]+)'", "\n".join(arrays[::2]))
         )
 
-        self.assertEqual(len(arrays), 24)
+        self.assertEqual(len(arrays), 20)
         self.assertTrue(declared_input_features <= catalog_keys)
         self.assertIn("sql_expression", self.seed_sql)
         self.assertIn("pandas_expression", self.seed_sql)
 
-    def test_seed_contains_all_twelve_agent_feature_arrays(self):
+    def test_seed_contains_all_ten_agent_feature_arrays(self):
         seed_body = self.seed_sql.split("WITH seed_agents", 1)[1].split(
             "INSERT INTO customer360.cdp_ai_agents", 1
         )[0]
         arrays = re.findall(r"ARRAY\[(.*?)\]::text\[\]", seed_body, re.DOTALL)
 
-        self.assertEqual(len(arrays), 24)
+        self.assertEqual(len(arrays), 20)
         self.assertNotRegex(
             "\n".join(arrays),
             r"'(?:customer_profile|recent_events|purchase_history|"
             r"historical_orders|behavior_history|customer_nodes)'",
         )
+
+    def test_graph_agent_type_removal_is_guarded_for_existing_databases(self):
+        migration = (
+            self.repository_root
+            / "customer360-database"
+            / "migrations"
+            / "013_remove_graph_ml_agent_type.sql"
+        ).read_text(encoding="utf-8")
+        schema = (
+            self.repository_root / "customer360-database" / "database-schema.sql"
+        ).read_text(encoding="utf-8")
+
+        self.assertNotIn("'graph_ml'", schema)
+        self.assertNotIn("'identity_graph_intelligence'", self.seed_sql)
+        self.assertIn("cdp_agent_workflow", migration)
+        self.assertIn("cdp_profile_attributes", migration)
+        self.assertIn("DELETE FROM customer360.cdp_ai_agents", migration)
+
+    def test_semantic_embedding_agent_removal_is_guarded_for_existing_databases(self):
+        migration = (
+            self.repository_root
+            / "customer360-database"
+            / "migrations"
+            / "015_remove_semantic_embedding_agent_type.sql"
+        ).read_text(encoding="utf-8")
+        schema = (
+            self.repository_root / "customer360-database" / "database-schema.sql"
+        ).read_text(encoding="utf-8")
+
+        self.assertNotIn("'semantic_embedding'", schema)
+        self.assertNotIn("'semantic_embedding'", migration)
+        self.assertNotIn("'customer_semantic_profile'", self.seed_sql)
+        self.assertIn("cdp_agent_workflow", migration)
+        self.assertIn("cdp_profile_attributes", migration)
+        self.assertIn("DELETE FROM customer360.cdp_ai_agents", migration)
+
+    def test_eligibility_activation_migration_preserves_operator_statuses(self):
+        migration = (
+            self.repository_root
+            / "customer360-database"
+            / "migrations"
+            / "014_activate_eligibility_policy.sql"
+        ).read_text(encoding="utf-8")
+        self.assertIn("agent_code = 'eligibility_policy'", migration)
+        self.assertIn("status = 'INACTIVE'", migration)
+        self.assertNotIn("status = 'FAILED'", migration)
+        self.assertNotIn("status = 'DEPRECATED'", migration)
 
 
 if __name__ == "__main__":

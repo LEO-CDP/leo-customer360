@@ -24,7 +24,7 @@ Trang **Overview** là tab đầu tiên trên thanh điều hướng trên cùng
 
 **Biểu đồ (Charts)**
 - **Profiles by Status**: Biểu đồ tròn thể hiện tỷ lệ hồ sơ thô theo trạng thái (`processed`, `in progress`, `new`, `inactive`, `deleted`).
-- **Profiles by Domain**: Biểu đồ cột so sánh số lượng hồ sơ thô và hồ sơ chính theo từng lĩnh vực kinh doanh (`retail`, `banking`, `real_estate`, `travel`, `media`, `education`).
+- **Profiles by Domain**: Biểu đồ cột so sánh số lượng hồ sơ thô và hồ sơ chính theo `_` (`Chưa phân loại`), `banking`, `education`, `healthcare`, `hospitality`, `insurance`, `manufacturing`, `media`, `real_estate`, `retail`, `telecom` và `travel`.
 - **Raw Profiles by Source System**: 10 hệ thống nguồn (`source_system`) gửi nhiều hồ sơ thô nhất kèm nhãn lĩnh vực.
 - **Identity Graph Coverage**: Tỷ lệ phần trăm hồ sơ chính có chứa từng loại định danh (`email`, `phone`, `device ID`, `advertising ID`, `cookie ID`, `external ID`, `national ID`).
 

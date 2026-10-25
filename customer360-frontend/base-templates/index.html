@@ -224,7 +224,8 @@
       leoObserverTrackingEndpoint: "{{ leo_observer_tracking_endpoint }}",
       leoObserverCdnJS: "{{ leo_observer_cdn_js }}",
       docsAiBase: "{{ docs_ai_base }}",
-      docsSiteBase: "{{ docs_site_base }}"
+      docsSiteBase: "{{ docs_site_base }}",
+      cacheBust: "{{ cache_bust }}"
     });
   </script>
   <script src="{{ static_base }}/js/common/config.js?cb={{ cache_bust }}"></script>

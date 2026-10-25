@@ -16,6 +16,7 @@ window.C360 = window.C360 || {};
   var audienceTagsByTagName = {};
   var audienceTagsLoaded = false;
   var profileEditAudienceTags = [];
+  var profileEditConsentKeys = [];
   var timelineLimit = 100;
   var timelineDataSourceId = "";
   var timelineDataSourcesLoadedForTenant = null;
@@ -28,7 +29,77 @@ window.C360 = window.C360 || {};
   // Mirrors the sys_domain / validate_domain_value fixed dictionary
   // (customer360-api/core/utils/domains.py) -- used to populate the "Add
   // Attribute" domain <select> without a dedicated /domains endpoint.
-  var DOMAIN_CODES = ["retail", "banking", "real_estate", "travel", "media", "education"];
+  var DOMAIN_CODES = ["_", "banking", "education", "healthcare", "hospitality", "insurance", "manufacturing", "media", "real_estate", "retail", "telecom", "travel"];
+  var PROFILE_CONSENT_FIELDS = [
+    { key: "email_opt_in", label: "Email marketing" },
+    { key: "sms_opt_in", label: "SMS" },
+    { key: "push_opt_in", label: "Push" },
+    { key: "zalo_opt_in", label: "Zalo" },
+    { key: "whatsapp_opt_in", label: "WhatsApp" },
+    { key: "voice_opt_in", label: "Voice" },
+    { key: "meta_ads_opt_in", label: "Meta Ads audience" },
+    { key: "google_ads_opt_in", label: "Google Ads audience" },
+    { key: "tiktok_ads_opt_in", label: "TikTok audience" },
+  ];
+  var ELIGIBILITY_CHANNELS = [
+    { key: "email", label: "Email marketing" },
+    { key: "sms", label: "SMS" },
+    { key: "push", label: "Push" },
+    { key: "zalo", label: "Zalo" },
+    { key: "whatsapp", label: "WhatsApp" },
+    { key: "voice", label: "Voice" },
+    { key: "meta_ads", label: "Meta Ads audience" },
+    { key: "google_ads", label: "Google Ads audience" },
+    { key: "tiktok_ads", label: "TikTok audience" },
+  ];
+
+  function jsonObjectOrEmpty(value) {
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  }
+
+  function consentPreferenceRows(preferences) {
+    return PROFILE_CONSENT_FIELDS.map(function (field) {
+      var recorded = Object.prototype.hasOwnProperty.call(preferences, field.key);
+      var value = preferences[field.key];
+      var status = value === true
+        ? "Explicitly granted"
+        : value === false
+          ? "Not granted"
+          : recorded
+            ? "Invalid value - not eligible"
+            : "Not recorded - not eligible";
+      return {
+        key: field.key,
+        label: field.label,
+        status: status,
+        statusClass: value === true
+          ? "text-emerald-700 bg-emerald-50 border-emerald-200"
+          : "text-amber-700 bg-amber-50 border-amber-200",
+      };
+    });
+  }
+
+  function eligibilityChannelRows(policy) {
+    var channels = jsonObjectOrEmpty(policy.channels);
+    return ELIGIBILITY_CHANNELS.map(function (channel) {
+      var result = jsonObjectOrEmpty(channels[channel.key]);
+      var isEligible = result.eligible === true;
+      var reasonCodes = Array.isArray(result.reason_codes) ? result.reason_codes : [];
+      return {
+        key: channel.key,
+        label: channel.label,
+        status: isEligible ? "Ready" : result.eligible === false ? "Not ready" : "Not evaluated",
+        statusClass: isEligible
+          ? "text-emerald-700 bg-emerald-50 border-emerald-200"
+          : result.eligible === false
+            ? "text-rose-700 bg-rose-50 border-rose-200"
+            : "text-amber-700 bg-amber-50 border-amber-200",
+        reasons: reasonCodes.map(function (reason) {
+          return fmt.titleCase(String(reason || "").replace(/_/g, " "));
+        }).join(", "),
+      };
+    });
+  }
 
   function populateDomainAttributeDomainSelect(defaultDomain) {
     var $select = $("#domain-attribute-domain");
@@ -750,6 +821,16 @@ window.C360 = window.C360 || {};
         totalTrackedEvents: fmt.int(source.total_tracked_events),
       };
     });
+    var communicationPreferences = jsonObjectOrEmpty(
+      profile.communication_preferences
+    );
+    var eligibilityPolicy = jsonObjectOrEmpty(
+      communicationPreferences.eligibility_policy
+    );
+    var eligibilityChannels = eligibilityChannelRows(eligibilityPolicy);
+    var hasEligibilityPolicy = Object.keys(jsonObjectOrEmpty(
+      eligibilityPolicy.channels
+    )).length > 0;
 
     return {
       master_profile_id: profile.master_profile_id,
@@ -792,11 +873,16 @@ window.C360 = window.C360 || {};
       hasDataSourceAnalytics: dataSourceAnalytics.length > 0,
       dataSourceAnalytics: dataSourceAnalytics,
 
-      // Check if the communication_preferences object exists and has at least one key
-      hasCommunicationPreferences: Object.keys(profile.communication_preferences || {}).length > 0,
-
-      // Default to an empty object instead of an empty array since the data structure is JSON
-      communicationPreferences: profile.communication_preferences || {},
+      hasCommunicationPreferences: true,
+      communicationPreferences: consentPreferenceRows(communicationPreferences),
+      hasEligibilityPolicy: hasEligibilityPolicy,
+      eligibilityPolicyDecisionLabel: eligibilityPolicy.decision
+        ? fmt.titleCase(eligibilityPolicy.decision)
+        : "Not evaluated",
+      eligibilityPolicyEvaluatedAtLabel: eligibilityPolicy.evaluated_at
+        ? fmt.dateTime(eligibilityPolicy.evaluated_at)
+        : "—",
+      eligibilityPolicyChannels: eligibilityChannels,
 
       hasTags: (profile.segmentation_tags || []).length > 0,
       segmentationTags: profile.segmentation_tags || [],
@@ -1560,6 +1646,15 @@ window.C360 = window.C360 || {};
       }
       $("#master-profile-edit-form [name='" + name + "']").val(value);
     });
+    var communicationPreferences = jsonObjectOrEmpty(
+      currentProfile.communication_preferences
+    );
+    $(".master-profile-consent-field").each(function () {
+      var consentKey = String($(this).data("consent-key") || "");
+      $(this).prop("checked", communicationPreferences[consentKey] === true);
+    });
+    profileEditConsentKeys = [];
+    $("#master-profile-consent-fields").attr("data-dirty", "false");
     profileEditAudienceTags = Array.isArray(currentProfile.audience_tags)
       ? currentProfile.audience_tags.slice()
       : [];
@@ -1596,6 +1691,22 @@ window.C360 = window.C360 || {};
       }
     });
     payload.audience_tags = profileEditAudienceTags.slice();
+    if (profileEditConsentKeys.length) {
+      var communicationPreferences = $.extend(
+        {},
+        jsonObjectOrEmpty(currentProfile && currentProfile.communication_preferences)
+      );
+      profileEditConsentKeys.forEach(function (consentKey) {
+        if (!PROFILE_CONSENT_FIELDS.some(function (field) {
+          return field.key === consentKey;
+        })) return;
+        communicationPreferences[consentKey] = $(
+          ".master-profile-consent-field[data-consent-key='" + consentKey + "']"
+        ).is(":checked");
+      });
+      delete communicationPreferences.eligibility_policy;
+      payload.communication_preferences = communicationPreferences;
+    }
     var $button = $(".btn-save-master-profile");
     var $error = $("#master-profile-edit-error");
     $button.prop("disabled", true).text("Saving...");
@@ -1611,8 +1722,14 @@ window.C360 = window.C360 || {};
         }
       })
       .fail(function (xhr) {
-        var detail = (xhr.responseJSON && xhr.responseJSON.detail) || "Could not save profile.";
-        $error.removeClass("hidden").text(typeof detail === "string" ? detail : JSON.stringify(detail));
+        var detail = xhr.responseJSON && xhr.responseJSON.detail;
+        var formatApiErrorDetail = C360.config.formatApiErrorDetail;
+        var message = detail && typeof formatApiErrorDetail === "function"
+          ? formatApiErrorDetail(detail)
+          : typeof detail === "string"
+            ? detail
+            : "Could not save profile.";
+        $error.removeClass("hidden").text(message || "Could not save profile.");
       })
       .always(function () {
         $button.prop("disabled", false).text("Save changes");
@@ -1683,6 +1800,19 @@ window.C360 = window.C360 || {};
     $(document).on("click.masterProfileEdit", ".btn-close-master-profile-edit", closeMasterProfileEditor);
     $(document).off("submit.masterProfileEdit", "#master-profile-edit-form");
     $(document).on("submit.masterProfileEdit", "#master-profile-edit-form", saveMasterProfile);
+    $(document).off("change.masterProfileConsent", ".master-profile-consent-field");
+    $(document).on("change.masterProfileConsent", ".master-profile-consent-field", function () {
+      var consentKey = String($(this).data("consent-key") || "");
+      if (
+        PROFILE_CONSENT_FIELDS.some(function (field) {
+          return field.key === consentKey;
+        }) &&
+        profileEditConsentKeys.indexOf(consentKey) === -1
+      ) {
+        profileEditConsentKeys.push(consentKey);
+        $("#master-profile-consent-fields").attr("data-dirty", "true");
+      }
+    });
 
     $(document).off("click.profileAudienceTags", ".btn-profile-toggle-audience-tag");
     $(document).on("click.profileAudienceTags", ".btn-profile-toggle-audience-tag", function () {

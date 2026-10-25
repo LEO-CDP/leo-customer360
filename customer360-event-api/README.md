@@ -131,6 +131,10 @@ The public tracking service has no PostgreSQL driver, credentials, connection,
 or write path. Environment-level `tenant_id=.../source_id=...` keys and Silver
 compaction remain subsequent rollout phases.
 
+Tracking events without a reliable business-domain value are stored with domain
+`_` (`Unclassified / Not set`). The downstream analytics and identity-resolution
+jobs preserve this neutral value; they do not infer `retail`.
+
 ## Email tracking
 
 The data-tracking service also owns the public email callbacks:
@@ -143,6 +147,36 @@ events. Each callback is written as an immutable NDJSON event in the tenant's
 S3 tracking partition, where Dagster can process campaign, recipient, and
 suppression metadata asynchronously. The data-tracking service no longer
 writes email engagement or suppression rows through customer360-api.
+
+Signed email unsubscribe callbacks and signature-verified Zalo opt-out
+webhooks include a server-generated `consent_update` revocation marker in the
+S3 event. The public `/tracking/logs` endpoint rejects these reserved markers
+and consent-revocation event names, so clients cannot opt another profile out
+by forging a tracking event. These callbacks can only revoke consent; positive
+marketing-consent grants remain on authenticated profile APIs. The tracking
+service still writes S3 only. `notification_engine` projects verified email
+and Zalo revocations to `email_opt_in=false` or `zalo_opt_in=false` and clears
+the cached `eligibility_policy` result for reevaluation.
+
+Example consent evidence inside the stored event payload:
+
+```json
+{
+  "event_name": "email-unsubscribed",
+  "source_system": "verified_consent_callback",
+  "properties": {
+    "tracking_channel": "email",
+    "tenant_id": "<tenant UUID>",
+    "master_profile_id": "<profile UUID>",
+    "consent_update": {
+      "field": "email_opt_in",
+      "granted": false,
+      "reason": "unsubscribe",
+      "source": "verified_email_callback"
+    }
+  }
+}
+```
 
 ### Email click example
 

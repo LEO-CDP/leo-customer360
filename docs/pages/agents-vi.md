@@ -22,7 +22,7 @@ Trang này là danh mục đăng ký các tác nhân AI (AI Agents), mô hình h
 
 ### Biểu mẫu Thêm / Sửa AI Agent
 - **Các trường thông tin**: `Agent Code` (`agent_code`), `Display Name`, `Runtime Model` (`model_name`), `Description`, `Model Type` (`model_type`), `Schedule Definition (cron)`, `Agent Status`, `Input Features` (cách nhau bởi dấu phẩy, từ `cdp_ai_feature_catalog`), `Hyperparameters` (JSON object), `Prompt Key`, `Prompt Engine`, `System Instructions` và `Required Variables`.
-- **Tùy chọn Model Type**: `Classification`, `Regression`, `Clustering`, `Ranking & Recommendation`, `Forecasting`, `Anomaly Detection`, `Uplift Modeling`, `Semantic Embedding`, `Graph ML`, `Optimization`, `Rules Engine`, `Generative LLM`.
+- **Tùy chọn Model Type**: `Classification`, `Regression`, `Clustering`, `Ranking & Recommendation`, `Forecasting`, `Anomaly Detection`, `Uplift Modeling`, `Optimization`, `Rules Engine`, `Generative LLM`.
 - **Tùy chọn Agent Status**: `Active`, `Inactive`, `Training`, `Deprecated`, `Failed`.
 - **Lịch chạy (Schedule)**: Chọn mẫu có sẵn (`At midnight`, `Every morning at 09:00`, `Every weekday at 09:00`) hoặc **Custom cron expression** (5 trường).
 - **Phiên bản hóa Prompt**: Khi sửa **System Instructions**, hệ thống tự động tăng `instruction_version` và lưu lịch sử vào mảng JSONB `prompt_versions`.

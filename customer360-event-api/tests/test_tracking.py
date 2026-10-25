@@ -133,7 +133,7 @@ def test_build_tracking_object_uses_utc_hour_folder_and_ndjson():
     assert record["event_id"]
     assert record["event_name"] == "page_view"
     assert record["event_category"] == "GENERAL"
-    assert record["domain"] == "unknown"
+    assert record["domain"] == "_"
     assert record["source_system"] == "tracking"
     assert record["event_time"] == received_at.isoformat()
     assert record["identity"]["anonymous_id"] == "anonymous-1"
@@ -193,6 +193,70 @@ def test_tracking_request_validates_and_persists_campaign_experiment_attribution
     assert record["payload"]["utm_campaign"] == "spring-launch"
     assert record["payload"]["utm_term"] == "family-plan"
     assert record["payload"]["utm_content"] == "variant-a"
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        {
+            "event_name": "purchase",
+            "properties": {
+                "consent_update": {
+                    "field": "email_opt_in",
+                    "granted": False,
+                }
+            },
+        },
+        {
+            "event_name": "email-unsubscribed",
+            "properties": {"suppression_reason": "unsubscribe"},
+        },
+        {
+            "eventType": "zalo-opt-out",
+            "properties": {"suppression_reason": "opt_out"},
+        },
+        {
+            "event_name": "purchase",
+            "source_system": "verified_consent_callback",
+        },
+    ],
+)
+def test_public_tracking_rejects_reserved_consent_events_and_markers(event):
+    with pytest.raises(ValidationError):
+        TrackingLogRequest(
+            data_source_id=SOURCE_ID,
+            user_id="profile-1",
+            events=[event],
+        )
+
+
+def test_build_tracking_object_preserves_verified_consent_revocation_evidence():
+    event = {
+        "event_name": "email-unsubscribed",
+        "source_system": "verified_consent_callback",
+        "tenant_id": str(SOURCE_ID),
+        "master_profile_id": "aaaaaaaa-0000-0000-0000-000000000001",
+        "properties": {
+            "tracking_channel": "email",
+            "consent_update": {
+                "field": "email_opt_in",
+                "granted": False,
+                "reason": "unsubscribe",
+                "source": "verified_email_callback",
+            },
+        },
+    }
+
+    _, _, body = build_tracking_object(SOURCE_ID, [event], datetime.now(timezone.utc))
+    record = json.loads(gzip.decompress(body).decode().strip())
+
+    assert record["source_system"] == "verified_consent_callback"
+    assert record["payload"]["properties"]["consent_update"] == {
+        "field": "email_opt_in",
+        "granted": False,
+        "reason": "unsubscribe",
+        "source": "verified_email_callback",
+    }
 
 
 def test_tracking_request_maps_short_attribution_names_to_canonical_fields():

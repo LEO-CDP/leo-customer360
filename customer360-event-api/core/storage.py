@@ -76,7 +76,7 @@ def build_tracking_object(
                 "event_time": _event_time(event, received_at),
                 "received_at": received_at.isoformat(),
                 "source_system": _source_system(event),
-                "domain": _string_value(event.get("domain")) or "unknown",
+                "domain": _string_value(event.get("domain")) or "_",
                 "device_type": _string_value(event.get("device_type")) or "unknown",
                 "event_name": _event_name(event),
                 "event_category": _event_category(event),

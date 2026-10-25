@@ -79,7 +79,11 @@ def test_pipeline_input_allows_at_most_one_thousand_candidates():
 
 @pytest.mark.parametrize(
     "model_type",
-    [model_type for model_type in PIPELINE_HANDLERS if model_type != "ranking_recommendation"],
+    [
+        model_type
+        for model_type in PIPELINE_HANDLERS
+        if model_type not in {"ranking_recommendation", "rules_engine"}
+    ],
 )
 def test_each_agent_type_has_an_explicit_unimplemented_handler(model_type):
     with pytest.raises(NotImplementedError, match=model_type):
@@ -137,6 +141,114 @@ def test_pipeline_batch_dispatches_and_validates_each_result(monkeypatch):
     ]
 
 
+def test_rules_engine_denies_missing_consent_and_active_suppression():
+    output = execute_agent_pipeline(
+        _input(
+            model_type="rules_engine",
+            input_data={
+                "communication_preferences": {
+                    "email_opt_in": True,
+                    "sms_opt_in": "true",
+                    "meta_ads_opt_in": True,
+                },
+                "profile_email_opt_in": True,
+                "profile_sms_opt_in": False,
+                "profile_meta_ads_opt_in": True,
+                "active_suppression_channels": ["EMAIL"],
+            },
+        ),
+        run_id="eligibility-run-1",
+    )
+
+    assert output.result["decision"] == "deny"
+    assert output.result["channels"]["email"] == {
+        "eligible": False,
+        "reason_codes": ["active_suppression"],
+    }
+    assert output.result["channels"]["sms"] == {
+        "eligible": False,
+        "reason_codes": ["consent_invalid"],
+    }
+    assert output.result["channels"]["meta_ads"] == {
+        "eligible": False,
+        "reason_codes": ["active_suppression"],
+    }
+    assert output.result["channels"]["google_ads"] == {
+        "eligible": False,
+        "reason_codes": ["active_suppression", "consent_missing"],
+    }
+
+
+def test_rules_engine_requires_provider_specific_advertising_consent():
+    output = execute_agent_pipeline(
+        _input(
+            model_type="rules_engine",
+            input_data={
+                "communication_preferences": {
+                    "meta_ads_opt_in": True,
+                },
+                "profile_meta_ads_opt_in": True,
+                "active_suppression_channels": [],
+            },
+        ),
+        run_id="eligibility-run-provider-consent",
+    )
+
+    assert output.result["channels"]["meta_ads"]["eligible"] is True
+    assert output.result["channels"]["google_ads"] == {
+        "eligible": False,
+        "reason_codes": ["consent_missing"],
+    }
+    assert output.result["channels"]["tiktok_ads"] == {
+        "eligible": False,
+        "reason_codes": ["consent_missing"],
+    }
+
+
+def test_rules_engine_applies_existing_profile_suppression_to_ad_audiences():
+    output = execute_agent_pipeline(
+        _input(
+            model_type="rules_engine",
+            input_data={
+                "communication_preferences": {
+                    "meta_ads_opt_in": True,
+                    "google_ads_opt_in": True,
+                    "tiktok_ads_opt_in": True,
+                },
+                "profile_meta_ads_opt_in": True,
+                "profile_google_ads_opt_in": True,
+                "profile_tiktok_ads_opt_in": True,
+                "active_suppression_channels": ["EMAIL"],
+            },
+        ),
+        run_id="eligibility-run-ads",
+    )
+
+    assert output.result["channels"]["meta_ads"] == {
+        "eligible": False,
+        "reason_codes": ["active_suppression"],
+    }
+
+
+def test_rules_engine_fails_closed_when_suppression_state_is_missing():
+    output = execute_agent_pipeline(
+        _input(
+            model_type="rules_engine",
+            input_data={
+                "communication_preferences": {"email_opt_in": True},
+                "profile_email_opt_in": True,
+            },
+        ),
+        run_id="eligibility-run-2",
+    )
+
+    assert output.result["decision"] == "deny"
+    assert output.result["channels"]["email"] == {
+        "eligible": False,
+        "reason_codes": ["suppression_state_missing"],
+    }
+
+
 @pytest.mark.parametrize(
     "model_type, result",
     [
@@ -147,10 +259,17 @@ def test_pipeline_batch_dispatches_and_validates_each_result(monkeypatch):
         ("forecasting", {"forecast_series": []}),
         ("anomaly_detection", {"anomaly_score": 0.9, "is_anomaly": True}),
         ("uplift_modeling", {"uplift_score": 0.2}),
-        ("semantic_embedding", {"embedding": [0.1, 0.2]}),
-        ("graph_ml", {"relationship_signals": {"connected": True}}),
         ("optimization", {"selected_action": "send_offer"}),
-        ("rules_engine", {"decision": "allow", "decision_trace": []}),
+        (
+            "rules_engine",
+            {
+                "decision": "allow",
+                "eligible_channels": ["email"],
+                "not_ready_channels": [],
+                "channels": {"email": {"eligible": True, "reason_codes": []}},
+                "decision_trace": [],
+            },
+        ),
         ("generative_llm", {"text": "summary"}),
     ],
 )
@@ -181,7 +300,6 @@ def test_pipeline_output_validates_each_agent_result_shape(model_type, result):
         ("regression", {"value": float("inf")}),
         ("ranking_recommendation", {"ranked_items": {}}),
         ("anomaly_detection", {"anomaly_score": 0.4, "is_anomaly": "no"}),
-        ("semantic_embedding", {"embedding": [0.2, float("nan")]}),
         ("rules_engine", {"decision": "maybe", "decision_trace": []}),
     ],
 )
@@ -230,28 +348,10 @@ def test_pipeline_output_rejects_invalid_agent_results(model_type, result):
             id="uplift-modeling",
         ),
         pytest.param(
-            "semantic_embedding",
-            {"embedding": [0.1, 0.2, 0.3]},
-            marks=pytest.mark.skip(reason="TODO: implement semantic embeddings"),
-            id="semantic-embedding",
-        ),
-        pytest.param(
-            "graph_ml",
-            {"relationship_signals": {"connected": True}},
-            marks=pytest.mark.skip(reason="TODO: implement graph intelligence"),
-            id="graph-intelligence",
-        ),
-        pytest.param(
             "optimization",
             {"selected_action": "send_offer"},
             marks=pytest.mark.skip(reason="TODO: implement optimization and decisioning"),
             id="optimization",
-        ),
-        pytest.param(
-            "rules_engine",
-            {"decision": "allow", "decision_trace": [{"rule": "eligible", "matched": True}]},
-            marks=pytest.mark.skip(reason="TODO: implement rules evaluation"),
-            id="rules-engine",
         ),
         pytest.param(
             "generative_llm",
@@ -429,4 +529,3 @@ def test_dagster_defs_jobs_ops_and_sensor(monkeypatch):
         run_req = dagster_defs.ai_agent_workflow_schedule_sensor(context)
     assert isinstance(run_req, RunRequest)
     assert run_req.run_key.startswith("ai-agent-workflow-")
-

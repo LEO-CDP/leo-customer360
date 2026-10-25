@@ -834,7 +834,7 @@ def compute_persona(master_profile: Dict[str, Any]) -> PersonaComputation:
     optional, never-raising LLM calls inside persona.py's
     generate_persona_name/generate_persona_summary. Fully unit-testable
     without a database."""
-    domain = (master_profile.get("domain") or "retail").lower()
+    domain = (master_profile.get("domain") or "_").lower()
     is_web_visitor = is_web_visitor_profile(master_profile)
     lifecycle_stage = master_profile.get("lifecycle_stage")
 
@@ -1284,7 +1284,7 @@ class PersonaResolutionEngine:
 
             computation = compute_persona(master_profile)
             old_persona = self._fetch_current_persona(cursor, tenant_id, master_profile_id)
-            domain = master_profile.get("domain") or "retail"
+            domain = master_profile.get("domain") or "_"
             persona_archetype_id = self._upsert_archetype(cursor, tenant_id, domain, computation)
             computed_version = self._next_computed_version(
                 cursor, tenant_id, master_profile_id, persona_archetype_id

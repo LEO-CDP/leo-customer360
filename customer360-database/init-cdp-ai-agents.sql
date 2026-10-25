@@ -1,7 +1,7 @@
 -- ============================================================================
 -- CUSTOMER 360 AI AGENT SEED DATA
 -- ============================================================================
--- Exactly 12 AI Agent Types
+-- Exactly 10 AI Agent Types
 --
 --  1. classification
 --  2. regression
@@ -10,36 +10,35 @@
 --  5. forecasting
 --  6. anomaly_detection
 --  7. uplift_modeling
---  8. semantic_embedding
---  9. graph_ml
--- 10. optimization
--- 11. rules_engine
--- 12. generative_llm
+--  8. optimization
+--  9. rules_engine
+-- 10. generative_llm
 --
 -- Design rule:
 --   model_type = execution / intelligence method
 --   agent_code = concrete business agent
 --
 -- Examples:
---   lead_scoring              -> classification
---   clv_prediction            -> regression
---   journey_behavior_clustering -> clustering
---   product_recommendation    -> ranking_recommendation
---   customer_demand_forecast  -> forecasting
---   behavior_anomaly_detector -> anomaly_detection
---   campaign_uplift           -> uplift_modeling
---   customer_semantic_profile -> semantic_embedding
---   identity_graph_intelligence -> graph_ml
---   next_best_action          -> optimization
---   eligibility_policy        -> rules_engine
---   campaign_planner          -> generative_llm
+--   lead_scoring                   -> classification
+--   clv_prediction                 -> regression
+--   journey_behavior_clustering    -> clustering
+--   product_recommendation         -> ranking_recommendation
+--   customer_demand_forecast       -> forecasting
+--   behavior_anomaly_detector       -> anomaly_detection
+--   campaign_uplift                 -> uplift_modeling
+--   next_best_action                -> optimization
+--   eligibility_policy              -> rules_engine
+--   campaign_planner                -> generative_llm
 --
 -- The existing cdp_ai_agents table separates model_type from model_name,
 -- runtime configuration, prompts, instructions and required variables.
--- These are INACTIVE templates, not deployed or trained models. model_name is
--- a documented estimator class or provider model ID; rules/optimization remain
--- NULL until an execution engine is selected. Do not dynamically import classes
--- from registry values. Dispatch through an implementation allow-list.
+-- product_recommendation and eligibility_policy are seeded as ACTIVE for their
+-- implemented runner handlers; the remaining seeds are INACTIVE templates
+-- until their execution handlers and trained artifacts are deployed.
+-- model_name is a documented estimator class or provider model ID;
+-- rules/optimization remain NULL until an execution engine is selected. Do not
+-- dynamically import classes from registry values. Dispatch through an
+-- implementation allow-list.
 -- Existing agent configuration and published prompt history are never replaced
 -- on rerun. Apply reviewed changes to existing rows through a migration or the
 -- versioned prompt publishing API, not by rerunning bootstrap seeds.
@@ -143,6 +142,10 @@ WITH feature_definitions (
     description
 ) AS (
     VALUES
+    ('profile_domain', 'profile', 'text',
+        $sql$mp.domain$sql$,
+        $pandas$profiles["domain"]$pandas$,
+        'Primary business domain of the resolved profile from cdp_master_profiles.'),
     ('profile_engagement_score', 'profile', 'numeric',
         $sql$mp.engagement_score$sql$,
         $pandas$profiles["engagement_score"]$pandas$,
@@ -211,6 +214,30 @@ WITH feature_definitions (
         $sql$COALESCE(mp.communication_preferences -> 'push_opt_in' = 'true'::jsonb, false)$sql$,
         $pandas$profiles["communication_preferences"].map(lambda values: (values or {}).get("push_opt_in") is True)$pandas$,
         'Explicit push opt-in flag; missing consent is false.'),
+    ('profile_zalo_opt_in', 'profile', 'boolean',
+        $sql$COALESCE(mp.communication_preferences -> 'zalo_opt_in' = 'true'::jsonb, false)$sql$,
+        $pandas$profiles["communication_preferences"].map(lambda values: (values or {}).get("zalo_opt_in") is True)$pandas$,
+        'Explicit Zalo opt-in flag; missing consent is false.'),
+    ('profile_whatsapp_opt_in', 'profile', 'boolean',
+        $sql$COALESCE(mp.communication_preferences -> 'whatsapp_opt_in' = 'true'::jsonb, false)$sql$,
+        $pandas$profiles["communication_preferences"].map(lambda values: (values or {}).get("whatsapp_opt_in") is True)$pandas$,
+        'Explicit WhatsApp opt-in flag; missing consent is false.'),
+    ('profile_voice_opt_in', 'profile', 'boolean',
+        $sql$COALESCE(mp.communication_preferences -> 'voice_opt_in' = 'true'::jsonb, false)$sql$,
+        $pandas$profiles["communication_preferences"].map(lambda values: (values or {}).get("voice_opt_in") is True)$pandas$,
+        'Explicit voice-call opt-in flag; missing consent is false.'),
+    ('profile_meta_ads_opt_in', 'profile', 'boolean',
+        $sql$COALESCE(mp.communication_preferences -> 'meta_ads_opt_in' = 'true'::jsonb, false)$sql$,
+        $pandas$profiles["communication_preferences"].map(lambda values: (values or {}).get("meta_ads_opt_in") is True)$pandas$,
+        'Explicit Meta custom-audience consent; missing consent is false and must not be inferred from email opt-in.'),
+    ('profile_google_ads_opt_in', 'profile', 'boolean',
+        $sql$COALESCE(mp.communication_preferences -> 'google_ads_opt_in' = 'true'::jsonb, false)$sql$,
+        $pandas$profiles["communication_preferences"].map(lambda values: (values or {}).get("google_ads_opt_in") is True)$pandas$,
+        'Explicit Google Ads Customer Match consent; missing consent is false and must not be inferred from email opt-in.'),
+    ('profile_tiktok_ads_opt_in', 'profile', 'boolean',
+        $sql$COALESCE(mp.communication_preferences -> 'tiktok_ads_opt_in' = 'true'::jsonb, false)$sql$,
+        $pandas$profiles["communication_preferences"].map(lambda values: (values or {}).get("tiktok_ads_opt_in") is True)$pandas$,
+        'Explicit TikTok custom-audience consent; missing consent is false and must not be inferred from email opt-in.'),
 
     ('event_count_7d', 'event_log', 'integer',
         $sql$COUNT(*) FILTER (WHERE events.event_time >= :as_of - INTERVAL '7 days' AND events.event_time <= :as_of)$sql$,
@@ -432,10 +459,22 @@ WITH feature_definitions (
         $sql$candidates.content_item_id::text$sql$,
         $pandas$candidates["content_item_id"].astype("string")$pandas$,
         'Candidate content/product identifier.'),
+    ('candidate_domain', 'candidate', 'text',
+        $sql$candidates.domain$sql$,
+        $pandas$candidates["domain"]$pandas$,
+        'Business domain of the candidate content or product item.'),
     ('candidate_item_type', 'candidate', 'text',
         $sql$candidates.item_type$sql$,
         $pandas$candidates["item_type"]$pandas$,
         'Candidate content/product type.'),
+    ('candidate_title', 'candidate', 'text',
+        $sql$candidates.title$sql$,
+        $pandas$candidates["title"]$pandas$,
+        'Display title of the candidate content or product item.'),
+    ('candidate_summary', 'candidate', 'text',
+        $sql$candidates.summary$sql$,
+        $pandas$candidates["summary"]$pandas$,
+        'Summary text of the candidate content or product item used for relevance matching and display.'),
     ('candidate_segment_tags', 'candidate', 'jsonb',
         $sql$to_jsonb(candidates.segment_tags)$sql$,
         $pandas$candidates["segment_tags"]$pandas$,
@@ -489,6 +528,10 @@ WITH feature_definitions (
         $sql$context.suppression_channel$sql$,
         $pandas$context["suppression_channel"]$pandas$,
         'Channel blocked by the active suppression policy.'),
+    ('active_suppression_channels', 'runtime', 'jsonb',
+        $sql$context.suppression_channels$sql$,
+        $pandas$context["suppression_channels"]$pandas$,
+        'Tenant-scoped active suppression channels resolved for the profile, including applicable campaign scope and identifier-only records.'),
     ('suppression_expires_at', 'runtime', 'timestamp',
         $sql$context.suppression_expires_at$sql$,
         $pandas$context["suppression_expires_at"]$pandas$,
@@ -832,6 +875,7 @@ $prompt$,
         '0 * * * *',
 
         ARRAY[
+            'profile_domain',
             'profile_segmentation_tags',
             'profile_preferred_channel',
             'event_item_view_count_90d',
@@ -840,16 +884,23 @@ $prompt$,
             'transaction_entity_count_365d',
             'transaction_amount_sum_365d',
             'candidate_item_id',
+            'candidate_domain',
             'candidate_item_type',
+            'candidate_title',
+            'candidate_summary',
             'candidate_segment_tags',
             'candidate_published_age_days',
             'candidate_availability'
         ]::text[],
 
         jsonb_build_object(
+            'strategy', 'tags',
+            'top_k', 8,
+            'semantic_weight', 0.7,
+            'tag_weight', 0.3,
+            'minimum_score', 0.0,
             'algorithm', 'lightgbm_lambdarank',
             'objective', 'lambdarank',
-            'top_k', 10,
             'feature_window', '90d',
             'diversity_weight', 0.20,
             'business_rule_filtering', true
@@ -866,7 +917,7 @@ Rank the supplied candidate items for the customer.
 Rules:
 1. Recommend ONLY from candidate_item_id and candidate_availability.
 2. Never invent product IDs or content IDs.
-3. Use observed customer behavior and supplied context.
+3. Match candidate_domain to profile_domain or 'all', and use observed customer behavior, profile_segmentation_tags, and supplied context.
 4. Respect supplied eligibility and availability constraints.
 5. Prefer relevance while avoiding excessive duplication.
 6. Return the ranking and concise evidence.
@@ -874,11 +925,15 @@ Rules:
 
 Expected output:
 {
-  "recommendations": [
+  "ranked_items": [
     {
       "item_id": "string",
       "rank": number,
       "score": number,
+      "strategy": "tags|semantic|hybrid",
+      "semantic_score": number,
+      "tag_score": number,
+      "matched_tags": [],
       "reason": "string"
     }
   ]
@@ -886,6 +941,7 @@ Expected output:
 $prompt$,
 
         ARRAY[
+            'profile_domain',
             'profile_segmentation_tags',
             'profile_preferred_channel',
             'event_item_view_count_90d',
@@ -894,7 +950,10 @@ $prompt$,
             'transaction_entity_count_365d',
             'transaction_amount_sum_365d',
             'candidate_item_id',
+            'candidate_domain',
             'candidate_item_type',
+            'candidate_title',
+            'candidate_summary',
             'candidate_segment_tags',
             'candidate_published_age_days',
             'candidate_availability'
@@ -1129,141 +1188,7 @@ $prompt$,
     ),
 
     -- ------------------------------------------------------------------------
-    -- 08. SEMANTIC / EMBEDDING
-    -- ------------------------------------------------------------------------
-    (
-        'customer_semantic_profile',
-        'Customer Semantic Intelligence Agent',
-        'Creates semantic representations of customer interests, intent, content affinity, and behavioral context for similarity and retrieval.',
-        'semantic_embedding',
-        'text-embedding-3-small',
-        'INACTIVE',
-        NULL,
-
-        ARRAY[
-            'profile_segmentation_tags',
-            'profile_text',
-            'event_search_query_text_90d',
-            'event_content_text_90d',
-            'event_product_text_90d',
-            'contact_text_90d'
-        ]::text[],
-
-        jsonb_build_object(
-            'embedding_dimension', 1536,
-            'similarity_metric', 'cosine',
-            'normalize', true
-        ),
-
-        'customer.semantic_profile.instructions',
-        'none',
-
-        $prompt$
-You are a Customer 360 semantic intelligence agent.
-
-Embed approved, redacted customer context with the embeddings endpoint.
-This model returns a numeric vector, not a chat completion. These instructions
-document preprocessing only and must not be sent to a completion endpoint.
-
-Rules:
-1. Use only supplied customer evidence.
-2. Do not infer sensitive personal traits.
-3. Bound input to the provider token limit and reject empty input.
-4. Validate that the response contains 1536 finite numeric dimensions.
-5. Metadata generation requires a separate generative model; never invent it
-   from embedding coordinates.
-$prompt$,
-
-        ARRAY[
-            'profile_segmentation_tags',
-            'profile_text',
-            'event_search_query_text_90d',
-            'event_content_text_90d',
-            'event_product_text_90d',
-            'contact_text_90d'
-        ]::text[],
-
-        1,
-        'leo_master_agent',
-        'Initial seed for semantic customer intelligence'
-    ),
-
-    -- ------------------------------------------------------------------------
-    -- 09. GRAPH INTELLIGENCE
-    -- ------------------------------------------------------------------------
-    (
-        'identity_graph_intelligence',
-        'Identity Graph Intelligence Agent',
-        'Analyzes customer identity and relationship graphs to discover connected identities, entities, relationships, and graph-based customer context.',
-        'graph_ml',
-        'torch_geometric.nn.models.GraphSAGE',
-        'INACTIVE',
-        '*/30 * * * *',
-
-        ARRAY[
-            'profile_device_count',
-            'profile_external_id_count',
-            'profile_source_system_count',
-            'identity_link_count',
-            'identity_link_avg_match_score',
-            'relation_out_degree',
-            'relation_in_degree',
-            'shared_device_profile_count',
-            'profile_linked_raw_profile_count'
-        ]::text[],
-
-        jsonb_build_object(
-            'algorithm', 'graphsage',
-            'embedding_dimension', 128,
-            'num_layers', 3,
-            'requires_edge_index', true,
-            'similarity_metric', 'cosine'
-        ),
-
-        'identity.graph_intelligence.instructions',
-        'none',
-
-        $prompt$
-You are a Customer 360 graph intelligence agent.
-
-Analyze supplied customer and identity graph structures.
-
-Rules:
-1. Use only supplied nodes and relationships.
-2. Do not invent graph edges or identities.
-3. Distinguish direct relationships from inferred graph proximity.
-4. Highlight identity confidence and important relationship patterns.
-5. Return ONLY JSON.
-
-Expected output:
-{
-  "entities": [],
-  "relationships": [],
-  "graph_signals": [],
-  "identity_confidence": number,
-  "summary": "string"
-}
-$prompt$,
-
-        ARRAY[
-            'profile_device_count',
-            'profile_external_id_count',
-            'profile_source_system_count',
-            'identity_link_count',
-            'identity_link_avg_match_score',
-            'relation_out_degree',
-            'relation_in_degree',
-            'shared_device_profile_count',
-            'profile_linked_raw_profile_count'
-        ]::text[],
-
-        1,
-        'leo_master_agent',
-        'Initial seed for graph-based customer intelligence'
-    ),
-
-    -- ------------------------------------------------------------------------
-    -- 10. OPTIMIZATION / DECISIONING
+    -- 08. OPTIMIZATION / DECISIONING
     -- ------------------------------------------------------------------------
     (
         'next_best_action',
@@ -1349,87 +1274,115 @@ $prompt$,
     ),
 
     -- ------------------------------------------------------------------------
-    -- 11. RULES ENGINE
+    -- 09. RULES ENGINE
     -- ------------------------------------------------------------------------
     (
         'eligibility_policy',
         'Customer Eligibility Policy Agent',
-        'Evaluates deterministic customer eligibility, suppression, compliance, and business policy rules before downstream segmentation or activation.',
+        'Evaluates explicit per-channel marketing consent and active suppression rules for segment profiles; records channel readiness without changing source consent.',
         'rules_engine',
         NULL,
-        'INACTIVE',
-        '*/5 * * * *',
+        'ACTIVE',
+        NULL,
 
         ARRAY[
             'profile_communication_preferences',
-            'profile_segmentation_tags',
-            'profile_lifecycle_stage',
             'profile_email_opt_in',
             'profile_sms_opt_in',
             'profile_push_opt_in',
-            'suppression_active',
-            'suppression_channel',
-            'suppression_expires_at',
-            'event_kyc_completed_flag_365d',
-            'business_rule_context'
+            'profile_zalo_opt_in',
+            'profile_whatsapp_opt_in',
+            'profile_voice_opt_in',
+            'profile_meta_ads_opt_in',
+            'profile_google_ads_opt_in',
+            'profile_tiktok_ads_opt_in',
+            'active_suppression_channels'
         ]::text[],
 
         jsonb_build_object(
             'evaluation_mode', 'deterministic',
             'default_on_missing_data', 'DENY',
             'strict_mode', true,
-            'trace_rules', true
+            'trace_rules', true,
+            'consent_requires_literal_true', true,
+            'advertising_consent_is_provider_specific', true,
+            'eligibility_output_key', 'eligibility_policy'
         ),
 
         'customer.eligibility_policy.instructions',
         'none',
 
         $prompt$
-You are a deterministic Customer 360 eligibility policy agent.
+You are the deterministic Customer 360 marketing eligibility evaluator.
 
-Evaluate supplied business rules against supplied customer facts.
+Evaluate readiness independently for each supplied channel. This is an
+operational policy check, not legal advice or a determination that a campaign
+complies with GDPR, PDPA, or any other law. Apply only the explicit,
+tenant-approved rules and evidence supplied to you.
 
 Rules:
-1. Apply rules exactly as provided.
-2. Do not infer missing facts.
-3. Missing required facts must not be treated as TRUE.
-4. Respect consent and suppression restrictions.
-5. Hard restrictions always override eligibility.
-6. Return a traceable explanation of the rules that determined the result.
-7. Do not generate or recommend new policy rules.
-8. Return ONLY JSON.
+1. Only a JSON boolean true grants consent. False, missing, null, strings,
+   numbers, and malformed values are not consent.
+2. Email requires email_opt_in; SMS requires sms_opt_in; push requires
+   push_opt_in; Zalo requires zalo_opt_in; WhatsApp requires whatsapp_opt_in;
+   voice requires voice_opt_in.
+3. Advertising audiences require their separate provider-specific boolean:
+   meta_ads_opt_in, google_ads_opt_in, or tiktok_ads_opt_in. Never infer
+   advertising consent from email, SMS, or another provider's consent.
+4. An active applicable suppression blocks the matching channel. A GLOBAL
+   suppression blocks every channel. Campaign-scoped suppressions apply only
+   when the matching campaign_id is supplied in the validated context. Any
+   active suppression returned for a profile/identifier blocks its advertising
+   audience export.
+5. Missing consent or suppression-state data fails closed for that channel.
+   Do not modify, invent, or normalize source consent values.
+6. Return channel-specific eligibility and stable reason codes. Overall
+   decision is allow only when all evaluated channels are eligible, deny when
+   none are eligible, and review when results are mixed.
+7. Return ONLY JSON. Do not send messages, activate audiences, or execute
+   campaign actions.
 
 Expected output:
 {
-  "eligible": boolean,
-  "decision": "ALLOW|DENY|REVIEW",
-  "matched_rules": [],
-  "blocked_reasons": [],
-  "explanation": "string"
+  "decision": "allow|deny|review",
+  "eligible_channels": [],
+  "not_ready_channels": [],
+  "channels": {
+    "email": {"eligible": boolean, "reason_codes": []},
+    "sms": {"eligible": boolean, "reason_codes": []},
+    "push": {"eligible": boolean, "reason_codes": []},
+    "zalo": {"eligible": boolean, "reason_codes": []},
+    "whatsapp": {"eligible": boolean, "reason_codes": []},
+    "voice": {"eligible": boolean, "reason_codes": []},
+    "meta_ads": {"eligible": boolean, "reason_codes": []},
+    "google_ads": {"eligible": boolean, "reason_codes": []},
+    "tiktok_ads": {"eligible": boolean, "reason_codes": []}
+  },
+  "decision_trace": []
 }
 $prompt$,
 
         ARRAY[
             'profile_communication_preferences',
-            'profile_segmentation_tags',
-            'profile_lifecycle_stage',
             'profile_email_opt_in',
             'profile_sms_opt_in',
             'profile_push_opt_in',
-            'suppression_active',
-            'suppression_channel',
-            'suppression_expires_at',
-            'event_kyc_completed_flag_365d',
-            'business_rule_context'
+            'profile_zalo_opt_in',
+            'profile_whatsapp_opt_in',
+            'profile_voice_opt_in',
+            'profile_meta_ads_opt_in',
+            'profile_google_ads_opt_in',
+            'profile_tiktok_ads_opt_in',
+            'active_suppression_channels'
         ]::text[],
 
         1,
         'leo_master_agent',
-        'Initial seed for deterministic eligibility policy evaluation'
+        'Initial seed for fail-closed per-channel marketing eligibility evaluation'
     ),
 
     -- ------------------------------------------------------------------------
-    -- 12. GENERATIVE LLM
+    -- 10. GENERATIVE LLM
     -- ------------------------------------------------------------------------
     (
         'campaign_planner',
@@ -1668,7 +1621,7 @@ COMMIT;
 
 
 -- ============================================================================
--- 3. VERIFY THE 12 CORE AGENT TYPES
+-- 3. VERIFY THE 11 CORE AGENT TYPES
 -- ============================================================================
 
 SELECT
@@ -1689,8 +1642,6 @@ WHERE agent_code IN (
     'customer_demand_forecast',
     'behavior_anomaly_detector',
     'campaign_uplift',
-    'customer_semantic_profile',
-    'identity_graph_intelligence',
     'next_best_action',
     'eligibility_policy',
     'campaign_planner'
@@ -1704,11 +1655,9 @@ ORDER BY
         WHEN 'forecasting' THEN 5
         WHEN 'anomaly_detection' THEN 6
         WHEN 'uplift_modeling' THEN 7
-        WHEN 'semantic_embedding' THEN 8
-        WHEN 'graph_ml' THEN 9
-        WHEN 'optimization' THEN 10
-        WHEN 'rules_engine' THEN 11
-        WHEN 'generative_llm' THEN 12
+        WHEN 'optimization' THEN 8
+        WHEN 'rules_engine' THEN 9
+        WHEN 'generative_llm' THEN 10
     END;
 
 
@@ -1723,8 +1672,6 @@ ORDER BY
 -- forecasting                 -> Customer Demand Forecast Agent
 -- anomaly_detection           -> Customer Behavior Anomaly Detection Agent
 -- uplift_modeling             -> Campaign Uplift Agent
--- semantic_embedding          -> Customer Semantic Intelligence Agent
--- graph_ml                    -> Identity Graph Intelligence Agent
 -- optimization                -> Next Best Action Agent
 -- rules_engine                -> Customer Eligibility Policy Agent
 -- generative_llm              -> Campaign Planning Agent

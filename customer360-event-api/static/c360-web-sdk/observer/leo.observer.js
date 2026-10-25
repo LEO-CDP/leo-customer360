@@ -14,6 +14,7 @@
 
     // Global session tracking variable
     var localSessionKey = "";
+    // Controls analytics tracking only; this is not email, channel, or advertising consent.
     var consentGranted = global.LEO_TRACKING_CONSENT !== false;
 
     function hasOwn(obj, key) {

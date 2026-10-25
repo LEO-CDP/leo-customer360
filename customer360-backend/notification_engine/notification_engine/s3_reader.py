@@ -1,8 +1,7 @@
-"""Read Zalo opt-out events from the S3 event lake for the consent projection.
+"""Read verified marketing consent revocations from the S3 event lake.
 
 Lists recent gzip/plain JSONL objects in each tenant's ``data-tracking-{tenant_id}``
-bucket (Zalo events partition by tenant UUID via the webhook's ``_source_id``) and
-yields the ``zalo-opt-out`` / ``zalo-failed`` records the webhook wrote. Downstream
+bucket and yields only events marked by verified email/Zalo callback paths.
 ``apply_optout`` is idempotent, so this re-scans a bounded recent window from
 the tenant connector configuration each run rather than tracking a checkpoint.
 
@@ -27,8 +26,21 @@ from .config import (
     S3_VERIFY_SSL,
 )
 
-ZALO_CHANNEL = "zalo"
-OPTOUT_EVENT_NAMES = {"zalo-opt-out", "zalo-failed"}
+VERIFIED_CONSENT_SOURCE = "verified_consent_callback"
+CONSENT_REVOCATIONS = {
+    "email-unsubscribed": (
+        "email",
+        "email_opt_in",
+        "unsubscribe",
+        "verified_email_callback",
+    ),
+    "zalo-opt-out": (
+        "zalo",
+        "zalo_opt_in",
+        "opt_out",
+        "verified_zalo_webhook",
+    ),
+}
 
 
 def build_s3_client():
@@ -61,25 +73,46 @@ def _iter_lines(body, object_key: str):
 
 
 def extract_optout_events(records: Iterable[dict]) -> list[dict]:
-    """Filter parsed JSONL records to zalo opt-out events (pure, testable).
-
-    Keeps only channel='zalo' opt-out/failed records that carry a
-    suppression_reason + tenant/profile; shapes each for ``project_optout_events``.
-    """
+    """Filter JSONL envelopes to verified email and Zalo consent revocations."""
     events = []
     for record in records:
         if not isinstance(record, dict):
             continue
-        props = record.get("properties") or {}
-        if props.get("tracking_channel") != ZALO_CHANNEL:
+        if record.get("source_system") != VERIFIED_CONSENT_SOURCE:
             continue
-        if record.get("event_name") not in OPTOUT_EVENT_NAMES:
+        event_name = record.get("event_name")
+        consent_contract = CONSENT_REVOCATIONS.get(event_name)
+        if consent_contract is None:
             continue
-        if not props.get("suppression_reason"):
+        channel, consent_field, reason, evidence_source = consent_contract
+        payload = record.get("payload")
+        props = (
+            payload.get("properties")
+            if isinstance(payload, dict)
+            else record.get("properties")
+        )
+        if not isinstance(props, dict):
+            continue
+        update = props.get("consent_update")
+        if not isinstance(update, dict):
+            continue
+        if (
+            update.get("field") != consent_field
+            or update.get("granted") is not False
+            or update.get("reason") != reason
+            or update.get("source") != evidence_source
+            or props.get("tracking_channel") != channel
+        ):
             continue
         if not (props.get("tenant_id") and props.get("master_profile_id")):
             continue
-        events.append({"properties": props})
+        events.append(
+            {
+                "event_name": event_name,
+                "source_system": VERIFIED_CONSENT_SOURCE,
+                "properties": props,
+            }
+        )
     return events
 
 

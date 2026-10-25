@@ -225,7 +225,7 @@ class EventRecordService:
             "event_id": event_id,
             "tenant_id": tenant_id,
             "data_source_id": data_source_id,
-            "domain": self.text_value(payload.get("domain")) or "unknown",
+            "domain": self.text_value(payload.get("domain")) or "_",
             "source_system": self.text_value(
                 record.get("source_system") or payload.get("source_system")
             )

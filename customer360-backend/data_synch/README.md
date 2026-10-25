@@ -11,9 +11,11 @@ Customer Match, and TikTok Ads.
 - Audit table: `customer360.crm_ad_sync_runs`
 - Identifiers are normalized and SHA-256 hashed in memory. Raw email and phone
   values are never sent to a provider or written to the audit table.
-- Only active profiles with a valid email or phone and no active
-  global/campaign suppression are eligible. Provider-specific consent keys
-  should be added as an explicit connector policy rather than inferred here.
+- Only active profiles with a valid email or phone, no active global/campaign
+  suppression, and literal-true provider consent are eligible. The required
+  profile keys are `meta_ads_opt_in`, `google_ads_opt_in`, and
+  `tiktok_ads_opt_in`; missing, false, or non-boolean values are not consent.
+  Consent for email or another provider is never used as a substitute.
 - Retries reuse the same tenant/campaign/segment/platform/audience idempotency
   key and preserve the external audience ID.
 - Workflow submissions add their execution ID to that key, preserving separate
