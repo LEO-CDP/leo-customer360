@@ -405,6 +405,7 @@ manual loop in Installation Order, shell glob order is the migration order.
 | `004_campaign_experiments.sql` | Create campaign experiment/variant tables with tenant-aware references, constraints, indexes, and RLS. |
 | `005_campaign_content_items.sql` | Restore the campaign-to-content relation with tenant-safe foreign keys and RLS. |
 | `006_cdp_agent_workflow.sql` | Add the tenant/segment/agent workflow queue, scheduling override, ordered execution constraints, candidate integrity triggers, indexes, and forced tenant RLS. |
+| `017_agent_campagn_journey.sql` | Add campaign and agent journey stages, AI workflow nodes, and tenant-scoped campaign-agent assignments. |
 
 `006_cdp_agent_workflow.sql` is for existing installations. A fresh database
 already receives `cdp_agent_workflow` from `database-schema.sql`; the migration

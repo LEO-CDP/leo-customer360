@@ -404,6 +404,7 @@ CREATE TABLE IF NOT EXISTS customer360.crm_campaign (
     channel VARCHAR(100),
     platform VARCHAR(100),
     objective VARCHAR(100),
+    journey_stage VARCHAR(30),
     
     -- Core details
     description TEXT,
@@ -424,7 +425,32 @@ CREATE TABLE IF NOT EXISTS customer360.crm_campaign (
     CONSTRAINT uq_crm_campaign_code UNIQUE (tenant_id, campaign_code)
 );
 
+ALTER TABLE customer360.crm_campaign
+    ADD COLUMN IF NOT EXISTS journey_stage VARCHAR(30);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'chk_crm_campaign_journey_stage'
+          AND conrelid = 'customer360.crm_campaign'::regclass
+    ) THEN
+        ALTER TABLE customer360.crm_campaign
+            ADD CONSTRAINT chk_crm_campaign_journey_stage
+            CHECK (journey_stage IS NULL OR journey_stage IN (
+                'awareness', 'acquisition', 'activation', 'engagement',
+                'conversion', 'retention', 'loyalty'
+            ));
+    END IF;
+END $$;
+
 COMMENT ON TABLE customer360.crm_campaign IS 'CRM journey-graph entity: a marketing initiative. Updated to support omnichannel dashboard dimensions (channel, platform, objective, status). Responders are tracked via crm_campaign_member.';
+COMMENT ON COLUMN customer360.crm_campaign.journey_stage IS
+    'Customer journey stage this campaign targets; derived from objective in the app. Lets the journey map show live campaigns per stage.';
+
+CREATE INDEX IF NOT EXISTS idx_crm_campaign_journey_stage
+    ON customer360.crm_campaign (tenant_id, journey_stage)
+    WHERE journey_stage IS NOT NULL;
 
 -- Campaign Performance Daily
 CREATE TABLE IF NOT EXISTS customer360.crm_campaign_performance_daily (
@@ -2008,6 +2034,8 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_ai_agents (
     -- Human-readable change note.
     instruction_note TEXT NOT NULL DEFAULT '',
 
+    journey_stage VARCHAR(30),
+
     -- Audit fields
     created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
@@ -2029,6 +2057,25 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_ai_agents (
     CONSTRAINT chk_cdp_ai_agents_prompt_versions_array
         CHECK (jsonb_typeof(prompt_versions) = 'array')
 );
+
+ALTER TABLE customer360.cdp_ai_agents
+    ADD COLUMN IF NOT EXISTS journey_stage VARCHAR(30);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'chk_cdp_ai_agents_journey_stage'
+          AND conrelid = 'customer360.cdp_ai_agents'::regclass
+    ) THEN
+        ALTER TABLE customer360.cdp_ai_agents
+            ADD CONSTRAINT chk_cdp_ai_agents_journey_stage
+            CHECK (journey_stage IS NULL OR journey_stage IN (
+                'awareness', 'acquisition', 'activation', 'engagement',
+                'conversion', 'retention', 'loyalty'
+            ));
+    END IF;
+END $$;
 
 COMMENT ON TABLE customer360.cdp_ai_agents IS
     'Unified registry for AI/ML models and task-oriented AI agents. Stores model configuration and current agent instructions.';
@@ -2057,8 +2104,15 @@ COMMENT ON COLUMN customer360.cdp_ai_agents.required_variables IS
 COMMENT ON COLUMN customer360.cdp_ai_agents.instruction_version IS
     'Current published prompt/instruction revision.';
 
+COMMENT ON COLUMN customer360.cdp_ai_agents.journey_stage IS
+    'Customer journey stage this agent serves (awareness .. loyalty). NULL = cross-stage. Drives the AI Agents journey map.';
+
 CREATE INDEX IF NOT EXISTS idx_cdp_ai_agents_status
     ON customer360.cdp_ai_agents (status);
+
+CREATE INDEX IF NOT EXISTS idx_cdp_ai_agents_journey_stage
+    ON customer360.cdp_ai_agents (journey_stage)
+    WHERE journey_stage IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_cdp_ai_agents_model_name
     ON customer360.cdp_ai_agents (model_name)
@@ -4055,6 +4109,36 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_content_items_tenant_id
 CREATE UNIQUE INDEX IF NOT EXISTS ux_crm_message_templates_tenant_id
     ON customer360.crm_message_templates (tenant_id, template_id);
 
+CREATE TABLE IF NOT EXISTS customer360.crm_campaign_agent (
+    campaign_agent_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id) ON DELETE CASCADE,
+    campaign_id UUID NOT NULL,
+    agent_code VARCHAR(100) NOT NULL
+        REFERENCES customer360.cdp_ai_agents(agent_code) ON DELETE RESTRICT,
+    role VARCHAR(20) NOT NULL CHECK (role IN ('plan', 'decide', 'optimize')),
+    autonomy VARCHAR(20) NOT NULL DEFAULT 'approve'
+        CHECK (autonomy IN ('suggest', 'approve')),
+    pinned_instruction_version INTEGER
+        CHECK (pinned_instruction_version > 0),
+    guardrails JSONB NOT NULL DEFAULT '{}'::jsonb
+        CHECK (jsonb_typeof(guardrails) = 'object'),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT fk_crm_campaign_agent_tenant_campaign
+        FOREIGN KEY (tenant_id, campaign_id)
+        REFERENCES customer360.crm_campaign (tenant_id, campaign_id) ON DELETE CASCADE,
+    CONSTRAINT uq_crm_campaign_agent UNIQUE (campaign_id, agent_code, role)
+);
+
+COMMENT ON TABLE customer360.crm_campaign_agent IS
+    'Agents assigned to a campaign with a role (plan/decide/optimize), autonomy level, guardrails and pinned prompt revision. Answers "campaigns using this agent" and "agents on this campaign".';
+
+CREATE INDEX IF NOT EXISTS idx_crm_campaign_agent_agent
+    ON customer360.crm_campaign_agent (agent_code, tenant_id)
+    WHERE is_active;
+
 -- =========================================================================
 -- CUSTOMER VALUE / CLV VALUATION SNAPSHOTS
 -- =========================================================================
@@ -4591,8 +4675,10 @@ CREATE TABLE IF NOT EXISTS customer360.crm_flow_node (
     node_id TEXT NOT NULL, -- "n1", "n2", ... as in the JSON
     node_type TEXT NOT NULL CHECK (node_type IN (
         'trigger', 'condition', 'wait', 'wait_event', 'exit',
-        'email', 'notification', 'push', 'update_profile', 'run_data_synch_job')),
+        'email', 'notification', 'push', 'update_profile', 'run_data_synch_job',
+        'ai_decide', 'ai_generate', 'ai_recommend')),
     config JSONB NOT NULL DEFAULT '{}',
+    agent_code VARCHAR(100) GENERATED ALWAYS AS (config ->> 'agent_code') STORED,
     PRIMARY KEY (flow_id, version, node_id),
     CONSTRAINT crm_flow_node_version_fk FOREIGN KEY (flow_id, version, tenant_id)
         REFERENCES customer360.crm_flow_version (flow_id, version, tenant_id) ON DELETE CASCADE,
@@ -4609,8 +4695,46 @@ ALTER TABLE customer360.crm_flow_node
 ALTER TABLE customer360.crm_flow_node
     ADD CONSTRAINT crm_flow_node_node_type_check CHECK (node_type IN (
         'trigger', 'condition', 'wait', 'wait_event', 'exit',
-        'email', 'notification', 'push', 'update_profile', 'run_data_synch_job'
+        'email', 'notification', 'push', 'update_profile', 'run_data_synch_job',
+        'ai_decide', 'ai_generate', 'ai_recommend'
     )) NOT VALID;
+
+ALTER TABLE customer360.crm_flow_node
+    ADD COLUMN IF NOT EXISTS agent_code VARCHAR(100)
+    GENERATED ALWAYS AS (config ->> 'agent_code') STORED;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'crm_flow_node_ai_agent_check'
+          AND conrelid = 'customer360.crm_flow_node'::regclass
+    ) THEN
+        ALTER TABLE customer360.crm_flow_node
+            ADD CONSTRAINT crm_flow_node_ai_agent_check
+            CHECK (node_type NOT IN ('ai_decide', 'ai_generate', 'ai_recommend')
+                   OR (config ->> 'agent_code' IS NOT NULL
+                       AND btrim(config ->> 'agent_code') <> ''));
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'crm_flow_node_agent_fk'
+          AND conrelid = 'customer360.crm_flow_node'::regclass
+    ) THEN
+        ALTER TABLE customer360.crm_flow_node
+            ADD CONSTRAINT crm_flow_node_agent_fk
+            FOREIGN KEY (agent_code)
+            REFERENCES customer360.cdp_ai_agents (agent_code) ON DELETE RESTRICT;
+    END IF;
+END $$;
+
+COMMENT ON COLUMN customer360.crm_flow_node.agent_code IS
+    'Generated from config->>agent_code. Set only for AI nodes; FK keeps every AI node pointing at a registered agent.';
+
+CREATE INDEX IF NOT EXISTS crm_flow_node_agent_idx
+    ON customer360.crm_flow_node (agent_code)
+    WHERE agent_code IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS customer360.crm_flow_edge (
     flow_id UUID NOT NULL,
@@ -5013,6 +5137,7 @@ DECLARE
         'cdp_persona_archetypes',
         'crm_message_templates',
         'crm_campaign_content_items',
+        'crm_campaign_agent',
         'crm_campaign_reviews',
         'crm_segment_sync_runs',
         'crm_ad_sync_runs',
