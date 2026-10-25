@@ -34,8 +34,11 @@ Inputs come from the same Terraform state the vServer deploy used (`../postgres`
 `TF_VAR_redis_password`. The image is the CI-built `ghcr.io/leo-cdp/leo-customer360/customer360-dagster`
 (tags `sha-<long sha>` and `latest`); the shared `ghcr-pull` secret is reused if present.
 
-The script then verifies from inside the pod: the `[render-instance]` log shows PostgreSQL
-storage and S3 compute logs, and GraphQL reports every code location `LOADED`.
+The script waits up to 15 minutes for a first image pull on a fresh VKS node, then verifies
+from inside the pod: the `[render-instance]` log shows PostgreSQL storage and S3 compute
+logs, and GraphQL reports every code location `LOADED`. A failed rollout prints pod
+descriptions and recent cluster events to distinguish image-pull or scheduling failures
+from application startup failures.
 
 ## Differences from the other VKS services (and why)
 

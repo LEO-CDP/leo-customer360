@@ -266,14 +266,19 @@ echo ">> Applying manifests (overlay: $ENV) ..."
 "${KUBECTL[@]}" apply -k "$GEN"
 
 echo ">> Waiting for the rollout ..."
-# A failure here is very often the database: the app RAISES on startup when Postgres is
-# unreachable, so the symptom is CrashLoopBackOff rather than a pod that starts unready.
-"${KUBECTL[@]}" -n "$NAMESPACE" rollout status deploy/promotions --timeout=5m || {
-  echo "   ROLLOUT FAILED. Most likely the pods cannot reach Postgres at $DB_HOST:$DB_PORT,"
-  echo "   or the leo_ads schema was never created (run ../postgres/run-sql.sh $ENV). Logs:"
+# The first pull of the image onto a VKS node can take several minutes. Keep this in line
+# with the Dagster VKS deploy's 15-minute wait; the default 5-minute window expires while
+# the new pod is still ContainerCreating, even though the rollout would otherwise succeed.
+if ! "${KUBECTL[@]}" -n "$NAMESPACE" rollout status deploy/promotions --timeout=15m; then
+  echo "   ROLLOUT FAILED. Inspecting pods and cluster events before exiting:"
+  "${KUBECTL[@]}" -n "$NAMESPACE" get pods -l app=promotions -o wide || true
+  "${KUBECTL[@]}" -n "$NAMESPACE" describe pods -l app=promotions | tail -n 100 || true
+  "${KUBECTL[@]}" -n "$NAMESPACE" get events --sort-by=.lastTimestamp | tail -n 25 || true
+  echo "   If the pod is CrashLoopBackOff, verify Postgres at $DB_HOST:$DB_PORT and"
+  echo "   the leo_ads schema with: ../postgres/run-sql.sh $ENV"
   "${KUBECTL[@]}" -n "$NAMESPACE" logs -l app=promotions --tail=30 || true
   exit 1
-}
+fi
 
 echo "   --- pods ---"
 "${KUBECTL[@]}" -n "$NAMESPACE" get pods -l app=promotions -o wide

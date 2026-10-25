@@ -25,6 +25,9 @@ metadata:
   labels: { app: promotions }
 spec:
   replicas: 1 # the HPA owns this at runtime (minReplicas is also 1)
+  # A first image pull on a VKS node can take several minutes. Do not let the
+  # controller fail the rollout before the deploy script's wait expires.
+  progressDeadlineSeconds: 1200
   selector:
     matchLabels: { app: promotions }
   strategy:

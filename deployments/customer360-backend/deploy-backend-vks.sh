@@ -214,13 +214,14 @@ echo ">> Applying manifests (overlay: $ENV) ..."
 "${KUBECTL[@]}" apply -k "$GEN"
 
 echo ">> Waiting for the rollout ..."
-"${KUBECTL[@]}" -n "$NAMESPACE" rollout status deploy/dagster --timeout=12m || {
-  echo "   ROLLOUT FAILED. Likely causes: Postgres login/DB (see the [render-instance] lines), vStorage key,"
-  echo "   or OOMKilled on the small UAT nodes. Logs:"
+if ! "${KUBECTL[@]}" -n "$NAMESPACE" rollout status deploy/dagster --timeout=15m; then
+  echo "   ROLLOUT FAILED. Inspecting pods and cluster events before exiting:"
   "${KUBECTL[@]}" -n "$NAMESPACE" logs deploy/dagster --tail=40 || true
-  "${KUBECTL[@]}" -n "$NAMESPACE" get pods -l app=dagster || true
+  "${KUBECTL[@]}" -n "$NAMESPACE" get pods -l app=dagster -o wide || true
+  "${KUBECTL[@]}" -n "$NAMESPACE" describe pods -l app=dagster | tail -n 100 || true
+  "${KUBECTL[@]}" -n "$NAMESPACE" get events --sort-by=.lastTimestamp | tail -n 25 || true
   exit 1
-}
+fi
 "${KUBECTL[@]}" -n "$NAMESPACE" get pods -l app=dagster -o wide
 
 # --- verification from INSIDE the pod ---

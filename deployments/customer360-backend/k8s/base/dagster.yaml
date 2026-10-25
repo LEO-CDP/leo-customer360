@@ -17,6 +17,9 @@ metadata:
   labels: { app: dagster }
 spec:
   replicas: 1
+  # The first pull of the large Dagster image can take several minutes on a fresh VKS node.
+  # Keep the controller deadline longer than the deploy script's rollout wait.
+  progressDeadlineSeconds: 1200
   strategy: { type: Recreate }
   selector:
     matchLabels: { app: dagster }

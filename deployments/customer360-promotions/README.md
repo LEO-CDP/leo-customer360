@@ -49,6 +49,9 @@ export GHCR_PULL_TOKEN=<a token with read:packages>   # the image is private
 `deploy-promotions.sh` resolves the DB host from `../postgres` and the Redis host from
 `../cache` + `../server` — the same Terraform state the vServer deploy used — renders them
 into a hash-suffixed ConfigMap/Secret, pins the image by digest, and applies the overlay.
+The rollout wait is 15 minutes to allow the first image pull onto a VKS node; a failed
+rollout also prints pod descriptions and recent cluster events to distinguish image-pull or
+scheduling problems from application and database failures.
 
 ## The schema is NOT bootstrapped by this script
 
