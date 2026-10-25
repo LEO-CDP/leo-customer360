@@ -294,7 +294,7 @@ echo ">> Applying manifests (overlay: $ENV) ..."
 "${KUBECTL[@]}" apply -k "$GEN"
 
 echo ">> Waiting for the rollout ..."
-if ! "${KUBECTL[@]}" -n "$NAMESPACE" rollout status deploy/event-api --timeout=5m; then
+if ! "${KUBECTL[@]}" -n "$NAMESPACE" rollout status deploy/event-api --timeout=15m; then
   echo "   --- rollout failed: pods / events ---"
   "${KUBECTL[@]}" -n "$NAMESPACE" get pods -l app=event-api -o wide || true
   "${KUBECTL[@]}" -n "$NAMESPACE" describe pods -l app=event-api | tail -n 80 || true
