@@ -109,7 +109,7 @@ Recommended order for a rollout:
 
 ```
 python tests/load/serve_load.py --base-url http://localhost:9009 --tenant demo \
-    --placement homepage_top --rps 200 --duration 30 --visitors 500
+    --placement demo-personalisation-top --rps 200 --duration 30 --visitors 500
 ```
 
 Run it against a disposable database with personalisation on for the tenant and a hold-out of 0. The target is at least 95% of `/serve` calls no more than 50 ms slower than the baseline, and every response valid; the script prints `PASS` or `FAIL` and exits non-zero on failure. Add `--json` for a machine-readable report.

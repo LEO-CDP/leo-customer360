@@ -17,7 +17,7 @@ so the pool of visitors is not held out), run against a disposable database, and
 never against production data. No dependency beyond the HTTP client the tests use.
 
     python tests/load/serve_load.py --base-url http://localhost:9009 --tenant demo \\
-        --placement homepage_top --rps 200 --duration 30 --visitors 500
+        --placement demo-personalisation-top --rps 200 --duration 30 --visitors 500
 """
 
 from __future__ import annotations
@@ -172,7 +172,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--base-url", default="http://localhost:9009")
     parser.add_argument("--tenant", default="demo")
-    parser.add_argument("--placement", default="homepage_top")
+    parser.add_argument("--placement", default="demo-personalisation-top")
     parser.add_argument("--rps", type=float, default=50.0, help="serve requests per second, per phase")
     parser.add_argument("--duration", type=float, default=20.0, help="seconds per phase")
     parser.add_argument("--visitors", type=int, default=500, help="size of the visitor pool")

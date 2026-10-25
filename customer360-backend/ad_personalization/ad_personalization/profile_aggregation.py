@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 WEIGHTS_ENV = "AD_PERSONALIZATION_WEIGHTS_FILE"
 _DEFAULT_WEIGHTS_PATH = (
     Path(__file__).resolve().parents[3]
-    / "specs" / "003-ad-personalization-engine" / "contracts" / "profile-event-weights.json"
+    / "docs" / "ad-personalization" / "contracts" / "profile-event-weights.json"
 )
 
 # Used only when the contract file is not shipped with the deployment (for

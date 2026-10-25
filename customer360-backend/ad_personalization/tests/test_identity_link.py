@@ -16,7 +16,7 @@ from ad_personalization import identity_link as il
 
 VECTORS_PATH = (
     Path(__file__).resolve().parents[3]
-    / "specs" / "003-ad-personalization-engine" / "contracts" / "visitor-key-test-vectors.json"
+    / "docs" / "ad-personalization" / "contracts" / "visitor-key-test-vectors.json"
 )
 SECRET = "unit-test-secret"
 

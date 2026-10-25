@@ -63,7 +63,7 @@ BEGIN
                 'content_item_id', 'tenant_id', 'domain', 'item_type', 'title', 'summary', 'segment_tags',
                 'published_at', 'status_code', 'created_at', 'updated_at']),
             ('crm_campaign', ARRAY[
-                'campaign_id', 'tenant_id', 'segment_id', 'template_id', 'approval_status', 'strategy_summary',
+                'campaign_id', 'tenant_id', 'segment_id', 'approval_status', 'strategy_summary',
                 'campaign_code', 'name', 'status', 'channel', 'platform', 'objective', 'description', 'keywords',
                 'lang', 'start_date', 'end_date', 'budget_amount', 'currency', 'created_at', 'updated_at']),
             ('crm_campaign_performance_daily', ARRAY[

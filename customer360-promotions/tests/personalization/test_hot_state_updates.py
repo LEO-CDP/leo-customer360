@@ -262,7 +262,7 @@ def test_unavailable_hot_state_raises_for_callers_to_fail_open():
 def test_signal_weights_match_the_shared_contract():
     path = (
         Path(__file__).resolve().parents[3]
-        / "specs" / "003-ad-personalization-engine" / "contracts" / "profile-event-weights.json"
+        / "docs" / "ad-personalization" / "contracts" / "profile-event-weights.json"
     )
     if not path.exists():
         pytest.skip("contract file not available in this checkout")

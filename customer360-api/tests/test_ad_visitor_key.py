@@ -13,7 +13,7 @@ from core.utils import ad_visitor_key as avk
 
 VECTORS_PATH = (
     Path(__file__).resolve().parents[2]
-    / "specs" / "003-ad-personalization-engine" / "contracts" / "visitor-key-test-vectors.json"
+    / "docs" / "ad-personalization" / "contracts" / "visitor-key-test-vectors.json"
 )
 
 

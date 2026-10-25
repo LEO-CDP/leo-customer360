@@ -2348,7 +2348,9 @@ ON CONFLICT DO NOTHING;
 -- 14B. PERSONALISATION DEMO CATALOGUE (specs/003-ad-personalization-engine)
 --
 -- Two advertisers (A and B), six campaigns (awareness, traffic and conversions
--- for each) and one eligible ad per campaign on the `homepage_top` placement,
+-- for each) and one eligible ad per campaign on the `demo-personalisation-top`
+-- placement (its own key: `homepage_top` is used by other tests and examples, and
+-- the unauthenticated placements endpoint resolves a key across all tenants),
 -- plus five ads that are deliberately NOT servable so the quickstart can show
 -- eligibility at work:
 --
@@ -2369,7 +2371,7 @@ INSERT INTO leo_ads.placement (
     min_width_px, max_width_px, min_height_px, max_height_px, responsive, metadata
 )
 SELECT
-    t.tenant_id, 'homepage_top', 'Homepage Top (personalisation demo)', 'active',
+    t.tenant_id, 'demo-personalisation-top', 'Homepage Top (personalisation demo)', 'active',
     300, 300, 250, 250, false, '{"position":"homepage_top","demo":"personalisation"}'::jsonb
 FROM leo_ads.tenant t
 WHERE t.tenant_key = 'demo'
@@ -2452,7 +2454,7 @@ JOIN (
 ) AS x(ad_key, campaign_key, creative_key, status, frequency_cap, metadata) ON TRUE
 JOIN leo_ads.campaign c  ON c.tenant_id = t.tenant_id AND c.campaign_key = x.campaign_key
 JOIN leo_ads.creative cr ON cr.tenant_id = t.tenant_id AND cr.creative_key = x.creative_key
-JOIN leo_ads.placement p ON p.tenant_id = t.tenant_id AND p.placement_key = 'homepage_top'
+JOIN leo_ads.placement p ON p.tenant_id = t.tenant_id AND p.placement_key = 'demo-personalisation-top'
 WHERE t.tenant_key = 'demo'
 ON CONFLICT (tenant_id, ad_key) DO NOTHING;
 

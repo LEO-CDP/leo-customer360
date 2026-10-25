@@ -27,7 +27,7 @@ NOW = datetime(2026, 10, 18, 9, 0, tzinfo=timezone.utc)
 TENANT = 7
 VECTORS = (
     Path(__file__).resolve().parents[3]
-    / "specs" / "003-ad-personalization-engine" / "contracts" / "cohort-key-test-vectors.json"
+    / "docs" / "ad-personalization" / "contracts" / "cohort-key-test-vectors.json"
 )
 
 

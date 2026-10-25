@@ -99,7 +99,7 @@ def test_the_shared_vectors_match_so_the_admin_api_derives_the_same_keys():
 
     path = (
         Path(__file__).resolve().parents[3]
-        / "specs" / "003-ad-personalization-engine" / "contracts" / "visitor-key-test-vectors.json"
+        / "docs" / "ad-personalization" / "contracts" / "visitor-key-test-vectors.json"
     )
     if not path.exists():
         pytest.skip("shared test vectors not available in this checkout")

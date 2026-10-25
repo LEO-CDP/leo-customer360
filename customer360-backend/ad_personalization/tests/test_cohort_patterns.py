@@ -17,7 +17,7 @@ from ad_personalization import cohort_patterns as cp
 
 VECTORS = (
     Path(cp.__file__).resolve().parents[3]
-    / "specs" / "003-ad-personalization-engine" / "contracts" / "cohort-key-test-vectors.json"
+    / "docs" / "ad-personalization" / "contracts" / "cohort-key-test-vectors.json"
 )
 MIN = 3  # the minimum cohort size used by the database tests
 

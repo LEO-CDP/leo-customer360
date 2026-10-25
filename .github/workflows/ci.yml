@@ -110,7 +110,7 @@ jobs:
             customer360-agent) runners="customer360-agent/run_unit_tests.sh" ;;
             customer360-dao)   runners="customer360-dao/run_tests.sh" ;;
             customer360-event-api) runners="customer360-event-api/run_unit_tests.sh" ;;
-            customer360-backend)    runners="customer360-backend/identity_resolution/run_tests.sh customer360-backend/segmentation/run_tests.sh customer360-backend/campaign_activation/run_tests.sh customer360-backend/email_engine/run_tests.sh customer360-backend/notification_engine/run_tests.sh" ;;
+            customer360-backend)    runners="customer360-backend/identity_resolution/run_tests.sh customer360-backend/segmentation/run_tests.sh customer360-backend/campaign_activation/run_tests.sh customer360-backend/email_engine/run_tests.sh customer360-backend/notification_engine/run_tests.sh customer360-backend/ad_personalization/run_tests.sh" ;;
             docs-vector-search) runners="tools/docs-vector-search/run_unit_tests.sh" ;;
             *)                 runners="" ;;
           esac

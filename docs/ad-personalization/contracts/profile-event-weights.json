@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "description": "How visitor behaviour is turned into profile affinity. Read by the ad_personalization profile_aggregation job; the dimension names and tag limits mirror customer360-promotions/personalization/features.py, and the event weights are mirrored by personalization/signals.py (a test in each service keeps them identical).",
+  "dimensions": ["advertiser", "ad_type", "format", "tag"],
+  "event_weights": {
+    "impression": 0.0,
+    "view": 0.2,
+    "click": 1.0,
+    "dismiss": -1.0,
+    "conversion": 2.0,
+    "view_through_conversion": 1.0
+  },
+  "half_life_days": 14,
+  "window_days": 30,
+  "recent_dismissed_hours": 24,
+  "max_tags": 10,
+  "max_tag_length": 64
+}
