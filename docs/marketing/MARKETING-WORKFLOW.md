@@ -17,6 +17,7 @@ The current core seed catalog supports:
 
 | Code | Business domain |
 | --- | --- |
+| `_` | Unclassified / Not set (fallback for profiles without a classified vertical) |
 | `retail` | Retail & E-Commerce |
 | `banking` | Banking & Financial Services |
 | `insurance` | Insurance |
@@ -32,9 +33,16 @@ The current core seed catalog supports:
 These values are seeded in
 [`init-core-database.sql`](../../customer360-database/init-core-database.sql)
 and filtered through `sys_tenant_domain`. Profile identity resolution,
-segmentation, content, and persona APIs use the same active-domain catalog.
-The special value `all` is accepted by APIs that support cross-domain filters;
-it is not a row in `sys_domain`.
+segmentation, content, persona APIs, and domain-scoped journey analytics use
+the same active-domain catalog (`_` is excluded from domain-specific KPI
+rollups). The special value `all` is accepted by APIs that support cross-domain
+filters; it is not a row in `sys_domain`.
+
+On `customer360.sys_tenant`, `business_type` stores the tenant's industry or
+vertical (for example, `retail`), while `business_model` stores the tenant's
+go-to-market model (`B2B`, `B2C`, or `B2B2C`, defaulting to `B2C`). Journey
+analytics uses `business_model` to filter KPI applicability and `sys_domain` to
+separate general (`domain_code IS NULL`) from domain-specific KPI snapshots.
 
 Business domains are separate from campaign delivery channels. The workflow
 engine currently supports email, web push, and notification providers for SMS,
@@ -55,8 +63,9 @@ different channel actions, or reach an audience-sync action.
 
 ```mermaid
 flowchart LR
-    MARKETER[Marketer] -->|select audience + design journey| UI[Campaign editor]
-    UI -->|save campaign and workflow version atomically| API[Campaign workflow API]
+    MARKETER[Marketer] -->|select audience + design journey + assign agents| UI[Campaign editor & Journey Map]
+    AGENTS[cdp_ai_agents] -->|plan / decide / optimize + AI canvas nodes| UI
+    UI -->|save campaign, agent links & workflow version| API[Campaign workflow API]
     REVIEWER[Human reviewer] -->|approve workflow / campaign| API
     ADMIN[Tenant admin] -->|explicit Start| ACTAPI[Campaign activation API]
     ACTAPI -->|tenant/admin + readiness checks| ACT[campaign_activation_job]
@@ -69,7 +78,8 @@ flowchart LR
     ENGINE -->|reached nodes only| ADS[data_synch_job]
     ADS -->|suppression + hashing + provider upload| ADPLATFORMS[Meta / Google Ads / TikTok]
     RUN -->|status + counts + audit| DB
-    DB -->|refresh / state history| UI
+    DB -->|refresh_journey_metrics_pg + event lake| JREPORT[cdp_journey_metric_daily / vw_journey_stage_report]
+    JREPORT -->|stage KPIs, campaign & AI agent attribution| UI
 ```
 
 Three state dimensions must not be conflated:
@@ -223,6 +233,7 @@ The campaign editor persists these campaign fields:
 | Budget | `budget_amount` | Campaign budget |
 | Currency | `currency` | Budget currency |
 | Objective | `objective` | Awareness, Leads, Conversions, App Install, or Visit Store |
+| Journey stage | `journey_stage` | `awareness`, `acquisition`, `activation`, `engagement`, `conversion`, `retention`, or `loyalty`; connects the campaign to the Customer Journey Map |
 | Strategy summary | `strategy_summary` | Human description of the intended journey |
 | Planning constraints | `planning_constraints` | Hard constraints for the planning agent |
 | Owner | `user_id` | Authenticated campaign owner |
@@ -273,6 +284,17 @@ version 2 workflow JSON. The node catalog is defined in
 | Send web push | `push` | `title`, `body` | Sends the rendered title/body to the profile's push tokens |
 | Update profile / tag | `update_profile` | `action`, `tag` | Adds or removes a segmentation tag in `cdp_master_profiles` |
 | Sync custom audience | `run_data_synch_job` | `platform`, `audience_name` | Requests a campaign-scoped export only if at least one profile reaches this node |
+| AI decision | `ai_decide` | `agent_code`, decision parameters | Scores or classifies a profile via a registered `cdp_ai_agents` entry to feed a downstream `condition` node |
+| AI content generation | `ai_generate` | `agent_code`, generation parameters | Drafts personalized subject/body/copy via a registered `cdp_ai_agents` entry for a downstream send node |
+| AI recommendation | `ai_recommend` | `agent_code`, ranking parameters | Selects product, content, or next-best action via a registered `cdp_ai_agents` entry |
+
+In PostgreSQL (`customer360.crm_flow_node`), `agent_code` is a stored generated
+column (`GENERATED ALWAYS AS (config ->> 'agent_code') STORED`) with a foreign
+key to `customer360.cdp_ai_agents(agent_code)` and `crm_flow_node_ai_agent_check`
+enforcing a non-blank `agent_code` whenever `node_type` is `ai_decide`,
+`ai_generate`, or `ai_recommend`. Branching remains with `condition` (`yes` /
+`no`), so `crm_flow_edge`, `crm_save_flow`, and `crm_load_flow` require no
+structural change.
 
 The current frontend studio, DAO engine, API, and canonical SQL support these
 node types. API and engine validation enforce the configuration and graph
@@ -594,6 +616,116 @@ key, so full replays preserve earlier audit rows. Existing external audience IDs
 are reused for the same target. A session advisory lock serializes concurrent
 jobs for the same tenant/campaign/platform/audience.
 
+## Unifying Campaigns and AI Agents in Customer Journey Map Analytics
+
+Campaigns, AI agents, and customer lifecycle KPIs share a unified 7-stage
+Customer Journey Map defined in
+[`database-schema.sql`](../../customer360-database/database-schema.sql),
+[`017_agent_campagn_journey.sql`](../../customer360-database/migrations/017_agent_campagn_journey.sql),
+and [`018_journey_report.sql`](../../customer360-database/migrations/018_journey_report.sql):
+
+```text
+awareness -> acquisition -> activation -> engagement -> conversion -> retention -> loyalty
+```
+
+```mermaid
+flowchart TB
+    subgraph JourneyMap["7-Stage Customer Journey Map (awareness .. loyalty)"]
+        C[crm_campaign.journey_stage]
+        A[cdp_ai_agents.journey_stage]
+        CA[crm_campaign_agent<br/>role: plan / decide / optimize<br/>autonomy: suggest / approve]
+        FN[crm_flow_node<br/>ai_decide / ai_generate / ai_recommend]
+    end
+    subgraph Reporting["Customer Journey Map Analytics"]
+        MC[cdp_journey_metric<br/>applicable_business_models: B2B / B2C / B2B2C]
+        MD[cdp_journey_metric_domain<br/>NULL = general, or sys_domain]
+        REFRESH[refresh_journey_metrics_pg]
+        LAKE[Event-lake KPI job]
+        DAILY[cdp_journey_metric_daily<br/>windows: 1 / 7 / 30 / 90d<br/>dims: all / channel / campaign / segment / agent]
+        VIEW[vw_journey_stage_report<br/>value, previous_value, change, currency, business_model, domain_code]
+    end
+    A --> CA
+    C --> CA
+    A --> FN
+    C --> REFRESH
+    CA --> REFRESH
+    MC --> MD
+    MD --> REFRESH
+    REFRESH --> DAILY
+    LAKE --> DAILY
+    DAILY --> VIEW
+    MD --> VIEW
+```
+
+### 1. Connecting Campaigns to AI Agents
+
+- **Journey-stage alignment:** Both `crm_campaign.journey_stage` and
+  `cdp_ai_agents.journey_stage` use the same 7-stage vocabulary (`NULL` on
+  `cdp_ai_agents` indicates a cross-stage agent). This allows the Journey Map UI
+  to display live campaigns and assigned AI agents side by side at every stage.
+- **Campaign–agent assignments (`crm_campaign_agent`):** Records which registered
+  AI agents work on a campaign, in which `role` (`plan`, `decide`, `optimize`),
+  at which `autonomy` level (`suggest` for advisory output, `approve` for
+  agent-drafted artifacts requiring human approval), with optional
+  `pinned_instruction_version` and JSONB `guardrails`.
+- **Workflow canvas AI nodes (`crm_flow_node`):** Workflow versions can embed
+  `ai_decide`, `ai_generate`, and `ai_recommend` nodes whose `config->>'agent_code'`
+  is projected into the stored generated column `crm_flow_node.agent_code` and
+  validated by a foreign key to `cdp_ai_agents(agent_code)`.
+
+### 2. Journey Stage KPI Catalog (`cdp_journey_metric` & `cdp_journey_metric_domain`)
+
+Each stage reports governed KPIs from `customer360.cdp_journey_metric`:
+
+| Stage | Primary KPI (`is_primary = true`) | Secondary / Stage KPI | Source |
+| --- | --- | --- | --- |
+| `awareness` | `visitors` (`count`) | `awareness_conversion` (`percent`) | `event_lake` |
+| `acquisition` | `new_leads` (`count`) | `acquisition_conversion` (`percent`) | `event_lake` |
+| `activation` | `activated_users` (`count`) | `activation_conversion` (`percent`) | `event_lake` |
+| `engagement` | `active_customers` (`count`) | `purchase_frequency` (`ratio`) | `transaction` |
+| `conversion` | `orders` (`count`) | `conversion_rate` (`percent`) | `transaction` / `event_lake` |
+| `retention` | `retention_rate` (`percent`) | `churn_risk_rate` (`percent`) | `transaction` / `profile` |
+| `loyalty` | `repeat_purchase_rate` (`percent`) | `referral_rate` (`percent`) | `transaction` / `event_lake` |
+| Cross-stage (`NULL`) | — | `campaign_spend` (`currency`), `campaign_conversions` (`count`), `campaign_revenue` (`currency`) | `campaign` |
+
+- **Business-model support (`B2B`, `B2C`, `B2B2C`):** `cdp_journey_metric.applicable_business_models`
+  declares which go-to-market models each KPI supports (defaulting to
+  `ARRAY['B2B', 'B2C', 'B2B2C']`). `sys_tenant.business_model` (default `'B2C'`)
+  determines the tenant's business model for snapshot generation and view
+  filtering.
+- **General vs. `sys_domain` scope (`cdp_journey_metric_domain`):** A row with
+  `domain_code IS NULL` enables the general (cross-domain) KPI; a row with an
+  active `sys_domain.domain_code` enables domain-scoped reporting for that KPI.
+
+### 3. Daily Trailing-Window Snapshots & Attribution (`cdp_journey_metric_daily`)
+
+- **Trailing windows (`window_days` in `1`, `7`, `30`, `90`):** Rates and
+  distinct profile counts cannot be summed across days, so each snapshot stores
+  the exact numerator, denominator, and value for the trailing window ending on
+  `report_date`.
+- **Dimensions (`dim_type` / `dim_value`):**
+  - `all` (`''`): stage-level aggregate.
+  - `campaign` (`campaign_id::text`): per-campaign contribution within the stage.
+  - `agent` (`agent_code`): attribution for each active AI agent assigned to
+    campaigns in that stage via `crm_campaign_agent`. Full campaign metrics are
+    attributed to each active assigned agent (non-additive when a campaign has
+    multiple active agents).
+  - `channel` and `segment`: available for channel/segment breakdowns.
+- **Currency separation (`currency`):** Campaign-derived metrics carry the
+  campaign's normalized ISO 4217 currency code (or `UNK` when unset) and never
+  sum different currencies together.
+- **Nightly PostgreSQL refresh (`refresh_journey_metrics_pg(p_tenant, p_date)`):**
+  Requires transaction-local `app.tenant_id` to match `p_tenant`, replaces only
+  PostgreSQL-sourced metrics for `(p_tenant, p_date, business_model)` while
+  preserving event-lake snapshots, and computes both general (`domain_code IS NULL`)
+  and enabled `sys_domain` transaction/churn rollups plus campaign/agent rollups.
+- **Reporting view (`vw_journey_stage_report`):** Security-invoker view joining
+  current snapshots to the prior window (`report_date - window_days`) with
+   matching `tenant_id`, `window_days`, `journey_stage`, `metric_code`,
+  `dim_type`, `dim_value`, `business_model`, `domain_code`, and `currency` to
+  compute `previous_value`, `change`, and `change_kind` (`points` for percentage
+  KPIs, `percent` for count/ratio/currency KPIs).
+
 ## Database model
 
 The canonical schema is
@@ -603,15 +735,22 @@ Campaign workflow tables:
 
 | Table | Role |
 | --- | --- |
-| `crm_campaign` | Campaign metadata, owner, segment, workflow pin, approval state, planning fields |
+| `crm_campaign` | Campaign metadata, owner, segment, `journey_stage`, workflow pin, approval state, planning fields |
+| `crm_campaign_agent` | Campaign-to-AI-agent assignments (`role`, `autonomy`, `pinned_instruction_version`, `guardrails`) |
+| `cdp_ai_agents` | Unified AI agent and ML model registry, prompt versions, and agent `journey_stage` |
 | `cdp_segments` | Selected audience definition and membership tag |
 | `crm_flow` | Workflow identity and lifecycle |
 | `crm_flow_version` | Immutable workflow JSON snapshot and governance state |
-| `crm_flow_node` | Shredded workflow nodes for queries |
+| `crm_flow_node` | Shredded workflow nodes for queries, including AI nodes and generated `agent_code` FK |
 | `crm_flow_edge` | Parent/child workflow edges |
 | `crm_campaign_workflow_action_runs` | Per-execution/profile/node action idempotency and provider results |
 | `crm_ad_sync_runs` | Campaign-scoped audience-sync audit state |
-| `cdp_master_profiles` | Profiles loaded into workflow execution |
+| `cdp_journey_metric` | Journey stage KPI catalog with `applicable_business_models` (`B2B`, `B2C`, `B2B2C`) |
+| `cdp_journey_metric_domain` | General (`NULL`) and `sys_domain`-specific scope mappings for journey KPIs |
+| `cdp_journey_metric_daily` | Tenant-scoped daily trailing-window KPI snapshots across stages, dimensions, domains, and currencies |
+| `vw_journey_stage_report` | Security-invoker reporting view with current value, prior window value, and delta |
+| `cdp_master_profiles` | Profiles loaded into workflow execution and churn/domain journey rollups |
+| `crm_transactions` | Transaction facts used for engagement, conversion, retention, and loyalty journey KPIs |
 | `cdp_raw_profiles_stage` | Raw events used by wait-for-event execution |
 | `cdp_profile_links` | Raw-to-master profile event linkage |
 | `crm_connector_config` | Tenant provider configuration |
@@ -621,11 +760,18 @@ Campaign workflow tables:
 The canonical schema is the source of truth for fresh initialization and the
 workflow upgrade definitions. An existing database must receive the current:
 
-- campaign `workflow_id`, `workflow_version`, `workflow_execution_id`, and `planning_constraints`
-  columns, paired-null check, and tenant-scoped workflow-version foreign key;
+- campaign `workflow_id`, `workflow_version`, `workflow_execution_id`, `planning_constraints`,
+  and `journey_stage` columns, paired-null check, and tenant-scoped workflow-version foreign key;
 - workflow author/review columns, constraints, and immutable-snapshot triggers;
 - eight-argument `crm_save_flow` and current review/publish/load functions;
-- notification/audience-sync node-type constraint and node view;
+- notification, audience-sync, and AI (`ai_decide`, `ai_generate`, `ai_recommend`)
+  node-type constraints, generated `crm_flow_node.agent_code` column/FK, and node view;
+- `crm_campaign_agent` table with composite tenant-campaign foreign key and forced RLS
+  ([`017_agent_campagn_journey.sql`](../../customer360-database/migrations/017_agent_campagn_journey.sql));
+- `sys_tenant.business_model` (default `'B2C'`), `cdp_journey_metric`,
+  `cdp_journey_metric_domain`, `cdp_journey_metric_daily`, `refresh_journey_metrics_pg`,
+  and `vw_journey_stage_report`
+  ([`018_journey_report.sql`](../../customer360-database/migrations/018_journey_report.sql));
 - per-execution action-ledger key migration and audience-sync audit tables.
 
 The execution-ledger migration retains existing action rows by assigning them
@@ -735,6 +881,11 @@ another execution was attempted.
 - [DAO engine tests](../../customer360-dao/src/tests/test_workflow_engine.py) and
   [PostgreSQL persistence tests](../../customer360-dao/src/tests/test_workflow_repository.py):
   graph execution, validation, round trips, and governance.
+- [Database schema contract tests](../../customer360-database/tests/test_campaign_agent_schema.py) and
+  [journey reporting schema tests](../../customer360-database/tests/test_journey_reporting_schema.py):
+  verify campaign-to-agent assignments, AI workflow node constraints, B2B/B2C/B2B2C
+  business-model defaults, `sys_domain` metric scopes, and currency-separated journey
+  reporting in both `database-schema.sql` and forward migrations `017` / `018`.
 - [Frontend regression tests](../../customer360-frontend/tests/workflow.test.js):
   profile/consent mapping, validation, simulation, and iframe-aware saving.
 

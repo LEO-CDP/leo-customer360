@@ -46,6 +46,32 @@ CREATE TABLE IF NOT EXISTS customer360.sys_tenant (
     metadata JSONB
 );
 
+-- Existing databases may already have sys_tenant without the business-model
+-- column; keep the canonical definition above while making bootstrap upgrades
+-- safe and defaulting legacy tenants to B2C.
+ALTER TABLE customer360.sys_tenant
+    ADD COLUMN IF NOT EXISTS business_model TEXT DEFAULT 'B2C';
+UPDATE customer360.sys_tenant
+SET business_model = 'B2C'
+WHERE business_model IS NULL;
+ALTER TABLE customer360.sys_tenant
+    ALTER COLUMN business_model SET DEFAULT 'B2C',
+    ALTER COLUMN business_model SET NOT NULL;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'customer360.sys_tenant'::regclass
+          AND conname = 'sys_tenant_business_model_check'
+    ) THEN
+        ALTER TABLE customer360.sys_tenant
+            ADD CONSTRAINT sys_tenant_business_model_check
+            CHECK (business_model IN ('B2B', 'B2C', 'B2B2C'));
+    END IF;
+END $$;
+
 COMMENT ON TABLE customer360.sys_tenant IS 'Top-level workspace/tenant record. Every tenant-scoped table in this schema carries a NOT NULL tenant_id FK to this table, enforced additionally via Row-Level Security (see the ROW LEVEL SECURITY section at the end of this file).';
 COMMENT ON COLUMN customer360.sys_tenant.business_type IS
     'Industry or business domain (for example, retail); not the B2B/B2C/B2B2C go-to-market model.';
@@ -436,6 +462,26 @@ CREATE TABLE IF NOT EXISTS customer360.crm_campaign (
     
     CONSTRAINT uq_crm_campaign_code UNIQUE (tenant_id, campaign_code)
 );
+
+ALTER TABLE customer360.crm_campaign
+    ADD COLUMN IF NOT EXISTS journey_stage VARCHAR(30);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'customer360.crm_campaign'::regclass
+          AND conname = 'chk_crm_campaign_journey_stage'
+    ) THEN
+        ALTER TABLE customer360.crm_campaign
+            ADD CONSTRAINT chk_crm_campaign_journey_stage
+            CHECK (journey_stage IS NULL OR journey_stage IN (
+                'awareness', 'acquisition', 'activation', 'engagement',
+                'conversion', 'retention', 'loyalty'
+            ));
+    END IF;
+END $$;
 
 COMMENT ON TABLE customer360.crm_campaign IS 'CRM journey-graph entity: a marketing initiative. Updated to support omnichannel dashboard dimensions (channel, platform, objective, status). Responders are tracked via crm_campaign_member.';
 COMMENT ON COLUMN customer360.crm_campaign.journey_stage IS
@@ -2055,6 +2101,26 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_ai_agents (
     CONSTRAINT chk_cdp_ai_agents_prompt_versions_array
         CHECK (jsonb_typeof(prompt_versions) = 'array')
 );
+
+ALTER TABLE customer360.cdp_ai_agents
+    ADD COLUMN IF NOT EXISTS journey_stage VARCHAR(30);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'customer360.cdp_ai_agents'::regclass
+          AND conname = 'chk_cdp_ai_agents_journey_stage'
+    ) THEN
+        ALTER TABLE customer360.cdp_ai_agents
+            ADD CONSTRAINT chk_cdp_ai_agents_journey_stage
+            CHECK (journey_stage IS NULL OR journey_stage IN (
+                'awareness', 'acquisition', 'activation', 'engagement',
+                'conversion', 'retention', 'loyalty'
+            ));
+    END IF;
+END $$;
 
 COMMENT ON TABLE customer360.cdp_ai_agents IS
     'Unified registry for AI/ML models and task-oriented AI agents. Stores model configuration and current agent instructions.';
@@ -5247,6 +5313,38 @@ ALTER TABLE customer360.crm_flow_node
         'email', 'notification', 'push', 'update_profile', 'run_data_synch_job',
         'ai_decide', 'ai_generate', 'ai_recommend'
     )) NOT VALID;
+
+ALTER TABLE customer360.crm_flow_node
+    ADD COLUMN IF NOT EXISTS agent_code VARCHAR(100)
+    GENERATED ALWAYS AS (config ->> 'agent_code') STORED;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'customer360.crm_flow_node'::regclass
+          AND conname = 'crm_flow_node_ai_agent_check'
+    ) THEN
+        ALTER TABLE customer360.crm_flow_node
+            ADD CONSTRAINT crm_flow_node_ai_agent_check
+            CHECK (node_type NOT IN ('ai_decide', 'ai_generate', 'ai_recommend')
+                   OR (config ->> 'agent_code' IS NOT NULL
+                       AND btrim(config ->> 'agent_code') <> ''));
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'customer360.crm_flow_node'::regclass
+          AND conname = 'crm_flow_node_agent_fk'
+    ) THEN
+        ALTER TABLE customer360.crm_flow_node
+            ADD CONSTRAINT crm_flow_node_agent_fk
+            FOREIGN KEY (agent_code)
+            REFERENCES customer360.cdp_ai_agents (agent_code) ON DELETE RESTRICT;
+    END IF;
+END $$;
 
 COMMENT ON COLUMN customer360.crm_flow_node.agent_code IS
     'Generated from config->>agent_code. Set only for AI nodes; FK keeps every AI node pointing at a registered agent.';
