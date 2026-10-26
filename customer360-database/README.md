@@ -195,7 +195,11 @@ conditions are present.
 ### System, tenants, and access control
 
 - `sys_tenant`, `sys_domain`, and `sys_tenant_domain` define tenants and the
-	system business-domain vocabulary.
+	system business-domain vocabulary. `sys_tenant.business_type` stores the
+	tenant's industry/vertical (such as `retail`), while
+	`sys_tenant.business_model` stores the go-to-market model (`B2B`, `B2C`,
+	or `B2B2C`, defaulting to `B2C`). `sys_domain` includes `_` for
+	unclassified profiles alongside vertical domain codes.
 - `sys_organization` stores tenant organization trees.
 - `sys_user` stores internal application users. SSO identities and local
 	credentials are separated into `sys_userinfo`.
@@ -205,12 +209,34 @@ conditions are present.
 	result information for compliance reporting.
 - `sys_data_source` stores inbound data-source and ingestion metadata. Its
 	`access_tokens` JSONB belongs to inbound collection connectors.
+- `sys_assistant_message` stores tenant-scoped conversational memory rows for
+	the LEO Assistant.
 
-### CRM and outbound activation
+### CRM, campaigns, workflows, and outbound activation
 
 - `crm_campaign` and `crm_campaign_performance_daily` store campaigns and
-	daily omnichannel performance. `vw_campaign_performance_metrics` exposes
-	aggregate spend, funnel rates, CPA, and ROAS.
+	daily omnichannel performance. `crm_campaign.journey_stage` (`awareness`,
+	`acquisition`, `activation`, `engagement`, `conversion`, `retention`,
+	`loyalty`) places each campaign on the customer journey map, and
+	`vw_campaign_performance_metrics` exposes aggregate spend, funnel rates,
+	CPA, and ROAS.
+- `crm_campaign_agent` assigns AI agents (`cdp_ai_agents`) to a campaign with a
+	specific `role` (`plan`, `decide`, `optimize`), `autonomy` (`suggest`,
+	`approve`), optional `pinned_instruction_version`, and JSONB `guardrails`,
+	enforced by a composite tenant-campaign foreign key and forced tenant RLS.
+- `crm_flow`, `crm_flow_version`, `crm_flow_node`, `crm_flow_edge`, and
+	`crm_vw_flow_node` store versioned, immutable customer journey workflow
+	trees. `crm_flow_node` supports trigger, branching, wait, outbound, sync,
+	and AI canvas nodes (`ai_decide`, `ai_generate`, `ai_recommend`) with a
+	stored generated `agent_code` column (`config ->> 'agent_code'`) referencing
+	`cdp_ai_agents(agent_code)`. Helper functions (`crm_save_flow`,
+	`crm_review_flow_version`, `crm_publish_flow`, `crm_load_flow`, and
+	`crm_node_json`) manage snapshot creation, human review, publishing, and
+	JSON reconstruction.
+- `crm_campaign_workflow_action_runs` is the per-profile, per-execution
+	idempotency ledger for workflow action nodes.
+- `crm_ad_sync_runs` records tenant-scoped, idempotent audience uploads to
+	external ad platforms (`meta_ads`, `google_ads`, `tiktok_ads`).
 - `crm_campaign_experiments` stores campaign-level experiment status, date
 	windows, primary metric, and winning variant. Its
 	`crm_campaign_experiment_variants` rows define each treatment/control
@@ -236,13 +262,16 @@ conditions are present.
 	suppression records. PostgreSQL exclusion constraints prevent overlapping
 	active suppression windows.
 
-### Customer 360 profiles and identity resolution
+### Customer 360 profiles, valuation, and identity resolution
 
 - `cdp_master_profiles` is the golden profile per tenant and domain. It holds
 	identity, demographics, channel identifiers, consent, lifecycle state,
-	persona labels, lineage, and ML/CX scores.
+	persona labels, standardized `audience_tags`, lineage, and ML/CX scores.
 - `cdp_domain_profiles` stores domain-specific attributes and analytics as
 	validated JSONB objects, one row per master profile and domain.
+- `cdp_customer_valuation` stores reproducible discounted contribution-value
+	and CLV snapshots per tenant, master profile, `sys_domain`, `as_of_date`,
+	and model version.
 - `cdp_raw_profiles_stage` is the inbound landing area before Customer
 	Identity Resolution (CIR).
 - `cdp_profile_links` records raw-to-master matches, scores, methods, and
@@ -254,7 +283,7 @@ conditions are present.
 - `cdp_relations` and `cdp_relation_types` model typed profile-to-profile
 	relationships.
 
-### Personas, metadata, and scoring
+### Personas, metadata, recommendations, and scoring
 
 - `cdp_persona_archetypes` stores reusable tenant/domain persona definitions,
 	embeddings, centroids, and matched-profile counts.
@@ -264,15 +293,23 @@ conditions are present.
 - `cdp_persona_config` stores typed runtime scoring thresholds and weights.
 - `cdp_profile_attributes` is the governed attribute catalog used by CIR,
 	segmentation, and scoring metadata.
+- `cdp_audience_tags` stores the IAB Audience Taxonomy 1.1 hierarchy used on
+	profiles and segments.
 - `cdp_ai_agents` is the single registry for scoring models, rule engines, and
-	task-oriented agents. It also stores current prompt instructions and the
+	task-oriented agents. It stores `journey_stage` (`awareness`..`loyalty`, or
+	`NULL` for cross-stage agents), current prompt instructions, and the
 	append-only `prompt_versions` JSONB history used by `customer360-agent`.
 - `cdp_ai_feature_catalog` is the allow-listed contract behind
 	`cdp_ai_agents.input_features`. Each feature has reviewed SQL and pandas
 	derivation guidance over tenant-scoped profile, S3 event, transaction,
 	contact, graph, candidate, or runtime data.
 - `cdp_event_catalog` defines the cross-domain event vocabulary.
-- `cdp_content_items` stores personalized content candidates.
+- `cdp_content_items` and `cdp_product_items` store personalized content and
+	product catalog items (including vector embeddings and tenant-scoped
+	`ext_attributes`).
+- `cdp_profile_recommendation_runs` and `cdp_profile_recommendations` store
+	tenant-scoped, segment-aware recommendation execution metadata and per-profile
+	ranked content candidates.
 - `cdp_segments` stores audience rules, generated SQL, processing source, and
 	computed membership counts.
 - `cdp_agent_workflow` links the global `cdp_ai_agents` registry to tenant-owned
@@ -282,6 +319,36 @@ conditions are present.
 	`cdp_content_items` (including products). Candidate IDs must be distinct,
 	exist, and belong to the same tenant; referenced items cannot be deleted or
 	have their tenant/ID changed until removed from all workflow lists.
+
+### Customer journey reporting
+
+- `cdp_journey_metric` is the global KPI catalog across the 7 journey stages
+	(`awareness`, `acquisition`, `activation`, `engagement`, `conversion`,
+	`retention`, `loyalty`, or `NULL` for cross-stage campaign metrics). Each
+	row declares `unit` (`count`, `percent`, `ratio`, `currency`), `source`
+	(`event_lake`, `profile`, `transaction`, `campaign`),
+	`applicable_business_models` (`B2B`, `B2C`, `B2B2C`), and a JSONB `rule`.
+- `cdp_journey_metric_domain` maps each KPI to its allowed domain scopes:
+	`domain_code IS NULL` enables the general (cross-domain) KPI, and a
+	non-null `domain_code` referencing `sys_domain` enables a domain-specific
+	KPI.
+- `cdp_journey_metric_daily` stores tenant-scoped daily trailing-window KPI
+	snapshots (`window_days` in `1`, `7`, `30`, `90`) keyed by
+	`(tenant_id, report_date, window_days, business_model, domain_code, journey_stage, metric_code, dim_type, dim_value, currency)`.
+	Supported `dim_type` values are `all`, `channel`, `campaign`, `segment`,
+	and `agent`. Campaign-derived metrics carry an ISO 4217 `currency` (`UNK`
+	when unset) so multi-currency figures are never summed together.
+- `refresh_journey_metrics_pg(p_tenant, p_date)` refreshes PostgreSQL-sourced
+	general and domain-scoped transaction/profile KPIs plus campaign and active
+	assigned-agent (`crm_campaign_agent`) rollups for the tenant's
+	`business_model` (default `B2C`), while leaving event-lake KPI snapshots
+	untouched. Callers must set transaction-local `app.tenant_id` equal to
+	`p_tenant`.
+- `vw_journey_stage_report` (`security_invoker = true`) joins current and
+	prior-window snapshots with `cdp_journey_metric` and
+	`cdp_journey_metric_domain` to expose `value`, `previous_value`, `change`,
+	`change_kind` (`points` for percent metrics, `percent` otherwise),
+	`currency`, `business_model`, and `domain_code`.
 
 ### Segment agent workflows
 
@@ -405,7 +472,27 @@ manual loop in Installation Order, shell glob order is the migration order.
 | `004_campaign_experiments.sql` | Create campaign experiment/variant tables with tenant-aware references, constraints, indexes, and RLS. |
 | `005_campaign_content_items.sql` | Restore the campaign-to-content relation with tenant-safe foreign keys and RLS. |
 | `006_cdp_agent_workflow.sql` | Add the tenant/segment/agent workflow queue, scheduling override, ordered execution constraints, candidate integrity triggers, indexes, and forced tenant RLS. |
-| `017_agent_campagn_journey.sql` | Add campaign and agent journey stages, AI workflow nodes, and tenant-scoped campaign-agent assignments. |
+| `007_cdp_product_items.sql` | Add tenant-scoped product items (`cdp_product_items`) with `ext_attributes` JSONB and optional link to `cdp_content_items`. |
+| `008_content_embedding_contract.sql` | Enforce non-null content tags, add embedding metadata, and support 384/768-dimensional HNSW vector indexes. |
+| `009_assistant_messages.sql` | Add tenant-scoped conversational memory (`sys_assistant_message`) with composite tenant foreign keys and RLS. |
+| `010_campaign_workflow_link.sql` | Link campaigns to immutable customer journey workflow versions (`crm_flow`, `crm_flow_version`, `crm_flow_node`, `crm_flow_edge`) and review/publish functions. |
+| `011_cdp_audience_tags.sql` | Add the IAB Audience Taxonomy 1.1 catalog (`cdp_audience_tags`) and `audience_tags` arrays on profiles and segments. |
+| `012_cdp_customer_valuation.sql` | Add tenant- and domain-scoped CLV / discounted contribution-value snapshots (`cdp_customer_valuation`) with forced RLS. |
+| `013_remove_graph_ml_agent_type.sql` | Remove the retired `graph_ml` model type and `identity_graph_intelligence` seed if unreferenced. |
+| `014_activate_eligibility_policy.sql` | Activate the `eligibility_policy` rules-engine seed where still in its default inactive state. |
+| `015_remove_semantic_embedding_agent_type.sql` | Remove the retired `semantic_embedding` model type and `customer_semantic_profile` seed if unreferenced. |
+| `016_add_unclassified_profile_domain.sql` | Register the `_` (`Unclassified / Not set`) domain and backfill legacy blank/unknown profile domains. |
+| `017_agent_campagn_journey.sql` | Add campaign and agent journey stages, AI workflow canvas node types (`ai_decide`, `ai_generate`, `ai_recommend`), and tenant-scoped campaign-agent assignments (`crm_campaign_agent`). |
+| `018_journey_report.sql` | Add journey KPI definitions (`cdp_journey_metric`, `cdp_journey_metric_domain`), tenant-scoped daily snapshots (`cdp_journey_metric_daily`), nightly PostgreSQL refresh (`refresh_journey_metrics_pg`), and `vw_journey_stage_report` supporting B2B/B2C/B2B2C (default `B2C`), `sys_domain` scopes, campaign/agent attribution, and currency separation. |
+
+`cdp_journey_metric_domain` controls whether a KPI is general (`domain_code IS
+NULL`) or applies to a specific `sys_domain`. The PostgreSQL refresh currently
+writes general and explicitly mapped domain-scoped transaction aggregates and
+churn-risk snapshots. Domain metrics require an active `sys_domain`, an enabled
+metric/domain mapping, and a tenant business model the metric supports (`B2C`
+by default). Campaigns do not yet carry a domain, so campaign totals remain
+general. Do not infer a profile's business model from its domain. Other
+source-job metrics are left untouched by the PostgreSQL refresh.
 
 `006_cdp_agent_workflow.sql` is for existing installations. A fresh database
 already receives `cdp_agent_workflow` from `database-schema.sql`; the migration
@@ -453,6 +540,11 @@ SELECT current_schema();
 SELECT to_regclass('customer360.cdp_master_profiles');
 SELECT to_regclass('customer360.crm_connector_config');
 SELECT to_regclass('customer360.cdp_agent_workflow');
+SELECT to_regclass('customer360.crm_campaign_agent');
+SELECT to_regclass('customer360.cdp_journey_metric');
+SELECT to_regclass('customer360.cdp_journey_metric_domain');
+SELECT to_regclass('customer360.cdp_journey_metric_daily');
+SELECT to_regclass('customer360.vw_journey_stage_report');
 SELECT relname, relrowsecurity, relforcerowsecurity
 FROM pg_class
 WHERE relnamespace = 'customer360'::regnamespace
@@ -460,6 +552,8 @@ WHERE relnamespace = 'customer360'::regnamespace
 		'cdp_master_profiles',
 		'crm_connector_config',
 		'cdp_agent_workflow',
+		'crm_campaign_agent',
+		'cdp_journey_metric_daily',
 		'graph_edges'
 	);
 SELECT current_setting('app.tenant_id', true);
