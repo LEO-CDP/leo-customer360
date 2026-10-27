@@ -33,6 +33,8 @@ def test_journey_reporting_is_in_canonical_schema_and_upgrade_migration():
         assert "GROUP BY g.journey_stage, g.currency, a.agent_code" in sql
         assert "AND prev.currency = cur.currency" in sql
         assert "'campaign_spend', 'campaign_conversions', 'campaign_revenue'" in sql
+        assert "'churn_rate'" in sql
+        assert "'churned'" in sql
         assert "WITH current_orders AS (" in sql
         assert "md.domain_code = g.domain_code" in sql
         assert "JOIN customer360.sys_domain d ON d.domain_code = p.domain AND d.is_active" in sql

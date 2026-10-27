@@ -4,7 +4,7 @@
 -- Safe to re-run (idempotent). Append to database-schema.sql or run as a migration.
 --
 -- What it adds
---   1. journey_stage on cdp_ai_agents and crm_campaign (7 stages shared by both)
+--   1. journey_stage on cdp_ai_agents and crm_campaign (8 stages shared by both)
 --   2. AI node types on crm_flow_node + a generated agent_code column with an FK
 --   3. crm_campaign_agent: which agents work on a campaign, in which role,
 --      at which autonomy level, pinned to which prompt revision
@@ -40,18 +40,22 @@ BEGIN
             SELECT 1 FROM pg_constraint
             WHERE conname = c.constraint_name
               AND conrelid = format('customer360.%I', c.table_name)::regclass
+              AND pg_get_constraintdef(oid) LIKE '%churned%'
         ) THEN
+            EXECUTE format(
+                'ALTER TABLE customer360.%I DROP CONSTRAINT IF EXISTS %I',
+                c.table_name, c.constraint_name);
             EXECUTE format(
                 'ALTER TABLE customer360.%I ADD CONSTRAINT %I CHECK (journey_stage IS NULL OR journey_stage IN (
                     ''awareness'', ''acquisition'', ''activation'', ''engagement'',
-                    ''conversion'', ''retention'', ''loyalty''))',
+                    ''conversion'', ''retention'', ''loyalty'', ''churned''))',
                 c.table_name, c.constraint_name);
         END IF;
     END LOOP;
 END $$;
 
 COMMENT ON COLUMN customer360.cdp_ai_agents.journey_stage IS
-    'Customer journey stage this agent serves (awareness .. loyalty). NULL = cross-stage. Drives the AI Agents journey map.';
+    'Customer journey stage this agent serves (awareness .. churned). NULL = cross-stage. Drives the AI Agents journey map.';
 COMMENT ON COLUMN customer360.crm_campaign.journey_stage IS
     'Customer journey stage this campaign targets; derived from objective in the app. Lets the journey map show live campaigns per stage.';
 

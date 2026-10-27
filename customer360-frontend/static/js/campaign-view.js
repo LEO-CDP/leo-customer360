@@ -762,7 +762,13 @@ window.C360 = window.C360 || {};
     conversions: "conversion",
     conversion: "conversion",
     retention: "retention",
-    loyalty: "loyalty"
+    loyalty: "loyalty",
+    "win-back": "churned",
+    winback: "churned",
+    "win back": "churned",
+    "re-engagement": "churned",
+    churn: "churned",
+    churned: "churned"
   };
 
   function inferJourneyStageFromObjective(objective) {
@@ -966,13 +972,14 @@ window.C360 = window.C360 || {};
 
   function renderDetailMetadata(campaign) {
     var journeyStageLabels = {
-      awareness: "Awareness",
-      acquisition: "Acquisition",
-      activation: "Activation",
-      engagement: "Engagement",
-      conversion: "Conversion",
-      retention: "Retention",
-      loyalty: "Loyalty"
+      awareness: "1. Awareness",
+      acquisition: "2. Acquisition",
+      activation: "3. Activation",
+      engagement: "4. Engagement",
+      conversion: "5. Conversion",
+      retention: "6. Retention",
+      loyalty: "7. Loyalty",
+      churned: "8. Churned"
     };
     var fields = [
       { label: "Schedule", value: [campaign.start_date, campaign.end_date].filter(Boolean).join(" - ") || "Not scheduled", icon: "bi-calendar3" },

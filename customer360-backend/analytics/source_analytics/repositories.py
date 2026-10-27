@@ -179,6 +179,33 @@ class AnalyticsRepository:
         connection.commit()
         return True
 
+    def refresh_journey_metrics(
+        self,
+        connection: Any,
+        tenant_id: str,
+        report_date: Optional[date] = None,
+    ) -> int:
+        """Invoke PostgreSQL ``refresh_journey_metrics_pg`` for one tenant under RLS."""
+        normalized_tenant = self._uuid_text(tenant_id)
+        if normalized_tenant is None:
+            raise ValueError("tenant_id must be a valid UUID")
+
+        with connection.cursor() as cursor:
+            self.set_tenant_context(cursor, normalized_tenant)
+            if report_date is None:
+                cursor.execute(
+                    f"SELECT {self.db_schema}.refresh_journey_metrics_pg(%s::uuid)",
+                    (normalized_tenant,),
+                )
+            else:
+                cursor.execute(
+                    f"SELECT {self.db_schema}.refresh_journey_metrics_pg(%s::uuid, %s::date)",
+                    (normalized_tenant, report_date),
+                )
+            row = cursor.fetchone()
+        connection.commit()
+        return int(row[0] or 0) if row else 0
+
     @staticmethod
     def _uuid_text(value: Any) -> Optional[str]:
         if value is None:

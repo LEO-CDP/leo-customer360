@@ -46,7 +46,7 @@ def get_journey_report(
     window_days: int = Query(default=30, alias="window"),
     db: Session = Depends(get_db),
 ):
-    """Return seven customer-journey stages with KPI, campaign, and agent data."""
+    """Return eight customer-journey stages with KPI, campaign, and agent data."""
     effective_tenant = _resolve_reporting_tenant(request, tenant_id)
     repo = ReportingRepository(db)
     try:

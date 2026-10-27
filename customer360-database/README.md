@@ -217,7 +217,7 @@ conditions are present.
 - `crm_campaign` and `crm_campaign_performance_daily` store campaigns and
 	daily omnichannel performance. `crm_campaign.journey_stage` (`awareness`,
 	`acquisition`, `activation`, `engagement`, `conversion`, `retention`,
-	`loyalty`) places each campaign on the customer journey map, and
+	`loyalty`, `churned`) places each campaign on the customer journey map, and
 	`vw_campaign_performance_metrics` exposes aggregate spend, funnel rates,
 	CPA, and ROAS.
 - `crm_campaign_agent` assigns AI agents (`cdp_ai_agents`) to a campaign with a
@@ -296,7 +296,7 @@ conditions are present.
 - `cdp_audience_tags` stores the IAB Audience Taxonomy 1.1 hierarchy used on
 	profiles and segments.
 - `cdp_ai_agents` is the single registry for scoring models, rule engines, and
-	task-oriented agents. It stores `journey_stage` (`awareness`..`loyalty`, or
+	task-oriented agents. It stores `journey_stage` (`awareness`..`churned`, or
 	`NULL` for cross-stage agents), current prompt instructions, and the
 	append-only `prompt_versions` JSONB history used by `customer360-agent`.
 - `cdp_ai_feature_catalog` is the allow-listed contract behind
@@ -322,9 +322,9 @@ conditions are present.
 
 ### Customer journey reporting
 
-- `cdp_journey_metric` is the global KPI catalog across the 7 journey stages
+- `cdp_journey_metric` is the global KPI catalog across the 8 journey stages
 	(`awareness`, `acquisition`, `activation`, `engagement`, `conversion`,
-	`retention`, `loyalty`, or `NULL` for cross-stage campaign metrics). Each
+	`retention`, `loyalty`, `churned`, or `NULL` for cross-stage campaign metrics). Each
 	row declares `unit` (`count`, `percent`, `ratio`, `currency`), `source`
 	(`event_lake`, `profile`, `transaction`, `campaign`),
 	`applicable_business_models` (`B2B`, `B2C`, `B2B2C`), and a JSONB `rule`.

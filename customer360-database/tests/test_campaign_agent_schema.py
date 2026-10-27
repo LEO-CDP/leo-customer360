@@ -21,6 +21,7 @@ def test_campaign_to_ai_agents_contract_is_in_canonical_schema_and_migration():
             "conversion",
             "retention",
             "loyalty",
+            "churned",
         ):
             assert f"'{stage}'" in sql
         assert "'ai_decide', 'ai_generate', 'ai_recommend'" in sql

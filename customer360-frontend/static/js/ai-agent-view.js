@@ -60,16 +60,18 @@ window.C360 = window.C360 || {};
     engagement: "4. Engagement",
     conversion: "5. Conversion",
     retention: "6. Retention",
-    loyalty: "7. Loyalty"
+    loyalty: "7. Loyalty",
+    churned: "8. Churned"
   };
   var JOURNEY_STAGE_BADGE_CLASSES = {
     awareness: "bg-sky-50 text-sky-700",
     acquisition: "bg-blue-50 text-blue-700",
-    activation: "bg-indigo-50 text-indigo-700",
-    engagement: "bg-violet-50 text-violet-700",
-    conversion: "bg-emerald-50 text-emerald-700",
-    retention: "bg-amber-50 text-amber-700",
-    loyalty: "bg-rose-50 text-rose-700"
+    activation: "bg-violet-50 text-violet-700",
+    engagement: "bg-emerald-50 text-emerald-700",
+    conversion: "bg-amber-50 text-amber-700",
+    retention: "bg-teal-50 text-teal-700",
+    loyalty: "bg-pink-50 text-pink-700",
+    churned: "bg-rose-50 text-rose-700"
   };
 
   function featureCountLabel(features) {

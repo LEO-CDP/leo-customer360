@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_journey_metric (
     metric_code VARCHAR(60) PRIMARY KEY,
     journey_stage VARCHAR(30) CHECK (journey_stage IS NULL OR journey_stage IN (
         'awareness', 'acquisition', 'activation', 'engagement',
-        'conversion', 'retention', 'loyalty')),
+        'conversion', 'retention', 'loyalty', 'churned')),
     label TEXT NOT NULL,
     unit VARCHAR(20) NOT NULL DEFAULT 'count'
         CHECK (unit IN ('count', 'percent', 'ratio', 'currency')),
@@ -99,6 +99,8 @@ VALUES
     ('churn_risk_rate',        'retention',   'Churn risk',            'percent', 'profile',     FALSE, FALSE, '{"min_probability": 0.7}', 20),
     ('repeat_purchase_rate',   'loyalty',     'Repeat purchase',       'percent', 'transaction', TRUE,  TRUE,  '{}', 10),
     ('referral_rate',          'loyalty',     'Referral rate',         'percent', 'event_lake',  FALSE, TRUE,  '{"event_names": []}', 20),
+    ('churn_rate',             'churned',     'Churn rate',            'percent', 'transaction', TRUE,  FALSE, '{}', 10),
+    ('winback_rate',           'churned',     'Win-back rate',         'percent', 'event_lake',  FALSE, TRUE,  '{"event_names": []}', 20),
     ('campaign_spend',         NULL,          'Campaign spend',        'currency','campaign',    FALSE, FALSE, '{}', 90),
     ('campaign_conversions',   NULL,          'Campaign conversions',  'count',   'campaign',    FALSE, TRUE,  '{}', 91),
     ('campaign_revenue',       NULL,          'Campaign revenue',      'currency','campaign',    FALSE, TRUE,  '{}', 92)
@@ -139,7 +141,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_journey_metric_daily (
         REFERENCES customer360.sys_domain(domain_code) ON DELETE RESTRICT,
     journey_stage VARCHAR(30) NOT NULL CHECK (journey_stage IN (
         'awareness', 'acquisition', 'activation', 'engagement',
-        'conversion', 'retention', 'loyalty')),
+        'conversion', 'retention', 'loyalty', 'churned')),
     metric_code VARCHAR(60) NOT NULL
         REFERENCES customer360.cdp_journey_metric(metric_code) ON DELETE RESTRICT,
     dim_type VARCHAR(20) NOT NULL DEFAULT 'all'
@@ -238,7 +240,7 @@ BEGIN
        AND (
            metric_code IN (
                'orders', 'active_customers', 'purchase_frequency',
-               'retention_rate', 'repeat_purchase_rate',
+               'retention_rate', 'repeat_purchase_rate', 'churn_rate',
                'campaign_spend', 'campaign_conversions', 'campaign_revenue'
            )
            OR (metric_code = 'churn_risk_rate' AND window_days = 1)
@@ -246,7 +248,7 @@ BEGIN
                domain_code IS NOT NULL
                AND metric_code IN (
                    'orders', 'active_customers', 'purchase_frequency',
-                   'retention_rate', 'repeat_purchase_rate', 'churn_risk_rate'
+                   'retention_rate', 'repeat_purchase_rate', 'churn_rate', 'churn_risk_rate'
                )
            )
        );
@@ -299,7 +301,8 @@ BEGIN
               ('engagement', 'active_customers',     v_buyers::numeric,       NULL::numeric,         v_buyers::numeric),
               ('engagement', 'purchase_frequency',   v_buyer_orders::numeric, v_buyers::numeric,     ROUND(v_buyer_orders::numeric / NULLIF(v_buyers, 0), 4)),
               ('retention',  'retention_rate',       v_retained::numeric,     v_prev_buyers::numeric, ROUND(100.0 * v_retained / NULLIF(v_prev_buyers, 0), 4)),
-              ('loyalty',    'repeat_purchase_rate', v_repeat::numeric,       v_buyers::numeric,     ROUND(100.0 * v_repeat / NULLIF(v_buyers, 0), 4))
+              ('loyalty',    'repeat_purchase_rate', v_repeat::numeric,       v_buyers::numeric,     ROUND(100.0 * v_repeat / NULLIF(v_buyers, 0), 4)),
+              ('churned',    'churn_rate',           (v_prev_buyers - v_retained)::numeric, v_prev_buyers::numeric, ROUND(100.0 * (v_prev_buyers - v_retained) / NULLIF(v_prev_buyers, 0), 4))
           ) AS s(stage, code, num, den, val)
           JOIN customer360.cdp_journey_metric m
             ON m.metric_code = s.code
@@ -308,7 +311,7 @@ BEGIN
           JOIN customer360.cdp_journey_metric_domain md
             ON md.metric_code = m.metric_code AND md.domain_code IS NULL
          WHERE s.val IS NOT NULL
-           AND (s.code <> 'retention_rate' OR w >= 7)
+           AND (s.code NOT IN ('retention_rate', 'churn_rate') OR w >= 7)
            AND (s.code <> 'repeat_purchase_rate' OR w >= 30)
         ON CONFLICT (tenant_id, report_date, window_days, business_model, domain_code,
                      journey_stage, metric_code, dim_type, dim_value, currency)
@@ -395,7 +398,9 @@ BEGIN
               ('retention', 'retention_rate', g.retained_buyers::numeric, g.previous_buyers::numeric,
                   ROUND(100.0 * g.retained_buyers / NULLIF(g.previous_buyers, 0), 4)),
               ('loyalty', 'repeat_purchase_rate', g.repeat_buyers::numeric, g.buyers::numeric,
-                  ROUND(100.0 * g.repeat_buyers / NULLIF(g.buyers, 0), 4))
+                  ROUND(100.0 * g.repeat_buyers / NULLIF(g.buyers, 0), 4)),
+              ('churned', 'churn_rate', (g.previous_buyers - g.retained_buyers)::numeric, g.previous_buyers::numeric,
+                  ROUND(100.0 * (g.previous_buyers - g.retained_buyers) / NULLIF(g.previous_buyers, 0), 4))
           ) AS s(stage, code, num, den, val)
           JOIN customer360.cdp_journey_metric m
             ON m.metric_code = s.code
@@ -404,7 +409,7 @@ BEGIN
           JOIN customer360.cdp_journey_metric_domain md
             ON md.metric_code = m.metric_code AND md.domain_code = g.domain_code
          WHERE s.val IS NOT NULL
-           AND (s.code <> 'retention_rate' OR w >= 7)
+           AND (s.code NOT IN ('retention_rate', 'churn_rate') OR w >= 7)
            AND (s.code <> 'repeat_purchase_rate' OR w >= 30)
         ON CONFLICT (tenant_id, report_date, window_days, business_model, domain_code,
                      journey_stage, metric_code, dim_type, dim_value, currency)

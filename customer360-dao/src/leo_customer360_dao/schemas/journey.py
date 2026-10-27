@@ -12,6 +12,7 @@ JourneyStageValue = Literal[
     "conversion",
     "retention",
     "loyalty",
+    "churned",
 ]
 
 CampaignAgentRoleValue = Literal["plan", "decide", "optimize"]
@@ -24,6 +25,7 @@ JOURNEY_STAGES: tuple[str, ...] = (
     "conversion",
     "retention",
     "loyalty",
+    "churned",
 )
 
 JOURNEY_STAGE_LABELS: dict[str, str] = {
@@ -34,6 +36,7 @@ JOURNEY_STAGE_LABELS: dict[str, str] = {
     "conversion": "Conversion",
     "retention": "Retention",
     "loyalty": "Loyalty",
+    "churned": "Churned",
 }
 
 OBJECTIVE_TO_JOURNEY_STAGE: dict[str, JourneyStageValue] = {
@@ -51,10 +54,15 @@ OBJECTIVE_TO_JOURNEY_STAGE: dict[str, JourneyStageValue] = {
     "conversion": "conversion",
     "sales": "conversion",
     "retention": "retention",
-    "win-back": "retention",
-    "winback": "retention",
     "loyalty": "loyalty",
     "referral": "loyalty",
+    "win-back": "churned",
+    "winback": "churned",
+    "win back": "churned",
+    "re-engagement": "churned",
+    "reengagement": "churned",
+    "churn": "churned",
+    "churned": "churned",
 }
 
 DEFAULT_STAGE_PRIMARY_METRICS: dict[str, tuple[str, str, str, bool]] = {
@@ -65,11 +73,12 @@ DEFAULT_STAGE_PRIMARY_METRICS: dict[str, tuple[str, str, str, bool]] = {
     "conversion": ("orders", "Orders", "count", True),
     "retention": ("retention_rate", "Retention rate", "percent", True),
     "loyalty": ("repeat_purchase_rate", "Repeat purchase", "percent", True),
+    "churned": ("churn_rate", "Churn rate", "percent", False),
 }
 
 
 def infer_journey_stage_from_objective(objective: str | None) -> JourneyStageValue | None:
-    """Infer a default 7-stage journey value from a campaign objective string."""
+    """Infer a default 8-stage journey value from a campaign objective string."""
     if not objective:
         return None
     normalized = " ".join(str(objective).strip().lower().split())
@@ -137,7 +146,7 @@ class JourneyAgentSummary(BaseModel):
 
 
 class JourneyStageReport(BaseModel):
-    """All report data needed to render one of the seven journey stages."""
+    """All report data needed to render one of the eight journey stages."""
 
     stage: JourneyStageValue
     label: str
@@ -148,7 +157,7 @@ class JourneyStageReport(BaseModel):
 
 
 class JourneyReportResponse(BaseModel):
-    """Seven-stage customer journey report for the requested tenant/window."""
+    """Eight-stage customer journey report for the requested tenant/window."""
 
     report_date: str | None = None
     window_days: int

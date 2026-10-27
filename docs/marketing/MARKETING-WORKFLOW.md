@@ -233,7 +233,7 @@ The campaign editor persists these campaign fields:
 | Budget | `budget_amount` | Campaign budget |
 | Currency | `currency` | Budget currency |
 | Objective | `objective` | Awareness, Leads, Conversions, App Install, or Visit Store |
-| Journey stage | `journey_stage` | `awareness`, `acquisition`, `activation`, `engagement`, `conversion`, `retention`, or `loyalty`; connects the campaign to the Customer Journey Map |
+| Journey stage | `journey_stage` | `awareness`, `acquisition`, `activation`, `engagement`, `conversion`, `retention`, `loyalty`, or `churned`; connects the campaign to the Customer Journey Map |
 | Strategy summary | `strategy_summary` | Human description of the intended journey |
 | Planning constraints | `planning_constraints` | Hard constraints for the planning agent |
 | Owner | `user_id` | Authenticated campaign owner |
@@ -618,19 +618,19 @@ jobs for the same tenant/campaign/platform/audience.
 
 ## Unifying Campaigns and AI Agents in Customer Journey Map Analytics
 
-Campaigns, AI agents, and customer lifecycle KPIs share a unified 7-stage
+Campaigns, AI agents, and customer lifecycle KPIs share a unified 8-stage
 Customer Journey Map defined in
 [`database-schema.sql`](../../customer360-database/database-schema.sql),
 [`017_agent_campagn_journey.sql`](../../customer360-database/migrations/017_agent_campagn_journey.sql),
 and [`018_journey_report.sql`](../../customer360-database/migrations/018_journey_report.sql):
 
 ```text
-awareness -> acquisition -> activation -> engagement -> conversion -> retention -> loyalty
+awareness -> acquisition -> activation -> engagement -> conversion -> retention -> loyalty -> churned
 ```
 
 ```mermaid
 flowchart TB
-    subgraph JourneyMap["7-Stage Customer Journey Map (awareness .. loyalty)"]
+    subgraph JourneyMap["8-Stage Customer Journey Map (awareness .. churned)"]
         C[crm_campaign.journey_stage]
         A[cdp_ai_agents.journey_stage]
         CA[crm_campaign_agent<br/>role: plan / decide / optimize<br/>autonomy: suggest / approve]
@@ -660,7 +660,7 @@ flowchart TB
 ### 1. Connecting Campaigns to AI Agents
 
 - **Journey-stage alignment:** Both `crm_campaign.journey_stage` and
-  `cdp_ai_agents.journey_stage` use the same 7-stage vocabulary (`NULL` on
+  `cdp_ai_agents.journey_stage` use the same 8-stage vocabulary (`NULL` on
   `cdp_ai_agents` indicates a cross-stage agent). This allows the Journey Map UI
   to display live campaigns and assigned AI agents side by side at every stage.
 - **Campaign–agent assignments (`crm_campaign_agent`):** Records which registered
@@ -686,6 +686,7 @@ Each stage reports governed KPIs from `customer360.cdp_journey_metric`:
 | `conversion` | `orders` (`count`) | `conversion_rate` (`percent`) | `transaction` / `event_lake` |
 | `retention` | `retention_rate` (`percent`) | `churn_risk_rate` (`percent`) | `transaction` / `profile` |
 | `loyalty` | `repeat_purchase_rate` (`percent`) | `referral_rate` (`percent`) | `transaction` / `event_lake` |
+| `churned` | `churn_rate` (`percent`) | `winback_rate` (`percent`) | `transaction` / `event_lake` |
 | Cross-stage (`NULL`) | — | `campaign_spend` (`currency`), `campaign_conversions` (`count`), `campaign_revenue` (`currency`) | `campaign` |
 
 - **Business-model support (`B2B`, `B2C`, `B2B2C`):** `cdp_journey_metric.applicable_business_models`

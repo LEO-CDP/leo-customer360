@@ -1630,8 +1630,8 @@ FROM (
         ('behavior_anomaly_detector', 'engagement'),
         ('customer_demand_forecast', 'conversion'),
         ('campaign_uplift', 'retention'),
-        ('next_best_action', 'retention'),
-        ('clv_prediction', 'retention')
+        ('clv_prediction', 'retention'),
+        ('next_best_action', 'churned')
 ) AS v(agent_code, journey_stage)
 WHERE a.agent_code = v.agent_code
   AND a.journey_stage IS NULL;

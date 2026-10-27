@@ -81,7 +81,8 @@ def test_get_journey_report_uses_authenticated_tenant():
     )
     payload = response.json()
     assert payload["window_days"] == 30
-    assert len(payload["stages"]) == 7
+    assert len(payload["stages"]) == 8
+    assert payload["stages"][-1]["stage"] == "churned"
 
 
 def test_summary_uses_authenticated_tenant_for_repository_and_cache_scope():

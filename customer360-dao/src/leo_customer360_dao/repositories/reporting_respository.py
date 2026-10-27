@@ -62,7 +62,7 @@ class ReportingRepository:
         days: int = 90,
         window_days: int = 30,
     ) -> JourneyReportResponse:
-        """Return the seven-stage report and its campaign/agent context.
+        """Return the eight-stage report and its campaign/agent context.
 
         Metrics are read from the database-owned report view. Campaigns are
         filtered by tenant, while the agent registry is shared and therefore
@@ -215,6 +215,7 @@ class ReportingRepository:
                     or_(
                         CdpAiAgent.schedule_definition.is_not(None),
                         CdpAiAgent.journey_stage.is_not(None),
+                        CdpAiAgent.status == "ACTIVE",
                     )
                 )
                 .order_by(
@@ -289,7 +290,7 @@ class ReportingRepository:
                     schedule_definition,
                     agent_stage,
                 ) in agents
-                if agent_stage == stage or (agent_stage is None and status == "ACTIVE" and schedule_definition)
+                if agent_stage == stage or (agent_stage is None and status == "ACTIVE")
             ]
             primary_metric = next((metric for metric in stage_metrics if metric.is_primary), None)
             if primary_metric is None:

@@ -1,4 +1,4 @@
-"""Contract and repository tests for the seven-stage customer journey feature."""
+"""Contract and repository tests for the eight-stage customer journey feature."""
 
 from datetime import date
 from decimal import Decimal
@@ -60,13 +60,13 @@ def test_campaign_and_agent_accept_targeted_journey_stage():
         model_type="optimization",
         journey_stage="retention",
     )
-    agent_update = AiAgentUpdate(journey_stage="loyalty")
+    agent_update = AiAgentUpdate(journey_stage="churned")
 
     assert campaign.journey_stage == "retention"
     assert campaign_update.journey_stage == "conversion"
     assert draft_edit.journey_stage == "engagement"
     assert agent_create.journey_stage == "retention"
-    assert agent_update.journey_stage == "loyalty"
+    assert agent_update.journey_stage == "churned"
 
 
 def test_campaign_and_agent_reject_unknown_journey_stage():
@@ -86,10 +86,11 @@ def test_infer_journey_stage_from_objective():
     assert infer_journey_stage_from_objective("App Install") == "activation"
     assert infer_journey_stage_from_objective("Visit Store") == "engagement"
     assert infer_journey_stage_from_objective("Conversions") == "conversion"
+    assert infer_journey_stage_from_objective("Win-back lapsed customers") == "churned"
     assert infer_journey_stage_from_objective(None) is None
 
 
-def test_journey_report_contract_requires_all_seven_stages():
+def test_journey_report_contract_requires_all_eight_stages():
     report = JourneyReportResponse(
         report_date=None,
         window_days=30,
@@ -105,6 +106,7 @@ def test_journey_report_contract_requires_all_seven_stages():
         ],
     )
 
+    assert len(report.stages) == 8
     assert [stage.stage for stage in report.stages] == list(JOURNEY_STAGES)
 
 
@@ -230,6 +232,11 @@ def test_reporting_repository_journey_report_aggregates_metrics_campaigns_and_ag
     # Conversion includes the stage-targeted inactive agent so UI can render "(inactive)"
     assert len(by_stage["conversion"].agents) == 1
     assert by_stage["conversion"].agents[0].status == "INACTIVE"
+
+    # Churned has default primary KPI (Churn rate, higher_is_better=False)
+    assert by_stage["churned"].primary_metric is not None
+    assert by_stage["churned"].primary_metric.label == "Churn rate"
+    assert by_stage["churned"].primary_metric.higher_is_better is False
 
     # Retention includes snapshot metric, campaign, and assigned campaign agents with roles
     retention = by_stage["retention"]
