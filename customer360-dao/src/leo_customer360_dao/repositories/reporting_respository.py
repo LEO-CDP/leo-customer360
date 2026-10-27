@@ -18,7 +18,9 @@ from typing import Optional
 from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session
 
+from leo_customer360_dao.models.crm import Campaign, CampaignAgent
 from leo_customer360_dao.models.identity import (
+    CdpAiAgent,
     CdpCustomerPersona,
     CdpDomainProfile,
     CdpMasterProfile,
@@ -26,7 +28,20 @@ from leo_customer360_dao.models.identity import (
     CdpProfileLink,
     CdpRawProfileStage,
 )
+from leo_customer360_dao.models.journey import CdpJourneyMetric, JourneyStageReportRow
 from leo_customer360_dao.schemas.reporting import CirSummary, DuplicateMasterProfile, IdentityGraphCoverage
+from leo_customer360_dao.schemas.journey import (
+    DEFAULT_STAGE_PRIMARY_METRICS,
+    JOURNEY_STAGES,
+    JOURNEY_STAGE_LABELS,
+    JourneyAgentSummary,
+    JourneyCampaignAgentSummary,
+    JourneyCampaignSummary,
+    JourneyMetricReport,
+    JourneyReportResponse,
+    JourneyStageReport,
+    infer_journey_stage_from_objective,
+)
 
 STATUS_CODE_LABELS = {
     3: "processed",
@@ -41,6 +56,271 @@ class ReportingRepository:
     def __init__(self, session: Session):
         self.session = session
 
+    def get_journey_report(
+        self,
+        tenant_id: Optional[uuid.UUID],
+        days: int = 90,
+        window_days: int = 30,
+    ) -> JourneyReportResponse:
+        """Return the seven-stage report and its campaign/agent context.
+
+        Metrics are read from the database-owned report view. Campaigns are
+        filtered by tenant, while the agent registry is shared and therefore
+        only filtered by active status and target stage.
+        """
+        if window_days not in (1, 7, 30, 90):
+            raise ValueError("window_days must be one of 1, 7, 30, or 90")
+
+        metric_filters = [
+            JourneyStageReportRow.window_days == window_days,
+            JourneyStageReportRow.dim_type == "all",
+            JourneyStageReportRow.domain_code.is_(None),
+        ]
+        if tenant_id is not None:
+            metric_filters.append(JourneyStageReportRow.tenant_id == tenant_id)
+        if days:
+            cutoff_dt = cutoff_for_days(days)
+            if cutoff_dt is not None:
+                metric_filters.append(JourneyStageReportRow.report_date >= cutoff_dt.date())
+        latest_date = self.session.execute(
+            select(func.max(JourneyStageReportRow.report_date)).where(*metric_filters)
+        ).scalar_one_or_none()
+        if latest_date is None and days:
+            fallback_filters = [
+                JourneyStageReportRow.window_days == window_days,
+                JourneyStageReportRow.dim_type == "all",
+                JourneyStageReportRow.domain_code.is_(None),
+            ]
+            if tenant_id is not None:
+                fallback_filters.append(JourneyStageReportRow.tenant_id == tenant_id)
+            latest_date = self.session.execute(
+                select(func.max(JourneyStageReportRow.report_date)).where(*fallback_filters)
+            ).scalar_one_or_none()
+            metric_filters = fallback_filters
+
+        rows: list[JourneyStageReportRow] = []
+        if latest_date is not None:
+            rows = list(
+                self.session.execute(
+                    select(JourneyStageReportRow)
+                    .where(*metric_filters, JourneyStageReportRow.report_date == latest_date)
+                    .order_by(
+                        JourneyStageReportRow.journey_stage,
+                        JourneyStageReportRow.display_order,
+                        JourneyStageReportRow.metric_code,
+                    )
+                ).scalars()
+            )
+
+        catalog_rows = list(
+            self.session.execute(
+                select(
+                    CdpJourneyMetric.metric_code,
+                    CdpJourneyMetric.journey_stage,
+                    CdpJourneyMetric.label,
+                    CdpJourneyMetric.unit,
+                    CdpJourneyMetric.is_primary,
+                    CdpJourneyMetric.higher_is_better,
+                    CdpJourneyMetric.display_order,
+                )
+                .where(CdpJourneyMetric.is_active.is_(True))
+                .order_by(CdpJourneyMetric.display_order.asc(), CdpJourneyMetric.metric_code.asc())
+            ).all()
+        )
+        primary_catalog_by_stage: dict[str, JourneyMetricReport] = {}
+        for metric_code, metric_stage, label, unit, is_primary, higher_is_better, _ in catalog_rows:
+            if metric_stage and is_primary and metric_stage not in primary_catalog_by_stage:
+                primary_catalog_by_stage[metric_stage] = JourneyMetricReport(
+                    metric_code=metric_code,
+                    label=label,
+                    unit=unit,
+                    is_primary=True,
+                    higher_is_better=higher_is_better,
+                    value=None,
+                    previous_value=None,
+                    change=None,
+                    change_kind="points" if unit == "percent" else "percent",
+                    dim_type="all",
+                    dim_value="",
+                    currency="",
+                )
+
+        campaigns_stmt = select(
+            Campaign.campaign_id,
+            Campaign.name,
+            Campaign.status,
+            Campaign.approval_status,
+            Campaign.channel,
+            Campaign.platform,
+            Campaign.objective,
+            Campaign.journey_stage,
+        ).order_by(Campaign.updated_at.desc().nullslast(), Campaign.created_at.desc().nullslast())
+        if tenant_id is not None:
+            campaigns_stmt = campaigns_stmt.where(Campaign.tenant_id == tenant_id)
+        campaigns = list(self.session.execute(campaigns_stmt).all())
+
+        campaign_agents_by_campaign: dict[uuid.UUID, list[JourneyCampaignAgentSummary]] = {}
+        campaign_ids = [row[0] for row in campaigns]
+        if campaign_ids:
+            ca_stmt = (
+                select(
+                    CampaignAgent.campaign_id,
+                    CampaignAgent.agent_code,
+                    CampaignAgent.role,
+                    CampaignAgent.autonomy,
+                    CdpAiAgent.display_name,
+                    CdpAiAgent.model_type,
+                    CdpAiAgent.status,
+                )
+                .join(CdpAiAgent, CdpAiAgent.agent_code == CampaignAgent.agent_code)
+                .where(
+                    CampaignAgent.campaign_id.in_(campaign_ids),
+                    CampaignAgent.is_active.is_(True),
+                )
+                .order_by(CampaignAgent.role.asc(), CdpAiAgent.display_name.asc())
+            )
+            if tenant_id is not None:
+                ca_stmt = ca_stmt.where(CampaignAgent.tenant_id == tenant_id)
+            for (
+                c_id,
+                agent_code,
+                role,
+                autonomy,
+                display_name,
+                model_type,
+                agent_status,
+            ) in self.session.execute(ca_stmt).all():
+                campaign_agents_by_campaign.setdefault(c_id, []).append(
+                    JourneyCampaignAgentSummary(
+                        agent_code=agent_code,
+                        display_name=display_name,
+                        role=role if role in ("plan", "decide", "optimize") else "decide",
+                        autonomy=autonomy or "approve",
+                        model_type=model_type,
+                        status=agent_status,
+                    )
+                )
+
+        agents = list(
+            self.session.execute(
+                select(
+                    CdpAiAgent.agent_code,
+                    CdpAiAgent.display_name,
+                    CdpAiAgent.model_type,
+                    CdpAiAgent.status,
+                    CdpAiAgent.schedule_definition,
+                    CdpAiAgent.journey_stage,
+                )
+                .where(
+                    or_(
+                        CdpAiAgent.schedule_definition.is_not(None),
+                        CdpAiAgent.journey_stage.is_not(None),
+                    )
+                )
+                .order_by(
+                    (CdpAiAgent.status == "ACTIVE").desc(),
+                    (CdpAiAgent.journey_stage.is_not(None)).desc(),
+                    CdpAiAgent.display_name.asc(),
+                )
+            ).all()
+        )
+
+        stage_rows: list[JourneyStageReport] = []
+        for stage in JOURNEY_STAGES:
+            stage_metrics = [
+                JourneyMetricReport(
+                    metric_code=row.metric_code,
+                    label=row.label,
+                    unit=row.unit,
+                    is_primary=row.is_primary,
+                    higher_is_better=row.higher_is_better,
+                    value=float(row.value) if row.value is not None else None,
+                    previous_value=float(row.previous_value) if row.previous_value is not None else None,
+                    change=float(row.change_) if row.change_ is not None else None,
+                    change_kind=row.change_kind,
+                    dim_type=row.dim_type,
+                    dim_value=row.dim_value,
+                    currency=row.currency,
+                )
+                for row in rows
+                if row.journey_stage == stage and row.domain_code is None and row.dim_type == "all"
+            ]
+            stage_campaigns: list[JourneyCampaignSummary] = []
+            for (
+                campaign_id,
+                name,
+                status,
+                approval_status,
+                channel,
+                platform,
+                objective,
+                campaign_stage,
+            ) in campaigns:
+                resolved_stage = campaign_stage or infer_journey_stage_from_objective(objective)
+                if resolved_stage != stage:
+                    continue
+                stage_campaigns.append(
+                    JourneyCampaignSummary(
+                        campaign_id=str(campaign_id),
+                        name=name,
+                        status=status,
+                        approval_status=approval_status,
+                        channel=channel,
+                        platform=platform,
+                        objective=objective,
+                        agents=campaign_agents_by_campaign.get(campaign_id, []),
+                    )
+                )
+
+            stage_agents = [
+                JourneyAgentSummary(
+                    agent_code=agent_code,
+                    display_name=display_name,
+                    model_type=model_type,
+                    status=status,
+                    schedule_definition=schedule_definition,
+                    journey_stage=agent_stage if agent_stage in JOURNEY_STAGES else None,
+                )
+                for (
+                    agent_code,
+                    display_name,
+                    model_type,
+                    status,
+                    schedule_definition,
+                    agent_stage,
+                ) in agents
+                if agent_stage == stage or (agent_stage is None and status == "ACTIVE" and schedule_definition)
+            ]
+            primary_metric = next((metric for metric in stage_metrics if metric.is_primary), None)
+            if primary_metric is None:
+                primary_metric = primary_catalog_by_stage.get(stage)
+            if primary_metric is None and stage in DEFAULT_STAGE_PRIMARY_METRICS:
+                m_code, m_label, m_unit, m_higher = DEFAULT_STAGE_PRIMARY_METRICS[stage]
+                primary_metric = JourneyMetricReport(
+                    metric_code=m_code,
+                    label=m_label,
+                    unit=m_unit,
+                    is_primary=True,
+                    higher_is_better=m_higher,
+                    value=None,
+                    change_kind="points" if m_unit == "percent" else "percent",
+                )
+            stage_rows.append(
+                JourneyStageReport(
+                    stage=stage,
+                    label=JOURNEY_STAGE_LABELS[stage],
+                    primary_metric=primary_metric,
+                    metrics=stage_metrics,
+                    campaigns=stage_campaigns,
+                    agents=stage_agents,
+                )
+            )
+
+        return JourneyReportResponse(
+            report_date=latest_date.isoformat() if latest_date is not None else None,
+            window_days=window_days,
+            stages=stage_rows,
+        )
 
 
     def _filter_recent(self, stmt, model, days: Optional[int]):

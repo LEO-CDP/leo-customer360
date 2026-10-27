@@ -9,6 +9,27 @@ from typing import Optional
 
 from pydantic import BaseModel
 
+from .journey import (
+    JourneyAgentSummary,
+    JourneyCampaignAgentSummary,
+    JourneyCampaignSummary,
+    JourneyMetricReport,
+    JourneyReportResponse,
+    JourneyStageReport,
+)
+
+__all__ = [
+    "CirSummary",
+    "DuplicateMasterProfile",
+    "IdentityGraphCoverage",
+    "JourneyAgentSummary",
+    "JourneyCampaignAgentSummary",
+    "JourneyCampaignSummary",
+    "JourneyMetricReport",
+    "JourneyReportResponse",
+    "JourneyStageReport",
+]
+
 
 class StatusCodeCount(BaseModel):
     status_code: int

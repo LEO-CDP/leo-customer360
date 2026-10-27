@@ -53,16 +53,38 @@ window.C360 = window.C360 || {};
   };
   function typeIcon(v) { return TYPE_ICONS[v] || "\ud83d\udd2e"; }
 
+  var JOURNEY_STAGE_LABELS = {
+    awareness: "1. Awareness",
+    acquisition: "2. Acquisition",
+    activation: "3. Activation",
+    engagement: "4. Engagement",
+    conversion: "5. Conversion",
+    retention: "6. Retention",
+    loyalty: "7. Loyalty"
+  };
+  var JOURNEY_STAGE_BADGE_CLASSES = {
+    awareness: "bg-sky-50 text-sky-700",
+    acquisition: "bg-blue-50 text-blue-700",
+    activation: "bg-indigo-50 text-indigo-700",
+    engagement: "bg-violet-50 text-violet-700",
+    conversion: "bg-emerald-50 text-emerald-700",
+    retention: "bg-amber-50 text-amber-700",
+    loyalty: "bg-rose-50 text-rose-700"
+  };
+
   function featureCountLabel(features) {
     var n = Array.isArray(features) ? features.length : 0;
     return n + (n === 1 ? " feature" : " features");
   }
 
   function rowVm(m) {
+    var stage = m.journey_stage || "";
     return $.extend({}, m, {
       typeIcon: typeIcon(m.model_type),
       typeLabel: fmt.titleCase(String(m.model_type || "").replace(/_/g, " ")),
       typeBadgeClass: typeBadgeClass(m.model_type),
+      journeyStageLabel: JOURNEY_STAGE_LABELS[stage] || "Cross-stage",
+      journeyStageBadgeClass: JOURNEY_STAGE_BADGE_CLASSES[stage] || "bg-slate-100 text-slate-600",
       statusLabel: fmt.titleCase(m.status),
       statusBadgeClass: statusBadgeClass(m.status),
       scheduleLabel: formatCronSchedule(m.schedule_definition),
@@ -81,6 +103,7 @@ window.C360 = window.C360 || {};
         avatarField: "typeIcon", avatarBg: "bg-violet-100", avatarColor: "text-violet-700", avatarTextClass: "text-base"
       },
       { label: "Agent Type", type: "badge", field: "typeLabel", classField: "typeBadgeClass" },
+      { label: "Journey Stage", type: "badge", field: "journeyStageLabel", classField: "journeyStageBadgeClass" },
       { label: "Model", field: "modelLabel" },
       { label: "Lifecycle", type: "badge", field: "statusLabel", classField: "statusBadgeClass" },
       { label: "Prompt Version", field: "promptVersionLabel" },
@@ -103,7 +126,8 @@ window.C360 = window.C360 || {};
         return (vm.display_name || "").toLowerCase().indexOf(needle) !== -1 ||
           (vm.agent_code || "").toLowerCase().indexOf(needle) !== -1 ||
           (vm.model_name || "").toLowerCase().indexOf(needle) !== -1 ||
-          (vm.description || "").toLowerCase().indexOf(needle) !== -1;
+          (vm.description || "").toLowerCase().indexOf(needle) !== -1 ||
+          (vm.journeyStageLabel || "").toLowerCase().indexOf(needle) !== -1;
       },
       type: function (vm, value) { return vm.model_type === value; },
       status: function (vm, value) { return vm.status === value; },
@@ -115,6 +139,9 @@ window.C360 = window.C360 || {};
       },
       schedule: function (vm, value) {
         return value === "scheduled" ? !!vm.schedule_definition : !vm.schedule_definition;
+      },
+      stage: function (vm, value) {
+        return value === "cross_stage" ? !vm.journey_stage : vm.journey_stage === value;
       }
     },
     onFetched: function (items) {
@@ -231,6 +258,7 @@ window.C360 = window.C360 || {};
     $("#agent-model-add-model-name").val("");
     $("#agent-model-add-type").val("classification");
     $("#agent-model-add-status").val("ACTIVE");
+    $("#agent-model-add-journey-stage").val("");
     populateSchedulePresets();
     $("#agent-model-add-schedule-preset").val("");
     $("#agent-model-add-schedule").val("");
@@ -261,6 +289,7 @@ window.C360 = window.C360 || {};
     $("#agent-model-add-model-name").val(m.model_name || "");
     $("#agent-model-add-type").val(m.model_type);
     $("#agent-model-add-status").val(m.status);
+    $("#agent-model-add-journey-stage").val(m.journey_stage || "");
     populateSchedulePresets();
     $("#agent-model-add-schedule").val(m.schedule_definition || "");
     var schedule = C360.AgentWorkflowSchedule;
@@ -320,6 +349,7 @@ window.C360 = window.C360 || {};
       model_name: $.trim($("#agent-model-add-model-name").val()) || null,
       model_type: $("#agent-model-add-type").val(),
       status: $("#agent-model-add-status").val(),
+      journey_stage: $("#agent-model-add-journey-stage").val() || null,
       schedule_definition: scheduleDefinition,
       input_features: parseCsvList($("#agent-model-add-features").val()),
       hyperparameters: hyperparameters,
@@ -368,7 +398,8 @@ window.C360 = window.C360 || {};
       "#agent-models-status-filter",
       "#agent-models-model-filter",
       "#agent-models-prompt-filter",
-      "#agent-models-schedule-filter"
+      "#agent-models-schedule-filter",
+      "#agent-models-stage-filter"
     ].forEach(function (selector) { $(selector).val(""); });
     dtv.clearFilters();
     syncStatusTab("");
@@ -381,6 +412,7 @@ window.C360 = window.C360 || {};
     dtv.bindSelect("#agent-models-model-filter", "model");
     dtv.bindSelect("#agent-models-prompt-filter", "prompt");
     dtv.bindSelect("#agent-models-schedule-filter", "schedule");
+    dtv.bindSelect("#agent-models-stage-filter", "stage");
     dtv.bindRowEdit();
 
     $("#agent-models-status-filter")

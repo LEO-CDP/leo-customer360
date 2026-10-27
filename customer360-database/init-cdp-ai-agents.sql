@@ -1619,6 +1619,23 @@ $$;
 
 COMMIT;
 
+-- Assign default targeted journey stages to the core seeded AI agents (if not overridden).
+UPDATE customer360.cdp_ai_agents AS a
+SET journey_stage = v.journey_stage
+FROM (
+    VALUES
+        ('lead_scoring', 'acquisition'),
+        ('product_recommendation', 'activation'),
+        ('journey_behavior_clustering', 'engagement'),
+        ('behavior_anomaly_detector', 'engagement'),
+        ('customer_demand_forecast', 'conversion'),
+        ('campaign_uplift', 'retention'),
+        ('next_best_action', 'retention'),
+        ('clv_prediction', 'retention')
+) AS v(agent_code, journey_stage)
+WHERE a.agent_code = v.agent_code
+  AND a.journey_stage IS NULL;
+
 
 -- ============================================================================
 -- 3. VERIFY THE 11 CORE AGENT TYPES

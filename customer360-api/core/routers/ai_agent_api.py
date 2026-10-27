@@ -29,6 +29,7 @@ from leo_customer360_dao.schemas.system import (
     AiAgentUpdate,
     ModelTypeValue,
 )
+from leo_customer360_dao.schemas.journey import JourneyStageValue
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,7 @@ def _get_ai_agent_or_404(repository: AiAgentRepository, agent_code: str) -> CdpA
 def list_metadata_ai_agents(
     status: str | None = None,
     model_type: ModelTypeValue | None = None,
+    journey_stage: JourneyStageValue | None = None,
     skip: int = 0,
     limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
     repository: AiAgentRepository = Depends(get_ai_agent_repository),
@@ -72,6 +74,7 @@ def list_metadata_ai_agents(
         return repository.list_ai_agents(
             status=status,
             model_type=model_type,
+            journey_stage=journey_stage,
             skip=skip,
             limit=limit,
         )
@@ -84,11 +87,16 @@ def list_metadata_ai_agents(
 def count_metadata_ai_agents(
     status: str | None = None,
     model_type: ModelTypeValue | None = None,
+    journey_stage: JourneyStageValue | None = None,
     repository: AiAgentRepository = Depends(get_ai_agent_repository),
 ) -> dict[str, int]:
     """Returns total count of AI agents matching filter criteria."""
     try:
-        count = repository.count_ai_agents(status=status, model_type=model_type)
+        count = repository.count_ai_agents(
+            status=status,
+            model_type=model_type,
+            journey_stage=journey_stage,
+        )
         return {"count": count}
     except MetadataRepositoryError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

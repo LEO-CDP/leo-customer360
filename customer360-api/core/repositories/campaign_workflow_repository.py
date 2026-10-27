@@ -19,6 +19,7 @@ from core.repositories.campaign_draft_repository import (
 from core.repositories.segment_repository import SegmentRepository
 from leo_customer360_dao.models.crm import Campaign
 from leo_customer360_dao.models.system import SysUser
+from leo_customer360_dao.schemas.journey import infer_journey_stage_from_objective
 from leo_customer360_dao.schemas.workflow import CampaignWorkflowSaveRequest
 from leo_customer360_dao.workflow import FlowDefinition, FlowEngine, WorkflowRepository
 
@@ -287,6 +288,10 @@ class CampaignWorkflowRepository:
                 "metadata_",
             }
         }
+        if not create_values.get("journey_stage") and create_values.get("objective"):
+            create_values["journey_stage"] = infer_journey_stage_from_objective(
+                create_values.get("objective")
+            )
         campaign = Campaign(
             **create_values,
             tenant_id=self.tenant_id,
@@ -349,6 +354,11 @@ class CampaignWorkflowRepository:
                 editor_id=self.user_id,
                 segment_id=selected_segment_id if "segment_id" in fields_set else SEGMENT_UNSET,
                 objective=payload.campaign.objective if "objective" in fields_set else FIELD_UNSET,
+                journey_stage=(
+                    payload.campaign.journey_stage
+                    if "journey_stage" in fields_set
+                    else FIELD_UNSET
+                ),
                 strategy_summary=(
                     payload.campaign.strategy_summary
                     if "strategy_summary" in fields_set

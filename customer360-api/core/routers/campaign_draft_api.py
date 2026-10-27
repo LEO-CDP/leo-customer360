@@ -56,6 +56,7 @@ def _build_response(repo: CampaignDraftRepository, campaign) -> CampaignDraftRes
         segment_id=campaign.segment_id,
         name=campaign.name,
         objective=campaign.objective,
+        journey_stage=campaign.journey_stage,
         strategy_summary=campaign.strategy_summary,
         planning_constraints=getattr(campaign, "planning_constraints", None),
         ai_plan=campaign.ai_plan,
@@ -86,6 +87,7 @@ def generate_campaign_draft(
             created_by=created_by,
             segment_id=payload.segment_id,
             objective=payload.objective,
+            journey_stage=payload.journey_stage,
             budget_time_constraints=payload.budget_time_constraints,
         )
     except CampaignSegmentNotFoundError as exc:
@@ -160,7 +162,7 @@ def edit_campaign_draft(
         ),
         "content_items": content_items,
     }
-    for field in ("objective", "strategy_summary", "planning_constraints", "start_date", "end_date"):
+    for field in ("objective", "journey_stage", "strategy_summary", "planning_constraints", "start_date", "end_date"):
         if field in payload.model_fields_set:
             draft_fields[field] = getattr(payload, field)
     try:

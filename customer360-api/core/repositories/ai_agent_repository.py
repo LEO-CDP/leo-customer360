@@ -25,15 +25,35 @@ class AiAgentRepository(MetadataRepository):
 		super().__init__(session)
 		self._crud = CRUDBase(CdpAiAgent)
 
-	def list_ai_agents(self, status: str | None = None, model_type: str | None = None, skip: int = 0, limit: int = 100) -> list[CdpAiAgent]:
+	def list_ai_agents(
+		self,
+		status: str | None = None,
+		model_type: str | None = None,
+		journey_stage: str | None = None,
+		skip: int = 0,
+		limit: int = 100,
+	) -> list[CdpAiAgent]:
 		"""Return paginated AI agents ordered by most recent update."""
 		try:
-			return self._crud.list(self._require_session(), status=status, model_type=model_type, skip=skip, limit=limit, sort_by="updated_at DESC")
+			return self._crud.list(
+				self._require_session(),
+				status=status,
+				model_type=model_type,
+				journey_stage=journey_stage,
+				skip=skip,
+				limit=limit,
+				sort_by="updated_at DESC",
+			)
 		except Exception as exc:  # noqa: BLE001
 			logger.warning("Failed to load AI-agent metadata from PostgreSQL", exc_info=True)
 			raise MetadataRepositoryError(f"AI-agent metadata unavailable: {exc}") from exc
 
-	def count_ai_agents(self, status: str | None = None, model_type: str | None = None) -> int:
+	def count_ai_agents(
+		self,
+		status: str | None = None,
+		model_type: str | None = None,
+		journey_stage: str | None = None,
+	) -> int:
 		"""Count AI agents matching the optional filters."""
 		try:
 			filters: dict[str, Any] = {}
@@ -41,6 +61,8 @@ class AiAgentRepository(MetadataRepository):
 				filters["status"] = status
 			if model_type is not None:
 				filters["model_type"] = model_type
+			if journey_stage is not None:
+				filters["journey_stage"] = journey_stage
 			return self._crud.count(self._require_session(), **filters)
 		except Exception as exc:  # noqa: BLE001
 			logger.warning("Failed to count AI-agent metadata in PostgreSQL", exc_info=True)

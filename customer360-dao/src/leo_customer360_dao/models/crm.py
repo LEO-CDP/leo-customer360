@@ -47,6 +47,7 @@ class Campaign(Base):
     channel: Mapped[Optional[str]] = mapped_column(String(100))
     platform: Mapped[Optional[str]] = mapped_column(String(100))
     objective: Mapped[Optional[str]] = mapped_column(String(100))
+    journey_stage: Mapped[Optional[str]] = mapped_column(String(30))
     description: Mapped[Optional[str]] = mapped_column(Text)
     keywords: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text))
     lang: Mapped[Optional[str]] = mapped_column(Text, server_default="en")
@@ -125,6 +126,39 @@ class CampaignExperiment(Base):
     winning_variant_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True))
     metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
     created_by: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id"))
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+class CampaignAgent(Base):
+    """Agents assigned to a campaign with a role, autonomy level, guardrails, and pinned prompt revision."""
+
+    __tablename__ = "crm_campaign_agent"
+    __table_args__ = (
+        UniqueConstraint("campaign_id", "agent_code", "role", name="uq_crm_campaign_agent"),
+        ForeignKeyConstraint(
+            ["tenant_id", "campaign_id"],
+            ["crm_campaign.tenant_id", "crm_campaign.campaign_id"],
+            name="fk_crm_campaign_agent_tenant_campaign",
+            ondelete="CASCADE",
+        ),
+    )
+
+    campaign_agent_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id", ondelete="CASCADE"), nullable=False
+    )
+    campaign_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    agent_code: Mapped[str] = mapped_column(
+        String(100), ForeignKey("cdp_ai_agents.agent_code", ondelete="RESTRICT"), nullable=False
+    )
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    autonomy: Mapped[str] = mapped_column(String(20), nullable=False, server_default="approve")
+    pinned_instruction_version: Mapped[Optional[int]] = mapped_column(Integer)
+    guardrails: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
     updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
 

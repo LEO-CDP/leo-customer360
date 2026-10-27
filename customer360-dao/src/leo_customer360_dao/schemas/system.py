@@ -6,6 +6,8 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .journey import JourneyStageValue
+
 SourceTypeValue = Literal[1, 2, 3, 4, 5]
 
 
@@ -87,6 +89,7 @@ class AiAgentBase(BaseModel):
     description: Optional[str] = None
     model_type: ModelTypeValue
     model_name: Optional[str] = Field(default=None, max_length=255)
+    journey_stage: Optional[JourneyStageValue] = None
     status: ModelStatusValue = "ACTIVE"
     schedule_definition: Optional[str] = Field(default=None, max_length=100)
     input_features: Optional[list[str]] = Field(default_factory=list)
@@ -110,6 +113,7 @@ class AiAgentUpdate(BaseModel):
     description: Optional[str] = None
     model_type: Optional[ModelTypeValue] = None
     model_name: Optional[str] = Field(default=None, max_length=255)
+    journey_stage: Optional[JourneyStageValue] = None
     status: Optional[ModelStatusValue] = None
     schedule_definition: Optional[str] = Field(default=None, max_length=100)
     input_features: Optional[list[str]] = None

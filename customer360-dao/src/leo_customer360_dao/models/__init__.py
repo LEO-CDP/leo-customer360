@@ -7,6 +7,7 @@ from leo_customer360_dao.models.agent_workflow import CdpAgentWorkflow
 from leo_customer360_dao.models.crm import (
     Account,
     Campaign,
+    CampaignAgent,
     CampaignExperiment,
     CampaignExperimentVariant,
     CampaignContentItem,
@@ -40,6 +41,7 @@ from leo_customer360_dao.models.identity import (
     CdpRawProfileStage,
     CdpAiAgent,
 )
+from leo_customer360_dao.models.journey import CdpJourneyMetric, JourneyStageReportRow
 from leo_customer360_dao.models.relations import CdpRelation, CustomerContact, RelationType, Transaction
 from leo_customer360_dao.models.segmentation import CdpAudienceTag, CdpSegment
 from leo_customer360_dao.models.system import (
@@ -58,6 +60,7 @@ __all__ = [
     "Base",
     "Account",
     "Campaign",
+    "CampaignAgent",
     "CampaignExperiment",
     "CampaignExperimentVariant",
     "CampaignContentItem",
@@ -91,6 +94,8 @@ __all__ = [
     "CdpRawProfileStage",
     "CdpRelation",
     "CdpAiAgent",
+    "CdpJourneyMetric",
+    "JourneyStageReportRow",
     "CdpAudienceTag",
     "CdpSegment",
     "CustomerContact",

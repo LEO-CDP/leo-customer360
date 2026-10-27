@@ -746,12 +746,31 @@ window.C360 = window.C360 || {};
       currency: fieldValue("#campaign-field-currency").trim().toUpperCase() || "VND",
       segment_id: fieldValue("#campaign-field-segment").trim() || null,
       objective: fieldValue("#campaign-field-objective").trim() || null,
+      journey_stage: fieldValue("#campaign-field-journey-stage").trim() || null,
       strategy_summary: fieldValue("#campaign-field-strategy").trim() || null,
       planning_constraints: fieldValue("#campaign-field-constraints").trim() || null
     };
     payload.tenant_id = tenantId();
     return payload;
   }
+
+  var OBJECTIVE_JOURNEY_STAGE_MAP = {
+    awareness: "awareness",
+    leads: "acquisition",
+    "app install": "activation",
+    "visit store": "engagement",
+    conversions: "conversion",
+    conversion: "conversion",
+    retention: "retention",
+    loyalty: "loyalty"
+  };
+
+  function inferJourneyStageFromObjective(objective) {
+    var key = String(objective || "").trim().toLowerCase();
+    return OBJECTIVE_JOURNEY_STAGE_MAP[key] || "";
+  }
+
+  var pendingCampaignDraftJourneyStage = "";
 
   function populateCampaignObjectiveOptions(selectedObjective) {
     var $objective = $("#campaign-field-objective");
@@ -842,6 +861,9 @@ window.C360 = window.C360 || {};
     $currency.val(currency);
     $("#campaign-field-segment").val(campaign.segment_id || "");
     populateCampaignObjectiveOptions(campaign.objective);
+    var defaultStage = campaign.journey_stage || pendingCampaignDraftJourneyStage || inferJourneyStageFromObjective(campaign.objective);
+    pendingCampaignDraftJourneyStage = "";
+    $("#campaign-field-journey-stage").val(defaultStage || "");
     $("#campaign-field-strategy").val(campaign.strategy_summary || "");
     $("#campaign-field-constraints").val(campaign.planning_constraints || "");
     loadSelectedSegment(campaign.segment_id, false, !campaign.campaign_id);
@@ -943,9 +965,19 @@ window.C360 = window.C360 || {};
   }
 
   function renderDetailMetadata(campaign) {
+    var journeyStageLabels = {
+      awareness: "Awareness",
+      acquisition: "Acquisition",
+      activation: "Activation",
+      engagement: "Engagement",
+      conversion: "Conversion",
+      retention: "Retention",
+      loyalty: "Loyalty"
+    };
     var fields = [
       { label: "Schedule", value: [campaign.start_date, campaign.end_date].filter(Boolean).join(" - ") || "Not scheduled", icon: "bi-calendar3" },
       { label: "Objective", value: campaign.objective, icon: "bi-bullseye" },
+      { label: "Journey stage", value: journeyStageLabels[campaign.journey_stage] || "Not targeted", icon: "bi-signpost-2" },
       { label: "Description", value: campaign.description, icon: "bi-card-text" },
       { label: "Campaign code", value: campaign.campaign_code, icon: "bi-hash", technical: true },
       { label: "Owner", value: campaign.user_id || "System / unassigned", icon: "bi-person" },
@@ -1497,6 +1529,13 @@ window.C360 = window.C360 || {};
     $doc.on("change.c360campaignworkspace", "#campaign-field-channel", function () {
       populateCampaignMetadataOptions($(this).val(), "", $("#campaign-field-lang").val());
     });
+    $doc.on("change.c360campaignworkspace", "#campaign-field-objective", function () {
+      var $stage = $("#campaign-field-journey-stage");
+      if (!$stage.val()) {
+        var inferred = inferJourneyStageFromObjective($(this).val());
+        if (inferred) $stage.val(inferred);
+      }
+    });
     $doc.on("click.c360campaignworkspace", "#btn-campaign-experiment-add-variant", function () { loadExperimentSegments(function () { addExperimentVariant(); }); });
     $doc.on("click.c360campaignworkspace", ".campaign-experiment-remove", function () { if ($("#campaign-experiment-variants .campaign-experiment-variant").length > 2) { $(this).closest(".campaign-experiment-variant").remove(); updateExperimentAllocation(); } });
     $doc.on("input.c360campaignworkspace", ".campaign-experiment-allocation-input", updateExperimentAllocation);
@@ -1638,6 +1677,12 @@ window.C360 = window.C360 || {};
     }
   });
 
-  C360.campaignView = { load: loadAll };
+  C360.campaignView = {
+    load: loadAll,
+    openCreateForStage: function (stage) {
+      pendingCampaignDraftJourneyStage = stage || "";
+      C360.router.navigate("/campaigns/new/edit");
+    }
+  };
 
 })(window.C360);

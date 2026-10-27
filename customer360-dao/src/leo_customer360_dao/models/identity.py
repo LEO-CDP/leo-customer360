@@ -609,6 +609,7 @@ class CdpAiAgent(Base):
     description: Mapped[Optional[str]] = mapped_column(Text)
     model_type: Mapped[str] = mapped_column(Text, nullable=False)
     model_name: Mapped[Optional[str]] = mapped_column(Text)
+    journey_stage: Mapped[Optional[str]] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'ACTIVE'"))
     schedule_definition: Mapped[Optional[str]] = mapped_column(Text)
     input_features: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text), server_default=text("ARRAY[]::text[]"))

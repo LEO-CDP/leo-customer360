@@ -27,6 +27,7 @@ from leo_customer360_dao.models.content import CdpContentItem
 from leo_customer360_dao.models.crm import Campaign, CampaignContentItem, CampaignReview
 from leo_customer360_dao.models.system import SysAuditLog, SysUser
 from leo_customer360_dao.repositories.segment_respository import SegmentRepository
+from leo_customer360_dao.schemas.journey import infer_journey_stage_from_objective
 
 APPROVAL_STATUS_DRAFT = "Draft"
 APPROVAL_STATUS_IN_REVIEW = "InReview"
@@ -143,6 +144,7 @@ class CampaignDraftRepository:
         segment_id: uuid.UUID,
         objective: str,
         budget_time_constraints: Optional[str] = None,
+        journey_stage: Optional[str] = None,
     ) -> Campaign:
         """Resolve the segment, build the closed candidate content list, call
         the planning agent, validate the schedule, and persist the campaign
@@ -201,6 +203,8 @@ class CampaignDraftRepository:
         # candidate list, even though the prompt already instructs against it.
         selected_ids = [cid for cid in generated.content_item_ids if cid in valid_content_ids]
 
+        resolved_journey_stage = journey_stage or infer_journey_stage_from_objective(objective)
+
         # New transaction for the write.
         campaign = Campaign(
             tenant_id=tenant_id,
@@ -208,6 +212,7 @@ class CampaignDraftRepository:
             name=generated.name,
             status=APPROVAL_STATUS_DRAFT,
             objective=objective,
+            journey_stage=resolved_journey_stage,
             segment_id=segment_id,
             approval_status=APPROVAL_STATUS_IN_REVIEW,
             strategy_summary=generated.strategy_summary,
@@ -215,6 +220,7 @@ class CampaignDraftRepository:
             ai_plan={
                 "name": generated.name,
                 "objective": generated.objective,
+                "journey_stage": resolved_journey_stage,
                 "strategy_summary": generated.strategy_summary,
                 "planning_constraints": budget_time_constraints,
                 "action_plan": generated.action_plan,
@@ -250,6 +256,7 @@ class CampaignDraftRepository:
                 after_data={
                     "name": generated.name,
                     "objective": objective,
+                    "journey_stage": resolved_journey_stage,
                     "strategy_summary": generated.strategy_summary,
                     "start_date": generated.start_date.isoformat(),
                     "end_date": generated.end_date.isoformat(),
@@ -322,6 +329,7 @@ class CampaignDraftRepository:
         editor_id: Optional[uuid.UUID],
         segment_id: object = SEGMENT_UNSET,
         objective: Any = FIELD_UNSET,
+        journey_stage: Any = FIELD_UNSET,
         strategy_summary: Any = FIELD_UNSET,
         planning_constraints: Any = FIELD_UNSET,
         start_date: Any = FIELD_UNSET,
@@ -376,6 +384,7 @@ class CampaignDraftRepository:
         before_data = {
             "segment": self._segment_audit_snapshot(tenant_id, current_segment_id),
             "objective": campaign.objective,
+            "journey_stage": getattr(campaign, "journey_stage", None),
             "strategy_summary": campaign.strategy_summary,
             "planning_constraints": getattr(campaign, "planning_constraints", None),
             "start_date": campaign.start_date.isoformat() if campaign.start_date else None,
@@ -396,6 +405,10 @@ class CampaignDraftRepository:
 
         if objective is not FIELD_UNSET:
             campaign.objective = objective
+            if journey_stage is FIELD_UNSET and not getattr(campaign, "journey_stage", None):
+                campaign.journey_stage = infer_journey_stage_from_objective(objective)
+        if journey_stage is not FIELD_UNSET:
+            campaign.journey_stage = journey_stage
         if strategy_summary is not FIELD_UNSET:
             campaign.strategy_summary = strategy_summary
         if planning_constraints is not FIELD_UNSET:
@@ -431,6 +444,7 @@ class CampaignDraftRepository:
         after_data = {
             "segment": self._segment_audit_snapshot(tenant_id, campaign.segment_id),
             "objective": campaign.objective,
+            "journey_stage": getattr(campaign, "journey_stage", None),
             "strategy_summary": campaign.strategy_summary,
             "planning_constraints": getattr(campaign, "planning_constraints", None),
             "start_date": campaign.start_date.isoformat() if campaign.start_date else None,

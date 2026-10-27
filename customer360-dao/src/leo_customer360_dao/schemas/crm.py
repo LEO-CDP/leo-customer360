@@ -14,6 +14,8 @@ from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .journey import JourneyStageValue
+
 
 APPROVAL_STATUS_PATTERN = "^(Draft|InReview|Approved|Rejected)$"
 
@@ -27,6 +29,7 @@ class CampaignBase(BaseModel):
     channel: Optional[str] = None
     platform: Optional[str] = None
     objective: Optional[str] = None
+    journey_stage: Optional[JourneyStageValue] = None
     description: Optional[str] = None
     keywords: Optional[list[str]] = None
     lang: Optional[str] = "en"
@@ -65,6 +68,7 @@ class CampaignUpdate(BaseModel):
     channel: Optional[str] = None
     platform: Optional[str] = None
     objective: Optional[str] = None
+    journey_stage: Optional[JourneyStageValue] = None
     description: Optional[str] = None
     keywords: Optional[list[str]] = None
     lang: Optional[str] = None
@@ -122,6 +126,7 @@ class CampaignRead(CampaignBase):
 class CampaignDraftRequest(BaseModel):
     segment_id: uuid.UUID
     objective: str
+    journey_stage: Optional[JourneyStageValue] = None
     budget_time_constraints: Optional[str] = None
 
 
@@ -134,6 +139,7 @@ class CampaignDraftResponse(BaseModel):
     segment_id: Optional[uuid.UUID] = None
     name: Optional[str] = None
     objective: Optional[str] = None
+    journey_stage: Optional[JourneyStageValue] = None
     strategy_summary: Optional[str] = None
     planning_constraints: Optional[str] = None
     ai_plan: Optional[dict] = None
@@ -149,6 +155,7 @@ class CampaignDraftResponse(BaseModel):
 class EditCampaignDraftRequest(BaseModel):
     segment_id: Optional[uuid.UUID] = None
     objective: Optional[str] = None
+    journey_stage: Optional[JourneyStageValue] = None
     strategy_summary: Optional[str] = None
     planning_constraints: Optional[str] = None
     start_date: Optional[date] = None
