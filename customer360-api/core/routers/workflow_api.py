@@ -37,14 +37,25 @@ logger = logging.getLogger(__name__)
 
 def _repository(request: Request, db: Session) -> CampaignWorkflowRepository:
     user_id = getattr(request.state, "user_id", None)
+    if user_id:
+        try:
+            user_id = uuid.UUID(str(user_id))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=401, detail="Invalid authenticated user identity") from exc
     return CampaignWorkflowRepository(
         db,
         tenant_id=uuid.UUID(require_tenant(request)),
-        user_id=uuid.UUID(str(user_id)) if user_id else None,
+        user_id=user_id,
     )
 
 
 def _raise_http_error(error: Exception, db: Session) -> None:
+    """Translate known domain/database failures into stable HTTP responses.
+
+    Integrity errors leave the SQLAlchemy transaction unusable. Roll back
+    before raising so request cleanup and any test/session reuse see a clean
+    transaction boundary.
+    """
     if isinstance(error, PermissionError):
         raise HTTPException(status_code=403, detail=str(error)) from error
     if isinstance(error, CampaignWorkflowNotFound | FlowNotFound):
@@ -82,7 +93,7 @@ def _raise_http_error(error: Exception, db: Session) -> None:
             "crm_campaign_workflow_version_fk": (
                 "The pinned workflow version conflicts with the campaign tenant or workflow. Refresh and retry."
             ),
-        }.get(constraint, "The campaign or workflow conflicts with existing data.")
+        }.get(constraint or "", "The campaign or workflow conflicts with existing data.")
         logger.warning(
             "Campaign/workflow integrity conflict: constraint=%s sqlstate=%s",
             constraint or "unknown",
@@ -96,6 +107,7 @@ def _raise_http_error(error: Exception, db: Session) -> None:
 
 
 def _save_response(campaign) -> CampaignWorkflowSaveResponse:
+    """Serialize the campaign plus the pinned workflow identity."""
     return CampaignWorkflowSaveResponse(
         campaign=CampaignRead.model_validate(campaign),
         workflow_id=campaign.workflow_id,
@@ -179,6 +191,8 @@ def review_workflow_version(
             payload.decision,
             payload.reason,
         )
+        # The stored procedure validates the review transition; commit only
+        # after it succeeds so failed reviews cannot partially persist.
         db.commit()
     except Exception as exc:
         db.rollback()

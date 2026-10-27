@@ -40,7 +40,11 @@ campaign_activation_router = APIRouter(prefix="/admin", tags=["Campaign - Activa
 
 
 def _to_provider_read(config) -> EmailProviderConfigRead:
-    """Keep the historical response mapper available to callers and tests."""
+    """Map provider config without exposing stored SMTP credentials.
+
+    The repository owns the canonical mapper; keeping this compatibility
+    wrapper avoids duplicating secret-redaction logic in route handlers.
+    """
     return CampaignActivationRepository(None, dagster_client).provider_read(config)
 
 
@@ -52,6 +56,8 @@ def activate_campaign(
     db: Session = Depends(get_db),
 ):
     """Validate the human-approval gate, then submit the activation run."""
+    # Activation is deliberately admin-only and separate from campaign
+    # approval: approving a draft never sends messages by itself.
     tenant_id = require_tenant(request)
     require_tenant_admin(request, "campaign activation")
 
@@ -106,7 +112,7 @@ def get_email_provider_config(request: Request, db: Session = Depends(get_db)):
 
 @campaign_activation_router.put("/email-provider-config", response_model=EmailProviderConfigRead)
 def put_email_provider_config(payload: EmailProviderConfigUpsert, request: Request, db: Session = Depends(get_db)):
-    """Create/update the tenant's email dispatch config; invalidates its cache."""
+    """Create or update the tenant's email dispatch config."""
     tenant_id = require_tenant(request)
     require_tenant_admin(request, "email config")
     repo = CampaignActivationRepository(db, dagster_client, upsert_config=upsert_config)

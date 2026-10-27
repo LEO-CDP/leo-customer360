@@ -99,7 +99,11 @@ class FakeCampaignDraftRepository:
         if FakeCampaignDraftRepository.create_side_effect is not None:
             raise FakeCampaignDraftRepository.create_side_effect
 
-        campaign = _campaign(tenant_id=kwargs["tenant_id"], segment_id=kwargs["segment_id"])
+        campaign = _campaign(
+            tenant_id=kwargs["tenant_id"],
+            segment_id=kwargs["segment_id"],
+            journey_stage=kwargs.get("journey_stage"),
+        )
         FakeCampaignDraftRepository.campaigns[campaign.campaign_id] = campaign
         FakeCampaignDraftRepository.content_items[campaign.campaign_id] = [
             _content_item_row(uuid.uuid4(), position=1, role="primary")
@@ -121,7 +125,7 @@ class FakeCampaignDraftRepository:
         campaign = self.get_campaign(tenant_id, campaign_id)
         if fields.get("segment_id", SEGMENT_UNSET) is not SEGMENT_UNSET and fields.get("segment_id") is not None:
             campaign.segment_id = fields["segment_id"]
-        for key in ("objective", "strategy_summary", "start_date", "end_date"):
+        for key in ("objective", "journey_stage", "strategy_summary", "start_date", "end_date"):
             if fields.get(key) is not None:
                 setattr(campaign, key, fields[key])
         if fields.get("content_items") is not None:
@@ -201,6 +205,19 @@ class GenerateCampaignDraftTests(unittest.TestCase):
         self.assertEqual(body["status"], "Draft")
         self.assertEqual(body["approval_status"], "InReview")
         self.assertTrue(len(body["content_items"]) > 0)
+
+    def test_generate_preserves_targeted_journey_stage(self):
+        response = self.client.post(
+            "/campaigns/draft",
+            json=self._payload(journey_stage="retention"),
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["journey_stage"], "retention")
+        self.assertEqual(
+            FakeCampaignDraftRepository.last_create_kwargs["journey_stage"],
+            "retention",
+        )
 
     def test_generate_missing_required_objective_returns_422(self):
         payload = self._payload()

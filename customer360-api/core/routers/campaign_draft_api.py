@@ -8,7 +8,7 @@ see that feature's research.md §5).
 """
 
 import uuid
-from typing import Optional, cast
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -38,35 +38,50 @@ router = APIRouter(prefix="/campaigns", tags=["AI Campaign Drafts"])
 
 
 def _current_user_id(request: Request) -> Optional[uuid.UUID]:
-    """Read the authenticated user identifier from request middleware state."""
+    """Read the authenticated user identifier or fail with a client-safe 401."""
     user_id = getattr(request.state, "user_id", None)
-    return uuid.UUID(str(user_id)) if user_id else None
+    if not user_id:
+        return None
+    try:
+        return uuid.UUID(str(user_id))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=401, detail="Invalid authenticated user identity") from exc
 
 
-def _build_response(repo: CampaignDraftRepository, campaign) -> CampaignDraftResponse:
-    """Map a persisted campaign and its content plan to the API response schema."""
-    content_items = cast(
-        list[CampaignDraftContentItemRead],
-        repo.list_campaign_content_items(campaign.tenant_id, campaign.campaign_id),
+def _build_response(repo: CampaignDraftRepository, campaign: Any) -> CampaignDraftResponse:
+    """Build the governed draft response from a campaign and its content plan.
+
+    The repository returns ORM objects in production and lightweight
+    attribute-shaped objects in API tests. Required campaign identity and
+    governance fields remain strict; optional fields use ``getattr`` so older
+    ORM-shaped objects remain readable after additive schema changes.
+    """
+    raw_content_items = repo.list_campaign_content_items(
+        campaign.tenant_id,
+        campaign.campaign_id,
     )
+    content_items = [
+        CampaignDraftContentItemRead.model_validate(item)
+        for item in (raw_content_items or [])
+    ]
     return CampaignDraftResponse(
         campaign_id=campaign.campaign_id,
-        status=campaign.status,
+        status=getattr(campaign, "status", None),
         approval_status=campaign.approval_status,
-        segment_id=campaign.segment_id,
-        name=campaign.name,
-        objective=campaign.objective,
-        journey_stage=campaign.journey_stage,
-        strategy_summary=campaign.strategy_summary,
+        segment_id=getattr(campaign, "segment_id", None),
+        name=getattr(campaign, "name", None),
+        objective=getattr(campaign, "objective", None),
+        journey_stage=getattr(campaign, "journey_stage", None),
+        strategy_summary=getattr(campaign, "strategy_summary", None),
         planning_constraints=getattr(campaign, "planning_constraints", None),
-        ai_plan=campaign.ai_plan,
-        start_date=campaign.start_date,
-        end_date=campaign.end_date,
-        approved_by=campaign.approved_by,
-        approved_at=campaign.approved_at,
+        ai_plan=getattr(campaign, "ai_plan", None),
+        start_date=getattr(campaign, "start_date", None),
+        end_date=getattr(campaign, "end_date", None),
+        approved_by=getattr(campaign, "approved_by", None),
+        approved_at=getattr(campaign, "approved_at", None),
         content_items=content_items,
-        created_at=campaign.created_at,
-        updated_at=campaign.updated_at,
+        created_at=getattr(campaign, "created_at", None),
+        updated_at=getattr(campaign, "updated_at", None),
     )
 
 
@@ -95,6 +110,8 @@ def generate_campaign_draft(
     except CampaignDraftValidationError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    # Campaign reads are cached by the generic CRM routes; invalidate only
+    # after the governed write has succeeded.
     invalidate_prefix("crm_campaign")
     return _build_response(repo, campaign)
 

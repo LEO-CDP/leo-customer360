@@ -27,11 +27,18 @@ experiment_router = APIRouter(prefix="/campaign-experiments", tags=["Campaign Ex
 
 
 def _current_user_id(request: Request) -> Optional[uuid.UUID]:
+    """Return the authenticated user UUID without leaking parsing errors as 500s."""
     user_id = getattr(request.state, "user_id", None)
-    return uuid.UUID(str(user_id)) if user_id else None
+    if not user_id:
+        return None
+    try:
+        return uuid.UUID(str(user_id))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=401, detail="Invalid authenticated user identity") from exc
 
 
 def _tenant_id(request: Request) -> uuid.UUID:
+    """Resolve the tenant set by authentication; never trust a body/query tenant."""
     return uuid.UUID(require_tenant(request))
 
 

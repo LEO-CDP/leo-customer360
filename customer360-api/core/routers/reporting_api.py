@@ -5,7 +5,7 @@ core-customer360/identity-resolution.md as proper JSON endpoints.
 """
 
 import uuid
-from typing import Literal, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
@@ -25,7 +25,12 @@ router = APIRouter(prefix="/reporting", tags=["Identity Resolution - Reporting"]
 
 
 def _resolve_reporting_tenant(request: Request, tenant_id: Optional[uuid.UUID]) -> uuid.UUID:
-    """Resolve and enforce the authenticated tenant for reporting queries."""
+    """Resolve and enforce the authenticated tenant for reporting queries.
+
+    The query parameter is retained for backwards compatibility, but it can
+    never override the tenant established by authentication. This also keeps
+    cache keys tenant-specific because each cached route receives ``Request``.
+    """
     resolved = uuid.UUID(require_tenant(request))
     if tenant_id is not None and tenant_id != resolved:
         raise HTTPException(status_code=403, detail="Tenant does not match the authenticated tenant")
@@ -57,19 +62,22 @@ def get_journey_report(
 @router.get("/summary", response_model=CirSummary)
 @cache_response("reporting/summary", ttl=300)
 def get_cir_summary(
+    request: Request,
     tenant_id: Optional[uuid.UUID] = None,
     days: int = Query(default=90, ge=1, le=365),
     db: Session = Depends(get_db),
 ):
     """One-shot overview: raw/master profile totals, processing funnel,
     domain/source breakdowns, and duplicate (merged) master profile count."""
+    effective_tenant = _resolve_reporting_tenant(request, tenant_id)
     repo = ReportingRepository(db)
-    return repo.get_cir_summary(tenant_id=tenant_id, days=days)
+    return repo.get_cir_summary(tenant_id=effective_tenant, days=days)
 
 
 @router.get("/master-profiles/duplicates", response_model=list[DuplicateMasterProfile])
 @cache_response("reporting/duplicates", ttl=300)
 def get_duplicate_master_profiles(
+    request: Request,
     tenant_id: Optional[uuid.UUID] = None,
     skip: int = 0,
     limit: int = Query(default=20, le=100),
@@ -78,18 +86,26 @@ def get_duplicate_master_profiles(
 ):
     """Master profiles that consolidated 2+ raw profiles -- i.e. identity
     resolution actually merged records from different source systems."""
+    effective_tenant = _resolve_reporting_tenant(request, tenant_id)
     repo = ReportingRepository(db)
-    return repo.list_duplicate_master_profiles(tenant_id=tenant_id, skip=skip, limit=limit, days=days)
+    return repo.list_duplicate_master_profiles(
+        tenant_id=effective_tenant,
+        skip=skip,
+        limit=limit,
+        days=days,
+    )
 
 
 @router.get("/identity-graph/coverage", response_model=IdentityGraphCoverage)
 @cache_response("reporting/coverage", ttl=300)
 def get_identity_graph_coverage(
+    request: Request,
     tenant_id: Optional[uuid.UUID] = None,
     days: int = Query(default=90, ge=1, le=365),
     db: Session = Depends(get_db),
 ):
     """Adoption of each identity channel (email/phone/device/advertising/cookie/
     external id/national id) across all resolved master profiles."""
+    effective_tenant = _resolve_reporting_tenant(request, tenant_id)
     repo = ReportingRepository(db)
-    return repo.get_identity_graph_coverage(tenant_id=tenant_id, days=days)
+    return repo.get_identity_graph_coverage(tenant_id=effective_tenant, days=days)

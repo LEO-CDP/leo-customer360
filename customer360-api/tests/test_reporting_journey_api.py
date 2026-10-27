@@ -6,9 +6,11 @@ from unittest.mock import MagicMock, patch
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
+import core.cache as cache
 from core.database import get_db
 from core.routers.reporting_api import router as reporting_router
 from leo_customer360_dao.schemas.journey import JOURNEY_STAGES, JourneyReportResponse
+from leo_customer360_dao.schemas.reporting import CirSummary
 
 TENANT_A = uuid.UUID("11111111-1111-1111-1111-111111111111")
 TENANT_B = uuid.UUID("22222222-2222-2222-2222-222222222222")
@@ -46,10 +48,26 @@ def _sample_report() -> JourneyReportResponse:
     )
 
 
+def _sample_summary() -> CirSummary:
+    return CirSummary(
+        total_raw_profiles=0,
+        total_master_profiles=0,
+        processed_raw_profiles=0,
+        pending_raw_profiles=0,
+        in_progress_raw_profiles=0,
+        duplicate_master_profile_count=0,
+        raw_profiles_by_status=[],
+        raw_profiles_by_domain=[],
+        master_profiles_by_domain=[],
+        raw_profiles_by_source_system=[],
+    )
+
+
 def test_get_journey_report_uses_authenticated_tenant():
     client = _build_client(TENANT_A)
     with (
-        patch("core.routers.reporting_api.get_redis_client", return_value=None, create=True),
+        patch.object(cache, "cache_get", return_value=None),
+        patch.object(cache, "cache_set"),
         patch("core.routers.reporting_api.ReportingRepository") as repo_cls,
     ):
         repo_cls.return_value.get_journey_report.return_value = _sample_report()
@@ -66,6 +84,30 @@ def test_get_journey_report_uses_authenticated_tenant():
     assert len(payload["stages"]) == 7
 
 
+def test_summary_uses_authenticated_tenant_for_repository_and_cache_scope():
+    client = _build_client(TENANT_A)
+    with (
+        patch.object(cache, "cache_get", return_value=None),
+        patch.object(cache, "cache_set"),
+        patch("core.routers.reporting_api.ReportingRepository") as repo_cls,
+    ):
+        repo_cls.return_value.get_cir_summary.return_value = _sample_summary()
+        response = client.get("/reporting/summary?days=30")
+
+    assert response.status_code == 200
+    repo_cls.return_value.get_cir_summary.assert_called_once_with(
+        tenant_id=TENANT_A,
+        days=30,
+    )
+
+
+def test_summary_rejects_cross_tenant_query_param():
+    client = _build_client(TENANT_A)
+    with patch.object(cache, "cache_get", return_value=None):
+        response = client.get(f"/reporting/summary?tenant_id={TENANT_B}")
+    assert response.status_code == 403
+
+
 def test_get_journey_report_rejects_cross_tenant_query_param():
     client = _build_client(TENANT_A)
     response = client.get(f"/reporting/journey?tenant_id={TENANT_B}")
@@ -80,6 +122,6 @@ def test_get_journey_report_requires_tenant_context():
 
 def test_get_journey_report_rejects_invalid_window():
     client = _build_client(TENANT_A)
-    with patch("core.routers.reporting_api.get_redis_client", return_value=None, create=True):
+    with patch.object(cache, "cache_get", return_value=None):
         response = client.get("/reporting/journey?window=15")
     assert response.status_code == 422
