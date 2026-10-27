@@ -112,25 +112,27 @@
 					</div>
 				</div>
 
-				<label for="campaign-field-objective" class="block min-w-0 text-sm font-semibold text-slate-700 md:col-span-2">Objective
-					<select id="campaign-field-objective" name="objective" data-objectives='["Awareness","Leads","Conversions","App Install","Visit Store"]' aria-describedby="campaign-objective-help" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100">
-						<option value="">Select a campaign objective</option>
-					</select>
-					<span id="campaign-objective-help" class="mt-1 block text-xs font-normal text-slate-500">Choose the primary outcome this campaign should achieve.</span>
-				</label>
-				<label for="campaign-field-journey-stage" class="block min-w-0 text-sm font-semibold text-slate-700">Targeted Journey Stage
-					<select id="campaign-field-journey-stage" name="journey_stage" aria-describedby="campaign-journey-stage-help" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100">
-						<option value="">Select a journey stage</option>
-						<option value="awareness">Awareness</option>
-						<option value="acquisition">Acquisition</option>
-						<option value="activation">Activation</option>
-						<option value="engagement">Engagement</option>
-						<option value="conversion">Conversion</option>
-						<option value="retention">Retention</option>
-						<option value="loyalty">Loyalty</option>
-					</select>
-					<span id="campaign-journey-stage-help" class="mt-1 block text-xs font-normal text-slate-500">Place this campaign on the seven-stage Customer Journey Map.</span>
-				</label>
+				<div class="col-span-full grid grid-cols-1 gap-5 md:grid-cols-2">
+					<label for="campaign-field-journey-stage" class="block min-w-0 text-sm font-semibold text-slate-700">Targeted Journey Stage
+						<select id="campaign-field-journey-stage" name="journey_stage" aria-describedby="campaign-journey-stage-help" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100">
+							<option value="">Select a journey stage</option>
+							<option value="awareness">Awareness</option>
+							<option value="acquisition">Acquisition</option>
+							<option value="activation">Activation</option>
+							<option value="engagement">Engagement</option>
+							<option value="conversion">Conversion</option>
+							<option value="retention">Retention</option>
+							<option value="loyalty">Loyalty</option>
+						</select>
+						<span id="campaign-journey-stage-help" class="mt-1 block text-xs font-normal text-slate-500">Place this campaign on the seven-stage Customer Journey Map.</span>
+					</label>
+					<label for="campaign-field-objective" class="block min-w-0 text-sm font-semibold text-slate-700">Objective
+						<select id="campaign-field-objective" name="objective" data-objectives='["Awareness","Leads","Conversions","App Install","Visit Store"]' aria-describedby="campaign-objective-help" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100">
+							<option value="">Select a campaign objective</option>
+						</select>
+						<span id="campaign-objective-help" class="mt-1 block text-xs font-normal text-slate-500">Choose the primary outcome this campaign should achieve.</span>
+					</label>
+				</div>
 				<label for="campaign-field-strategy" class="block min-w-0 text-sm font-semibold text-slate-700 md:col-span-2">Strategy summary
 					<span id="campaign-strategy-help" class="mt-1 block text-xs font-normal text-slate-500">Describe how the customer journey should work: entry point, message sequence, timing, branches, and intended outcome.</span>
 					<textarea id="campaign-field-strategy" name="strategy_summary" rows="4" aria-describedby="campaign-strategy-help" placeholder="Example: When a customer abandons a cart, send a reminder, wait two days, then follow up only if they have not purchased." class="campaign-field mt-2 block w-full min-w-0 resize-y rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors placeholder:text-slate-400 hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100"></textarea>

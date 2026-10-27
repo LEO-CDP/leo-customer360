@@ -51,8 +51,14 @@
         <h2 id="journey-report-title" class="text-base font-bold text-slate-900">Customer Journey Map</h2>
         <p class="mt-1 text-xs text-slate-500">Campaign and always-on AI agent performance across the seven journey stages.</p>
       </div>
-      <span id="journey-report-meta" class="text-xs font-medium text-slate-400"></span>
+      <div class="flex flex-wrap items-center gap-2">
+        <span id="journey-report-stage-count" class="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600">7 stages</span>
+        <span id="journey-report-campaign-count" class="rounded-full border border-indigo-100 bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700">— campaigns</span>
+        <span id="journey-report-agent-count" class="rounded-full border border-violet-100 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700">— agents</span>
+        <span id="journey-report-meta" class="text-xs font-medium text-slate-400"></span>
+      </div>
     </div>
+    <div id="journey-report-snapshot-notice" class="hidden rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-900" role="status"></div>
     <div id="journey-report-error" class="hidden rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" role="alert"></div>
     <div id="journey-report-loading" class="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">Loading journey report...</div>
     <div id="journey-report-stages" class="hidden grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7"></div>
