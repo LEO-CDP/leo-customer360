@@ -26,27 +26,28 @@ và `customer360.vw_journey_stage_report`.
 
 ## Mục lục
 
-1. [Tám giai đoạn hành trình & tham chiếu danh mục KPI](#1-the-eight-journey-stages--kpi-catalog-reference)
-2. [Nguồn dữ liệu chuẩn & hợp đồng schema](#2-source-of-truth--schema-contracts)
-3. [Pipeline xử lý đầu-cuối & hành vi UI](#3-end-to-end-processing-pipeline--ui-behavior)
-4. [Logic xử lý theo từng giai đoạn](#4-stage-by-stage-processing-logic)
-5. [Cẩm nang vận hành: Hướng dẫn thiết lập từng bước](#5-operational-playbook-step-by-step-setup-guide)
-   - [Cẩm nang A: Cấu hình mô hình kinh doanh & domain của tenant](#playbook-a-configure-tenant-business-model--domain)
-   - [Cẩm nang B: Thiết lập AI agent, workflow phân khúc & liên kết chiến dịch](#playbook-b-set-up-ai-agents-segment-workflows--campaign-bindings)
-   - [Cẩm nang C: Tạo, phê duyệt & kích hoạt workflow chiến dịch chính xác](#playbook-c-build-approve--activate-an-accurate-campaign-workflow)
-   - [Cẩm nang D: Tính toán & xác minh KPI giai đoạn hành trình](#playbook-d-compute--verify-journey-stage-kpis)
-6. [Cách kiểm thử trên máy cục bộ](#6-how-to-test-locally)
-7. [Khắc phục sự cố](#7-troubleshooting)
-8. [Quy tắc vận hành & an toàn tenant](#8-operational--tenant-safety-rules)
-9. [Các trường hợp sử dụng đầu-cuối theo ngành](#9-end-to-end-industry-use-cases)
-   - [Trường hợp 1: Thương mại điện tử (B2C) — Từ khách truy cập web đến khách mua lại](#use-case-1-e-commerce-b2c--web-visitor-to-repeat-buyer)
-   - [Trường hợp 2: Giáo dục & EdTech (B2C) — Từ người tìm hiểu khóa học đến học viên tốt nghiệp](#use-case-2-education--edtech-b2c--course-explorer-to-enrolled-graduate)
-   - [Trường hợp 3: Tiếp thị liên kết & đối tác (B2B2C) — Từ lượt giới thiệu của nhà xuất bản đến chuyển đổi đã quyết toán](#use-case-3-affiliate--partner-marketing-b2b2c--publisher-referral-to-settled-conversion)
-   - [Trường hợp 4: SaaS doanh nghiệp (B2B) — LEO CDP tự sử dụng và hành trình áp dụng](#use-case-4-enterprise-saas-b2b--leo-cdp-dogfooding--adoption-journey)
-   - [Danh sách kiểm tra xác minh liên trường hợp & SQL](#cross-use-case-verification-checklist--sql)
+1. [Tám giai đoạn hành trình & tham chiếu danh mục KPI](#giai-doan-hanh-trinh-kpi)
+2. [Nguồn dữ liệu chuẩn & hợp đồng schema](#nguon-du-lieu-chuan-schema)
+3. [Pipeline xử lý đầu-cuối & hành vi UI](#pipeline-xu-ly-ui)
+4. [Logic xử lý theo từng giai đoạn](#logic-xu-ly-giai-doan)
+5. [Cẩm nang vận hành: Hướng dẫn thiết lập từng bước](#cam-nang-van-hanh)
+   - [Cẩm nang A: Cấu hình mô hình kinh doanh & domain của tenant](#cam-nang-a-domain-tenant)
+   - [Cẩm nang B: Thiết lập AI agent, workflow phân khúc & liên kết chiến dịch](#cam-nang-b-ai-agent-workflow)
+   - [Cẩm nang C: Tạo, phê duyệt & kích hoạt workflow chiến dịch chính xác](#cam-nang-c-workflow-chien-dich)
+   - [Cẩm nang D: Tính toán & xác minh KPI giai đoạn hành trình](#cam-nang-d-kpi)
+6. [Cách kiểm thử trên máy cục bộ](#kiem-thu-cuc-bo)
+7. [Khắc phục sự cố](#khac-phuc-su-co)
+8. [Quy tắc vận hành & an toàn tenant](#van-hanh-an-toan-tenant)
+9. [Các trường hợp sử dụng đầu-cuối theo ngành](#truong-hop-su-dung-theo-nganh)
+   - [Trường hợp 1: Thương mại điện tử (B2C) — Từ khách truy cập web đến khách mua lại](#truong-hop-1-thuong-mai-dien-tu)
+   - [Trường hợp 2: Giáo dục & EdTech (B2C) — Từ người tìm hiểu khóa học đến học viên tốt nghiệp](#truong-hop-2-giao-duc-edtech)
+   - [Trường hợp 3: Tiếp thị liên kết & đối tác (B2B2C) — Từ lượt giới thiệu của nhà xuất bản đến chuyển đổi đã quyết toán](#truong-hop-3-tiep-thi-lien-ket)
+   - [Trường hợp 4: SaaS doanh nghiệp (B2B) — LEO CDP tự sử dụng và hành trình áp dụng](#truong-hop-4-saas-leocdp)
+   - [Danh sách kiểm tra xác minh liên trường hợp & SQL](#kiem-tra-xac-minh-lien-truong-hop)
 
 ---
 
+<a id="giai-doan-hanh-trinh-kpi"></a>
 ## 1. Tám giai đoạn hành trình & tham chiếu danh mục KPI
 
 Các giai đoạn được sắp xếp và hiển thị nhất quán trong database, DAO, API,
@@ -99,6 +100,7 @@ Mọi KPI trong Customer Journey Map đều được định nghĩa trong
 
 ---
 
+<a id="nguon-du-lieu-chuan-schema"></a>
 ## 2. Nguồn dữ liệu chuẩn & hợp đồng schema
 
 Tập thuật ngữ chuẩn gồm 8 giai đoạn được định nghĩa trong
@@ -124,6 +126,7 @@ Các tệp schema và migration:
 
 ---
 
+<a id="pipeline-xu-ly-ui"></a>
 ## 3. Pipeline xử lý đầu-cuối & hành vi UI
 
 ```mermaid
@@ -312,6 +315,7 @@ Overview Dashboard hiển thị:
 
 ---
 
+<a id="logic-xu-ly-giai-doan"></a>
 ## 4. Logic xử lý theo từng giai đoạn
 
 Phần sau mô tả logic xử lý cho từng giai đoạn. Giai đoạn là cách phân loại
@@ -538,12 +542,14 @@ nghiệp vụ chuẩn; tên sự kiện và ngưỡng cụ thể được cấu 
 
 ---
 
+<a id="cam-nang-van-hanh"></a>
 ## 5. Cẩm nang vận hành: Hướng dẫn thiết lập từng bước
 
 Dùng cẩm nang vận hành gồm 4 phần này khi onboarding tenant doanh nghiệp, cấu
 hình AI agent, xây dựng workflow chiến dịch nhắm theo giai đoạn hoặc làm mới
 các KPI của Customer Journey Map.
 
+<a id="cam-nang-a-domain-tenant"></a>
 ### Cẩm nang A: Cấu hình mô hình kinh doanh & domain của tenant
 
 1. **Đặt `sys_tenant.business_model`**: Chọn `'B2B'`, `'B2C'` (mặc định) hoặc
@@ -565,6 +571,7 @@ các KPI của Customer Journey Map.
    - Phân tích được tách theo domain (`domain_code = '<domain>'`) cần có hàng
      `(metric_code, domain_code)` tương ứng trong `customer360.cdp_journey_metric_domain`.
 
+<a id="cam-nang-b-ai-agent-workflow"></a>
 ### Cẩm nang B: Thiết lập AI agent, workflow phân khúc & liên kết chiến dịch
 
 LEO CDP điều phối AI agent trên **ba bề mặt được kết nối**. Cấu hình từng bề
@@ -576,6 +583,7 @@ mặt theo vai trò của nó:
 | **2. Workflow AI agent của phân khúc** | `customer360.cdp_agent_workflow` (`POST /api/v1/segments/{segment_id}/workflow/run`) | Pipeline theo thứ tự cho từng phân khúc (`execution_order = 1, 2, ...`) do `customer360-backend/ai_agents_runners` thực thi. Chạy `eligibility_policy` xác định (ghi trạng thái sẵn sàng của kênh vào `communication_preferences.eligibility_policy`) và `product_recommendation` (`ranking_recommendation` trên tập đóng `candidate_content_item_ids`). | Làm giàu hồ sơ phân khúc bằng điều kiện đủ tiêu chuẩn của kênh và nội dung được xếp hạng trước hoặc đồng thời với việc thực thi chiến dịch. |
 | **3. Liên kết AI agent với chiến dịch** | `customer360.crm_campaign_agent` | Liên kết `(tenant_id, campaign_id, agent_code, role)` với `role IN ('plan', 'decide', 'optimize')`, `autonomy IN ('suggest', 'approve')`, `pinned_instruction_version` và `guardrails`. | Hiển thị **nhãn `<Agent> · <role>` màu tím** trên thẻ chiến dịch trong Customer Journey Map và phân bổ `campaign_spend`, `campaign_conversions`, `campaign_revenue` vào `dim_type = 'agent'`. |
 
+<a id="cam-nang-c-workflow-chien-dich"></a>
 ### Cẩm nang C: Tạo, phê duyệt & kích hoạt workflow chiến dịch chính xác
 
 Mọi chiến dịch production trong LEO CDP đều tuân theo sự phân tách nghiêm ngặt
@@ -630,6 +638,7 @@ xác thực cây JSON được lưu qua `customer360.crm_save_flow`:
 4. **Gửi duyệt & phê duyệt chiến dịch**: Chuyển `crm_campaign.approval_status` từ `Draft` → `InReview` (`POST /campaigns/{id}/submit-for-approval`) → `Approved` (`POST /campaigns/{id}/approve`).
 5. **Kích hoạt chiến dịch**: Gọi `POST /api/v1/admin/campaigns/{campaign_id}/activate`. Thao tác này kích hoạt `campaign_activation_job` → `campaign_workflow_job`, ghi các hàng idempotency theo từng hồ sơ vào `crm_campaign_workflow_action_runs` và các lần chuyển trạng thái vào `sys_audit_log`.
 
+<a id="cam-nang-d-kpi"></a>
 ### Cẩm nang D: Tính toán & xác minh KPI giai đoạn hành trình
 
 1. **Làm mới KPI lấy từ PostgreSQL** (`orders`, `active_customers`, `purchase_frequency`, `retention_rate`, `repeat_purchase_rate`, `churn_rate`, `churn_risk_rate`, `campaign_spend`, `campaign_conversions`, `campaign_revenue`):
@@ -641,6 +650,7 @@ xác thực cây JSON được lưu qua `customer360.crm_save_flow`:
 
 ---
 
+<a id="kiem-thu-cuc-bo"></a>
 ## 6. Cách kiểm thử trên máy cục bộ
 
 ### Điều kiện tiên quyết
@@ -811,6 +821,7 @@ sơ, chiến dịch hoặc báo cáo.
 
 ---
 
+<a id="khac-phuc-su-co"></a>
 ## 7. Khắc phục sự cố
 
 ### Migration thất bại khi thêm ràng buộc `lifecycle_stage`
@@ -870,6 +881,7 @@ hiện tại và trước đó, cùng các phân công agent/chiến dịch `chu
 
 ---
 
+<a id="van-hanh-an-toan-tenant"></a>
 ## 8. Quy tắc vận hành & an toàn tenant
 
 - Luôn lọc dữ liệu báo cáo theo `tenant_id` đã xác thực.
@@ -881,6 +893,7 @@ hiện tại và trước đó, cùng các phân công agent/chiến dịch `chu
 
 ---
 
+<a id="truong-hop-su-dung-theo-nganh"></a>
 ## 9. Trường hợp sử dụng đầu-cuối theo ngành
 
 Bốn trường hợp sử dụng đầu-cuối dưới đây minh họa cách tracking web/ứng dụng,
@@ -896,6 +909,7 @@ workflow chiến dịch và sổ cái giao dịch phối hợp xuyên suốt c�
 
 ---
 
+<a id="truong-hop-1-thuong-mai-dien-tu"></a>
 ### Trường hợp 1: Thương mại điện tử (B2C) — Từ khách truy cập web đến khách mua lại
 
 Trường hợp này minh họa cách tenant thương mại điện tử bán lẻ `B2C`
@@ -1363,6 +1377,7 @@ Win-back thành công được ghi nhận như tín hiệu hoạt động/chuy�
 
 ---
 
+<a id="truong-hop-2-giao-duc-edtech"></a>
 ### Trường hợp 2: Giáo dục & EdTech (B2C) — Từ người tìm hiểu khóa học đến học viên tốt nghiệp
 
 Trường hợp này minh họa cách một học viện trực tuyến hoặc trường đại học
@@ -1545,6 +1560,7 @@ Hồ sơ domain giáo dục của học viên (`cdp_domain_profiles`) theo dõi 
 
 ---
 
+<a id="truong-hop-3-tiep-thi-lien-ket"></a>
 ### Trường hợp 3: Tiếp thị liên kết & đối tác (B2B2C) — Từ giới thiệu của nhà xuất bản đến chuyển đổi đã quyết toán
 
 Trường hợp này minh họa cách tenant vận hành theo mô hình go-to-market
@@ -1734,6 +1750,7 @@ hàng chỉ mua để nhận chiết khấu một lần:
 
 ---
 
+<a id="truong-hop-4-saas-leocdp"></a>
 ### Trường hợp 4: SaaS doanh nghiệp (B2B) — LEO CDP tự sử dụng & hành trình áp dụng
 
 Trường hợp này minh họa cách doanh nghiệp vận hành theo mô hình SaaS **`B2B`**
@@ -2547,6 +2564,7 @@ agent được kết nối chính xác:
 
 ---
 
+<a id="kiem-tra-xac-minh-lien-truong-hop"></a>
 ### Danh sách kiểm tra xác minh liên trường hợp & SQL
 
 Chạy lần lượt một trong bốn trường hợp sử dụng và xác minh từng ranh giới:
