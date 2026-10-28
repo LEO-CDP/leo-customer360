@@ -11,3 +11,9 @@ from model.campaign import Campaign  # noqa: F401
 from model.creative import Creative, CreativeRender, Destination  # noqa: F401
 from model.placement import Placement, PlacementFormat  # noqa: F401
 from model.ad import Ad  # noqa: F401
+from model.personalization import (  # noqa: F401
+    ConsentHistory,
+    ConsentRecord,
+    ErasureRequest,
+    PersonalizationSetting,
+)

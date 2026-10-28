@@ -483,7 +483,11 @@ class TestServeEndpoint:
         )
 
         assert response.status_code == 200
-        assert response.json() == {"ads": []}
+        data = response.json()
+        assert data["ads"] == []
+        # Additive fields from the personalisation contract; `ads` is unchanged.
+        assert data["personalisation"]["applied"] is False
+        assert data["request_id"]
 
 
 class TestErrorHandling:

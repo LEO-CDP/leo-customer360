@@ -1,5 +1,5 @@
 # Dagster orchestrator image for customer360-backend.
-# Runs the Dagster webserver or singleton daemon, loading all eight code
+# Runs the Dagster webserver or singleton daemon, loading all nine code
 # locations in workspace.yaml. Identity resolution is managed by Dagster; there
 # is no separate identity-resolution worker image.
 FROM python:3.12-slim-bookworm AS builder
@@ -19,6 +19,7 @@ COPY customer360-backend/data_synch/requirements.txt /tmp/requirements/data_sync
 COPY customer360-backend/email_engine/requirements.txt /tmp/requirements/email_engine.txt
 COPY customer360-backend/notification_engine/requirements.txt /tmp/requirements/notification_engine.txt
 COPY customer360-backend/campaign_activation/requirements.txt /tmp/requirements/campaign_activation.txt
+COPY customer360-backend/ad_personalization/requirements.txt /tmp/requirements/ad_personalization.txt
 
 # Third-party dependencies FIRST, in their own layer, keyed only on the requirement
 # files + the DAO's declared dependencies (read from its pyproject.toml). The DAO

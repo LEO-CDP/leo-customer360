@@ -5,7 +5,7 @@
  * - Google Ads / Google Ad Manager JS tags
  * - Affiliate JS-tag ads
  * - Native JSON ads
- * - Impression & click tracking
+ * - Impression, view, click and dismiss tracking (batched to POST /events)
  * - Responsive placements
  * - Light/dark theme support
  */
@@ -30,6 +30,188 @@
   console.log("Leo Ad Widget Loader initialized. Using CDN:", DEFAULT_CDN);
   console.log("Leo Ad Widget Loader initialized. Using API base:", DEFAULT_API_BASE);
 
+  /**
+   * ------------------------------------------------------------
+   * EVENT TRANSPORT (POST {ad server}/events)
+   * ------------------------------------------------------------
+   *
+   * Options (script tag or ad container attributes; the container wins):
+   *   data-ads-events-url  full URL of the events endpoint (override)
+   *   data-ads-tenant      tenant key (default "demo")
+   *   data-ads-site        opaque site key (default: page hostname)
+   *   data-ads-consent     granted | denied | unknown (default unknown)
+   *
+   * Without an events-url override the endpoint is `events` under
+   * data-ads-api-base when that is set, otherwise `/events` on the origin this
+   * loader was served from.
+   *
+   * Events are queued, sent as one batch after a short debounce (at most 50 per
+   * call) and flushed with sendBeacon when the page is hidden or unloaded. A
+   * 429 or 503 answer is retried up to 3 times: after its Retry-After delay,
+   * or a doubling back-off from 5 s when it has none, never more than 30 s.
+   * The events keep their event_id, so a retry is never counted twice. Nothing is sent
+   * while consent is "denied". Only the existing `leovid` is stored in the
+   * browser; the session id lives in memory for this page load.
+   */
+  const EVENT_BATCH_MAX = 50;
+  const EVENT_FLUSH_DELAY_MS = 500;
+  const RETRY_AFTER_DEFAULT_S = 5;
+  const RETRY_AFTER_MAX_S = 30;
+  const MAX_RETRIES = 3;
+  const VIEW_MIN_DWELL_MS = 1000; // the server rejects a view below this
+
+  const scriptOption = (name) => jsdoc.currentScript?.getAttribute(name) || "";
+
+  const resolveEventsUrl = () => {
+    const override = scriptOption("data-ads-events-url");
+
+    if (override) {
+      return override;
+    }
+
+    if (scriptOption("data-ads-api-base")) {
+      return `${DEFAULT_API_BASE}events`;
+    }
+
+    try {
+      return new URL(
+        "/events",
+        jsdoc.currentScript?.src || window.location.href,
+      ).toString();
+    } catch (error) {
+      return `${DEFAULT_API_BASE}events`;
+    }
+  };
+
+  class EventTransport {
+    constructor(getUrl) {
+      this.getUrl = getUrl;
+      this.queue = [];
+      this.timer = null;
+    }
+
+    add(entry) {
+      this.queue.push(entry);
+
+      if (!this.timer) {
+        this.timer = setTimeout(() => {
+          this.timer = null;
+          this.flush();
+        }, EVENT_FLUSH_DELAY_MS);
+      }
+    }
+
+    flush({ unloading = false } = {}) {
+      if (this.timer) {
+        clearTimeout(this.timer);
+        this.timer = null;
+      }
+
+      const entries = this.queue.splice(0);
+      const groups = new Map();
+
+      entries.forEach((entry) => {
+        const key = JSON.stringify([
+          entry.tenant,
+          entry.site,
+          entry.leovid,
+          entry.sessionId,
+        ]);
+
+        if (!groups.has(key)) {
+          groups.set(key, { head: entry, events: [] });
+        }
+
+        groups.get(key).events.push(entry.event);
+      });
+
+      groups.forEach(({ head, events }) => {
+        for (let i = 0; i < events.length; i += EVENT_BATCH_MAX) {
+          this.send(
+            {
+              tenant: head.tenant,
+              leovid: head.leovid,
+              session_id: head.sessionId,
+              site: head.site,
+              events: events.slice(i, i + EVENT_BATCH_MAX),
+            },
+            unloading,
+            false,
+            0,
+          );
+        }
+      });
+    }
+
+    send(body, unloading, attempt) {
+      const url = this.getUrl();
+      const blob = new Blob([JSON.stringify(body)], {
+        type: "application/json",
+      });
+
+      // sendBeacon survives navigation but cannot report a status, so it is
+      // only used when the page is going away.
+      if (unloading && typeof navigator.sendBeacon === "function") {
+        try {
+          if (navigator.sendBeacon(url, blob)) {
+            return;
+          }
+        } catch (error) {
+          console.warn("sendBeacon failed", error);
+        }
+      }
+
+      fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: blob,
+        keepalive: true,
+        credentials: "omit",
+      })
+        .then((response) => {
+          if (
+            (response.status === 429 || response.status === 503) &&
+            attempt < MAX_RETRIES
+          ) {
+            const header = Number(response.headers?.get("Retry-After"));
+            const seconds = Math.min(
+              Math.max(
+                header > 0 ? header : RETRY_AFTER_DEFAULT_S * 2 ** attempt,
+                1,
+              ),
+              RETRY_AFTER_MAX_S,
+            );
+
+            setTimeout(
+              () => this.send(body, false, attempt + 1),
+              seconds * 1000,
+            );
+          }
+        })
+        .catch(() => {});
+    }
+  }
+
+  const transport = new EventTransport(resolveEventsUrl);
+  let sessionId = null;
+
+  // Widgets on this page, so a page hide can close their dwell measurement
+  // before the queue is flushed.
+  const widgets = new Set();
+
+  window.addEventListener("pagehide", () => {
+    widgets.forEach((widget) => widget.pauseDwell());
+    transport.flush({ unloading: true });
+  });
+  jsdoc.addEventListener("visibilitychange", () => {
+    if (jsdoc.visibilityState === "hidden") {
+      widgets.forEach((widget) => widget.pauseDwell());
+      transport.flush({ unloading: true });
+    } else {
+      widgets.forEach((widget) => widget.startDwell());
+    }
+  });
+
   class LeoAdWidget {
     constructor(container) {
       this.container = container;
@@ -37,6 +219,12 @@
       this.impressionObserver = null;
       this.impressionTimer = null;
       this.hasFiredImpression = false;
+      this.requestId = null;
+      this.inView = false;
+      this.visibleSince = null;
+      this.dwellMs = 0;
+      this.hasSentView = false;
+      widgets.add(this);
 
       this.theme = this.resolveTheme();
 
@@ -151,6 +339,15 @@
 
       params.set("leovid", this.getOrCreateVisitorId());
 
+      // Personalisation inputs (all optional on the server).
+      params.set("tenant", this.getOption("tenant", "demo"));
+
+      params.set("session", this.getSessionId());
+
+      params.set("site", this.getOption("site", jsdoc.location?.hostname || ""));
+
+      params.set("consent", this.getConsent());
+
       params.set("url", jsdoc.location.href);
 
       params.set("referrer", jsdoc.referrer || "");
@@ -205,6 +402,31 @@
      * VISITOR ID
      * ------------------------------------------------------------
      */
+
+    getSessionId() {
+      // In memory only: never written to storage.
+      if (!sessionId) {
+        sessionId = this.generateUUID();
+      }
+
+      return sessionId;
+    }
+
+    getOption(name, fallback) {
+      const attribute = `data-ads-${name}`;
+
+      return (
+        this.container.getAttribute(attribute) ||
+        scriptOption(attribute) ||
+        fallback
+      );
+    }
+
+    getConsent() {
+      const value = String(this.getOption("consent", "unknown")).toLowerCase();
+
+      return value === "granted" || value === "denied" ? value : "unknown";
+    }
 
     getOrCreateVisitorId() {
       const key = "leovid";
@@ -290,6 +512,9 @@
 
         const payload = await response.json();
 
+        // Correlates later events with the stored serving decision.
+        this.requestId = payload?.request_id || null;
+
         this.adData = this.selectAdForPlacement(payload, placementId);
 
         if (!this.adData) {
@@ -303,6 +528,8 @@
         this.setupImpressionTracking();
 
         this.setupClickTracking();
+
+        this.setupDismissTracking();
       } catch (error) {
         console.error("Unable to load ad data", error);
 
@@ -1250,10 +1477,6 @@
      */
 
     setupImpressionTracking() {
-      if (!this.adData?.tracking?.impressionUrl) {
-        return;
-      }
-
       if (!("IntersectionObserver" in window)) {
         this.trackImpression();
 
@@ -1265,26 +1488,27 @@
       this.impressionObserver = new IntersectionObserver(
         (entries) => {
           entries.forEach((entry) => {
-            if (this.hasFiredImpression) {
-              return;
-            }
+            this.inView = entry.isIntersecting;
 
             if (entry.isIntersecting) {
+              this.startDwell();
+
+              if (!this.hasFiredImpression && !this.impressionTimer) {
+                this.impressionTimer = setTimeout(() => {
+                  this.impressionTimer = null;
+                  this.hasFiredImpression = true;
+                  this.trackImpression();
+                }, 1000);
+              }
+            } else {
               if (this.impressionTimer) {
                 clearTimeout(this.impressionTimer);
+
+                this.impressionTimer = null;
               }
 
-              this.impressionTimer = setTimeout(() => {
-                this.trackImpression();
-
-                this.hasFiredImpression = true;
-
-                this.impressionObserver?.disconnect();
-              }, 1000);
-            } else if (this.impressionTimer) {
-              clearTimeout(this.impressionTimer);
-
-              this.impressionTimer = null;
+              // Leaving view ends the dwell measurement.
+              this.pauseDwell();
             }
           });
         },
@@ -1296,24 +1520,37 @@
       this.impressionObserver.observe(this.container);
     }
 
-    trackImpression() {
-      if (!this.adData?.tracking?.impressionUrl) {
-        return;
+    /**
+     * Dwell time is the total time the ad was >= 50% visible while the tab was
+     * visible. One `view` is sent per ad, the first time the ad leaves view (or
+     * the tab is hidden, or the page is hidden) with at least 1000 ms on screen.
+     */
+    startDwell() {
+      if (
+        this.inView &&
+        this.visibleSince === null &&
+        jsdoc.visibilityState !== "hidden"
+      ) {
+        this.visibleSince = Date.now();
+      }
+    }
+
+    pauseDwell() {
+      if (this.visibleSince !== null) {
+        this.dwellMs += Date.now() - this.visibleSince;
+
+        this.visibleSince = null;
       }
 
-      this.trackEvent(this.adData.tracking.impressionUrl, {
-        adId: this.adData.adId,
+      if (!this.hasSentView && this.dwellMs >= VIEW_MIN_DWELL_MS) {
+        this.hasSentView = true;
 
-        event: "impression",
+        this.queueEvent("view", { dwell_ms: Math.round(this.dwellMs) });
+      }
+    }
 
-        sourceType: this.adData.source?.type || "unknown",
-
-        provider: this.adData.source?.provider || "unknown",
-
-        network: this.adData.source?.network || "unknown",
-
-        timestamp: new Date().toISOString(),
-      });
+    trackImpression() {
+      this.queueEvent("impression");
     }
 
     /**
@@ -1327,10 +1564,6 @@
         return;
       }
 
-      if (!this.adData?.tracking?.clickUrl) {
-        return;
-      }
-
       this.container.addEventListener("click", (event) => {
         const targetElement = event.target.closest("a[data-track-type]");
 
@@ -1338,33 +1571,9 @@
           return;
         }
 
-        const trackType =
-          targetElement.getAttribute("data-track-type") || "click";
-
-        const itemId = targetElement.getAttribute("data-item-id");
-
-        const destinationUrl =
-          targetElement.getAttribute("href") ||
-          this.adData?.destination?.url ||
-          this.adData?.destination?.finalUrl ||
-          "";
-
-        this.trackEvent(this.adData.tracking.clickUrl, {
-          adId: this.adData.adId,
-
-          event: trackType,
-
-          itemId,
-
-          destination: destinationUrl,
-
-          sourceType: this.adData.source?.type || "unknown",
-
-          provider: this.adData.source?.provider || "unknown",
-
-          network: this.adData.source?.network || "unknown",
-
-          timestamp: new Date().toISOString(),
+        // The destination link is left alone; this only reports the click.
+        this.queueEvent("click", {
+          click_id: this.adData?.tracking?.clickId,
         });
       });
 
@@ -1373,49 +1582,92 @@
 
     /**
      * ------------------------------------------------------------
-     * TRACKING TRANSPORT
+     * DISMISS TRACKING
      * ------------------------------------------------------------
+     *
+     * The widget adds a small close button to the ad (`data-ad-dismiss`). Any
+     * element inside the container with that attribute reports a dismiss event
+     * when clicked, then the ad is hidden.
      */
 
-    trackEvent(endpoint, payload) {
-      if (!endpoint) {
+    setupDismissTracking() {
+      if (this.container.dataset.dismissBound === "true") {
         return;
       }
 
-      const body = JSON.stringify(payload);
+      this.addDismissControl();
 
-      /**
-       * Prefer sendBeacon for analytics
-       * because it survives navigation.
-       */
-      if (typeof navigator.sendBeacon === "function") {
-        try {
-          const blob = new Blob([body], {
-            type: "application/json",
-          });
-
-          const sent = navigator.sendBeacon(endpoint, blob);
-
-          if (sent) {
-            return;
-          }
-        } catch (error) {
-          console.warn("sendBeacon failed", error);
+      this.container.addEventListener("click", (event) => {
+        if (event.target.closest("[data-ad-dismiss]")) {
+          this.dismiss();
         }
+      });
+
+      this.container.dataset.dismissBound = "true";
+    }
+
+    addDismissControl() {
+      if (!jsdoc.createElement || this.container.querySelector?.("[data-ad-dismiss]")) {
+        return;
       }
 
-      /**
-       * Fallback
-       */
-      fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body,
-        keepalive: true,
-        credentials: "omit",
-      }).catch(() => {});
+      const button = jsdoc.createElement("button");
+
+      button.type = "button";
+      button.className = "leo-ad-dismiss";
+      button.setAttribute("data-ad-dismiss", "");
+      button.setAttribute("aria-label", "Dismiss this ad");
+      button.textContent = "\u00d7";
+
+      this.container.appendChild(button);
+    }
+
+    dismiss() {
+      this.queueEvent("dismiss");
+
+      this.pauseDwell();
+
+      this.container.setAttribute("hidden", "");
+    }
+
+    /**
+     * ------------------------------------------------------------
+     * EVENT QUEUE
+     * ------------------------------------------------------------
+     */
+
+    queueEvent(eventType, extra = {}) {
+      // Nothing is sent without consent, or when the server gave no request id.
+      if (this.getConsent() === "denied") {
+        return;
+      }
+
+      if (!this.adData?.adId || !this.requestId) {
+        return;
+      }
+
+      const event = {
+        event_id: this.generateUUID(),
+        event_type: eventType,
+        request_id: this.requestId,
+        ad_key: String(this.adData.adId),
+        event_time: new Date().toISOString(),
+        page_url: jsdoc.location?.href,
+      };
+
+      Object.entries(extra).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          event[key] = value;
+        }
+      });
+
+      transport.add({
+        tenant: this.getOption("tenant", "demo"),
+        site: this.getOption("site", jsdoc.location?.hostname || ""),
+        leovid: this.getOrCreateVisitorId(),
+        sessionId: this.getSessionId(),
+        event,
+      });
     }
 
     /**
@@ -1475,6 +1727,12 @@
         console.warn("Unable to load ad stylesheet", error);
       });
   };
+
+  // Test hook: only populated when a test sets window.__LEO_ADS_TEST__ = {}
+  // before loading this file (tests/widget/ads.loader.test.js).
+  if (window.__LEO_ADS_TEST__) {
+    Object.assign(window.__LEO_ADS_TEST__, { LeoAdWidget, EventTransport, transport, widgets });
+  }
 
   /**
    * ------------------------------------------------------------

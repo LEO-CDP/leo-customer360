@@ -17,6 +17,8 @@ dagster-graphql==1.13.26
 # Test-only dependencies (see ./run_unit_tests.sh)
 pytest>=7.4,<9
 httpx2>=2.9.1
+jsonschema>=4.20,<5   # contract validation in tests/personalization
+pyyaml>=6,<7
 
 
 # OpenTelemetry zero-code request tracing (OTLP -> Jaeger). Installed here; the
