@@ -1,0 +1,45 @@
+# UAT scaling profile for customer360-event-api.
+# Non-secret, per-env, reviewable. deploy-event-api.sh layers the image + the
+# ConfigMap/Secret it renders from Terraform on top of this.
+#
+# UAT runs LEAN: 1 pod at rest, 3 at peak. That is a deliberate departure from prod's
+# HA floor of 3 — this environment is for verifying behaviour, not surviving a node
+# failure, and the cluster's own system pods already claim most of two small nodes.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+patches:
+  # 1 pod floor, 3 ceiling, scale out past ~50 ingest req/sec per pod.
+  - target: { kind: ScaledObject, name: event-api }
+    patch: |-
+      - { op: replace, path: /spec/minReplicaCount, value: 1 }
+      - { op: replace, path: /spec/maxReplicaCount, value: 3 }
+      - { op: replace, path: /spec/triggers/0/metadata/threshold, value: "50" }
+      # trigger 2 = redis-streams backlog (0 = prometheus RPS, 1 = cpu)
+      - { op: replace, path: /spec/triggers/2/metadata/lagCount, value: "500" }
+      - { op: replace, path: /spec/triggers/2/metadata/activationLagCount, value: "50" }
+      # Scale DOWN policy. The base is tuned for prod (300s window, so a busy tier
+      # never oscillates); with a 1-3 range there is far less to oscillate over, and
+      # holding 3 idle pods on a small cluster is the expensive mistake. 120s of
+      # sustained low load, then one pod a minute: 3 -> 1 in roughly four minutes.
+      #
+      # Shrinking fast is safe here because a removed pod is not dropped: SIGTERM ->
+      # 5s preStop (endpoints drain) -> the worker finishes its in-flight Redis batch,
+      # inside terminationGracePeriodSeconds=60. Whatever it had not yet claimed stays
+      # in the stream for a surviving pod.
+      - op: replace
+        path: /spec/advanced/horizontalPodAutoscalerConfig/behavior/scaleDown
+        value:
+          stabilizationWindowSeconds: 120
+          policies:
+            - { type: Pods, value: 1, periodSeconds: 60 }
+
+  # Keep the Deployment's own replica count in step with the floor. Without this the
+  # manifest says 3, so every `kubectl apply` bumps the tier to 3 pods and KEDA then
+  # walks it back down — a pointless surge on each deploy.
+  - target: { kind: Deployment, name: event-api }
+    patch: |-
+      - { op: replace, path: /spec/replicas, value: 1 }

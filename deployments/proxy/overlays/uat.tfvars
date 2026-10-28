@@ -14,25 +14,37 @@ caddy_image      = "caddy:2-alpine"
 # Upstreams — all co-located on the api box (127.0.0.1) except dagster (backend box).
 api_upstream       = "127.0.0.1:8008"  # customer360-api (root_path /c360api; Caddy strips /c360api)
 keycloak_upstream  = "127.0.0.1:8080"  # Keycloak (serve under /auth -> set KC_HTTP_RELATIVE_PATH=/auth)
-frontend_upstream  = "127.0.0.1:8890"  # frontend-admin (catch-all "/")
-ads_upstream       = "127.0.0.1:9009"  # ads-server (/ads)
-dagster_upstream   = "10.100.1.4:3000" # backend box (only if you enable the /dagster block)
+frontend_upstream  = "127.0.0.1:8890"  # customer360-frontend (catch-all "/")
+ads_upstream       = "49.213.73.17:9009" # customer360-promotions (/ads) — VKS Service LoadBalancer, NOT this box
+dagster_upstream   = "10.100.1.11:30300" # VKS Dagster NodePort (was backend box 10.100.1.4:3000); only if you enable the /dagster block
 netdata_upstream   = "127.0.0.1:4199"  # oauth2-proxy -> Netdata (only if you enable /netdata)
 portainer_upstream = "127.0.0.1:9443"  # Portainer HTTPS (only if you enable /portainer)
 
 # Jaeger trace UI served under /jaeger on :443 (TLS) via its oauth2-proxy SSO gate.
 jaeger_upstream = "127.0.0.1:4686"
 
-# data-tracking-api served under /data. On its OWN box (server key "tracking"), so this is a
-# PRIVATE cross-box ip, NOT 127.0.0.1. Assumes DHCP gives the tracking box 10.100.1.8 — verify
-# with `cd ../server && terraform output servers` and correct if it differs.
-data_upstream = "10.100.1.8:8010"
+# customer360-event-api served under /data, on the VKS cluster.
+#   49.213.73.13:8010  the `event-api` Service (type LoadBalancer)
+#
+# The old tracking vServer (10.100.1.8) was destroyed on 2026-09-29 after the canary reached
+# 100% here, so it is no longer listed — a dead address left in this file reads like a
+# rollback target that does not exist. Re-introducing a canary means adding a second address
+# back and setting data_lb_policy to "weighted_round_robin <a> <b>" (order matches).
+#
+#   kubectl -n customer360 get svc event-api     # if the EXTERNAL-IP ever changes
+data_upstream  = "49.213.73.13:8010"
+data_lb_policy = "random"
 
 # docs-vector-search served under /docs-ai (the public docs site's chatbot calls it cross-origin).
 # On its OWN box (server key "docs"), so a PRIVATE cross-box ip. Reachable from the api box (Caddy)
 # via the docs:8001 extra_ingress rule in ../server/overlays/uat.tfvars. Verify with
 # `cd ../server && terraform output servers`.
 docs_upstream = "10.100.1.7:8001"
+
+# customer360-agent — ONLY /agent/health is routed (see Caddyfile); /plan/* stays internal.
+# Its own box (server key "agent"); VERIFY the private IP with `terraform output servers`
+# after ../server apply. Caddy runs on the api box, which already reaches the agent on :8009.
+agent_upstream = "10.100.1.10:8009" # agent-box private ip (verified via hostname -I on the box)
 
 # Parent origin allowed to embed the hidden c360 web SDK iframe.
 sdk_frame_ancestor = "https://beta.leocdp.com"

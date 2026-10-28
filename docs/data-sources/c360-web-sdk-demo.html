@@ -431,8 +431,21 @@
                 <div class="sidebar-box">
                     <div class="sidebar-header">Nhận thông báo kết quả</div>
                     <form id="lottery-alert-form" class="p-3" data-c360-form="lottery-alert">
+                        <label for="alert-full-name" class="visually-hidden">Họ và tên</label>
+                        <input id="alert-full-name" name="full_name" type="text" class="form-control form-control-sm mb-2" placeholder="Họ và tên" autocomplete="name" required>
+                        <label for="alert-phone" class="visually-hidden">Số điện thoại</label>
+                        <input id="alert-phone" name="phone_number" type="tel" class="form-control form-control-sm mb-2" placeholder="Số điện thoại" autocomplete="tel" required>
                         <label for="alert-email" class="visually-hidden">Email</label>
-                        <input id="alert-email" name="email" type="email" class="form-control form-control-sm mb-2" placeholder="Email của bạn" required>
+                        <input id="alert-email" name="email" type="email" class="form-control form-control-sm mb-2" placeholder="Email của bạn" autocomplete="email" required>
+                        <div class="form-check mb-2">
+                            <input id="alert-email-marketing-consent" name="email_marketing_consent" class="form-check-input" type="checkbox" required>
+                            <label for="alert-email-marketing-consent" class="form-check-label small">
+                                Tôi đồng ý nhận email tiếp thị. Tôi có thể hủy đăng ký bất cứ lúc nào.
+                            </label>
+                        </div>
+                        <small class="d-block text-muted mb-2">
+                            Consent email marketing riêng với consent tracking. Demo chỉ ghi event, không gửi email hoặc cập nhật hồ sơ.
+                        </small>
                         <button type="submit" class="btn btn-danger btn-sm w-100">Đăng ký nhận tin</button>
                         <small id="alert-form-status" class="d-block text-muted mt-2" aria-live="polite"></small>
                     </form>
@@ -441,6 +454,82 @@
             </div>
         </div>
     </div>
+
+    <section class="container mb-4" aria-labelledby="data-layer-demo-title">
+        <div class="card border-primary-subtle">
+            <div class="card-body">
+                <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+                    <div>
+                        <h2 id="data-layer-demo-title" class="h5 mb-1">Thử Data Layer và custom event</h2>
+                        <p class="text-muted small mb-3">
+                            SDK không tự đọc Data Layer. Nút 1 chỉ push event vào
+                            <code>window.dataLayer</code>; nút 2 đọc event mới nhất rồi map sang LEO.
+                        </p>
+                    </div>
+                    <span class="badge text-bg-secondary">Demo adapter</span>
+                </div>
+
+                <div class="row g-3">
+                    <div class="col-lg-6">
+                        <label for="c360-data-layer-event-json" class="form-label small fw-semibold">
+                            Custom purchase event JSON
+                        </label>
+                        <textarea id="c360-data-layer-event-json" class="form-control font-monospace small"
+                            rows="12" spellcheck="false" aria-describedby="c360-data-layer-help">{
+  "event": "leo_purchase",
+  "ecommerce": {
+    "transaction_id": "DEMO-ORDER-1001",
+    "value": 599000,
+    "currency": "VND",
+    "items": [
+      {
+        "item_id": "SKU-101",
+        "item_name": "Vé số mẫu",
+        "price": 299000,
+        "quantity": 1,
+        "details": {
+          "draw": "2026-10-07",
+          "numbers": ["12", "34", "56"]
+        }
+      },
+      {
+        "item_id": "SKU-205",
+        "item_name": "Gói thống kê",
+        "price": 300000,
+        "quantity": 1
+      }
+    ]
+  }
+}</textarea>
+                        <small id="c360-data-layer-help" class="form-text text-muted">
+                            Có thể sửa payload hoặc thêm nested properties/arrays trước khi push.
+                        </small>
+                    </div>
+                    <div class="col-lg-6">
+                        <div class="d-flex flex-wrap gap-2 mb-2">
+                            <button id="c360-data-layer-push" type="button" class="btn btn-outline-primary btn-sm">
+                                1. Push vào window.dataLayer
+                            </button>
+                            <button id="c360-data-layer-send" type="button" class="btn btn-primary btn-sm">
+                                2. Đọc event mới nhất và gửi LEO
+                            </button>
+                        </div>
+                        <div id="c360-data-layer-status" class="small alert alert-info py-2" role="status" aria-live="polite">
+                            Push event để bắt đầu. Push không tự gửi event tới LEO.
+                        </div>
+                        <label for="c360-data-layer-preview" class="form-label small fw-semibold">
+                            Data Layer preview
+                        </label>
+                        <pre id="c360-data-layer-preview" class="border rounded bg-light p-2 small"
+                            style="max-height: 260px; overflow: auto;">Chưa có event leo_purchase trong window.dataLayer.</pre>
+                        <small class="text-muted">
+                            Nút gửi tạo request tracking thật theo SDK settings hiện tại. Chỉ gửi khi endpoint đã cấu hình và consent đã được cấp.
+                        </small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
 
     <div class="c360-settings-launcher">
         <button id="c360-settings-open" type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#c360-settings-modal">
@@ -480,220 +569,296 @@
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 
+    <!--
+        C360 demo tracking layer.
+        Developer note: Keep SDK loading, Observer handlers, payload shaping,
+        and C360DemoSDK public methods in this script. The page script below
+        should call C360DemoSDK, but should not build Observer payloads itself.
+    -->
     <script>
-
         (function (window, $, Handlebars) {
             "use strict";
 
-        // Leo Observer SDK: load the real Customer 360 Web SDK for this demo.
-        (function () {
-            var defaults = {
-                dataSourceId: "1a93ae2d-0961-4992-b27d-15a703a44038",
-                logDomain: "c360.example.com"
-            };
-            var storageKeys = {
-                dataSourceId: "c360.demo.leoC360DataSourceId",
-                logDomain: "c360.demo.leoObserverLogDomain"
-            };
-
-            function readStoredValue(key, fallback) {
-                try {
-                    var storedValue = window.localStorage.getItem(key);
-                    return storedValue && storedValue.trim() ? storedValue.trim() : fallback;
-                } catch (error) {
-                    console.warn("[C360 SDK] Unable to read localStorage", key, error);
-                    return fallback;
-                }
-            }
-
-            function normalizeLogDomain(value) {
-                return String(value || "")
-                    .trim()
-                    .replace(/^https?:\/\//i, "")
-                    .replace(/\/+$/, "");
-            }
-
-            var dataSourceId = readStoredValue(storageKeys.dataSourceId, defaults.dataSourceId);
-            var logDomain = normalizeLogDomain(readStoredValue(storageKeys.logDomain, defaults.logDomain));
-            if (!logDomain) logDomain = defaults.logDomain;
-
-            window.C360DemoSettings = {
-                defaults: defaults,
-                storageKeys: storageKeys,
-                dataSourceId: dataSourceId,
-                logDomain: logDomain
-            };
-            window.leoC360DataSourceId = dataSourceId;
-            window.leoTrackingBatchSize = 10;
-            window.leoObserverLogDomain = logDomain;
-
-            var c360TrackingBase = "https://" + window.leoObserverLogDomain;
-            window.leoTrackingEndpoint = c360TrackingBase + "/data/api/v1/tracking/logs";
-            window.leoCdpProxyPath = "/data/cdp-sdk/html/cdp-event-proxy.html";
-            window.srcTouchpointName = encodeURIComponent(document.title);
-            window.srcTouchpointUrl = encodeURIComponent(location.href);
-
-            var src = "https://gcore.jsdelivr.net/gh/LEO-CDP/leo-customer360@main/data-tracking-api/static/c360-web-sdk/observer/leo.proxy.js".trim();
-            if (src === "" || !/^(https?:)?\/\//i.test(src)) {
-                src = c360TrackingBase + "/data/cdp-sdk/observer/leo.proxy.js";
-            }
-
-            console.log("[C360 SDK] Loading Leo Observer proxy", {
-                dataSourceId: window.leoC360DataSourceId,
-                trackingEndpoint: window.leoTrackingEndpoint,
-                proxyScript: src
-            });
-
-            var jsNode = document.createElement('script');
-            jsNode.async = true;
-            jsNode.defer = true;
-            jsNode.src = src;
-            jsNode.onload = function () {
-                console.log("[C360 SDK] Leo Observer proxy script loaded", src);
-            };
-            jsNode.onerror = function (error) {
-                console.error("[C360 SDK] Leo Observer proxy script failed to load", src, error);
-            };
-            var firstScript = document.getElementsByTagName('script')[0];
-            firstScript.parentNode.insertBefore(jsNode, firstScript);
-        })();
-
-        // Called by leo.proxy.js after the cross-domain visitor/session proxy is ready.
-        // Page views are sent by loadLotteryInformation(); do not send another
-        // page view here or the initial page load will be recorded twice.
-        window.leoObserverProxyReady = function (session) {
-            console.log("[C360 SDK] Leo Observer proxy ready", {
-                session: session || null,
-                visitorId: window.LeoObserverProxy && window.LeoObserverProxy.visitorId,
-                sessionKey: window.LeoObserverProxy && window.LeoObserverProxy.sessionKey
-            });
-            C360DemoSDK.flushPendingPageViews();
-        }
-
-        function invokeObserver(observer, methodName, args) {
-            if (!observer || typeof observer[methodName] !== 'function') return false;
-            observer[methodName].apply(observer, args);
-            return true;
-        }
-
-        const OBSERVER_EVENT_HANDLERS = {
-            page_view: function (observer, payload) {
-                return invokeObserver(observer, 'recordEventPageView', [payload]);
-            },
-            content_view: function (observer, payload) {
-                return invokeObserver(observer, 'recordEventContentView', [payload]);
-            },
-            ui_click: function (observer, payload) {
-                return invokeObserver(observer, 'recordEventClickDetails', [payload]);
-            },
-            form_submit: function (observer, payload) {
-                return invokeObserver(observer, 'recordEventSubmitContact', [payload]);
-            },
-            user_login: function (observer, payload) {
-                return invokeObserver(observer, 'recordEventUserLogin', [payload]);
-            },
-            sign_up: function (observer, payload) {
-                return invokeObserver(observer, 'recordEventRegisterAccount', [payload]);
-            },
-            purchase: function (observer, payload) {
-                return invokeObserver(observer, 'recordEventConversion', [
-                    payload.transaction_id || ('demo-' + Date.now()),
-                    payload.value || 0,
-                    payload.currency || 'VND',
-                    payload.items || [],
-                    payload
-                ]);
-            },
-            ad_impression: function (observer, payload) {
-                return invokeObserver(observer, 'recordEventContentView', [payload]);
-            },
-            ad_clicked: function (observer, payload) {
-                return invokeObserver(observer, 'recordEventClickDetails', [payload]);
-            }
-        };
-
-        /*
-         * C360 event facade used by the demo journey. These calls are real
-         * LeoObserver methods when the proxy has loaded; the CustomEvent
-         * remains available for local debugging and automated smoke tests.
-         */
-        const C360DemoSDK = window.C360DemoSDK = {
-            pendingPageViews: [],
-
-            send: function (eventName, eventData) {
-                const observer = window.LeoObserver;
-                const payload = Object.assign({
-                    event: eventName,
-                    page_url: window.location.href,
-                    occurred_at: new Date().toISOString()
-                }, eventData || {});
-                const handler = OBSERVER_EVENT_HANDLERS[eventName];
-                const sentToObserver = handler ? handler(observer, payload) : false;
-
-                console.log("[C360 SDK] Event", eventName, {
-                    sentToLeoObserver: sentToObserver,
-                    payload: payload
-                });
-                window.dispatchEvent(new CustomEvent('c360:sdk-event', { detail: payload }));
-                return payload;
-            },
-
-            trackPageView: function (pageData) {
-                const pageView = {
-                    page_name: pageData.pageName,
-                    menu_key: pageData.menuKey,
-                    title: pageData.title
+            // Leo Observer SDK: load the real Customer 360 Web SDK for this demo.
+            (function () {
+                var defaults = {
+                    dataSourceId: "15dc39d4-ae42-5c60-9c77-66f05dcae448",
+                    logDomain: "c360.example.com"
                 };
+                var storageKeys = {
+                    dataSourceId: "c360.demo.leoC360DataSourceId",
+                    logDomain: "c360.demo.leoObserverLogDomain"
+                };
+                var legacyDefaultDataSourceId = "1a93ae2d-0961-4992-b27d-15a703a44038";
 
-                if (!window.LeoObserver || typeof window.LeoObserver.recordEventPageView !== 'function') {
-                    this.pendingPageViews.push(pageView);
-                    console.warn("[C360 SDK] Queued page_view until Leo Observer is ready", pageView);
-                    return pageView;
+                function readStoredValue(key, fallback) {
+                    try {
+                        var storedValue = window.localStorage.getItem(key);
+                        return storedValue && storedValue.trim() ? storedValue.trim() : fallback;
+                    } catch (error) {
+                        console.warn("[C360 SDK] Unable to read localStorage", key, error);
+                        return fallback;
+                    }
                 }
 
-                return this.send('page_view', pageView);
-            },
-
-            flushPendingPageViews: function () {
-                if (!window.LeoObserver || typeof window.LeoObserver.recordEventPageView !== 'function') {
-                    console.warn("[C360 SDK] Cannot flush page_views; Leo Observer is unavailable");
-                    return;
+                function normalizeLogDomain(value) {
+                    return String(value || "")
+                        .trim()
+                        .replace(/^https?:\/\//i, "")
+                        .replace(/\/+$/, "");
                 }
 
-                while (this.pendingPageViews.length) {
-                    const pageView = this.pendingPageViews.shift();
-                    console.log("[C360 SDK] Sending queued page_view after proxy-ready callback");
-                    this.send('page_view', pageView);
+                var dataSourceId = readStoredValue(storageKeys.dataSourceId, defaults.dataSourceId);
+                if (dataSourceId === legacyDefaultDataSourceId) {
+                    dataSourceId = defaults.dataSourceId;
+                    try {
+                        window.localStorage.setItem(storageKeys.dataSourceId, dataSourceId);
+                    } catch (error) {
+                        console.warn("[C360 SDK] Unable to migrate the demo data source ID", error);
+                    }
                 }
-            },
+                var logDomain = normalizeLogDomain(readStoredValue(storageKeys.logDomain, defaults.logDomain));
+                if (!logDomain) logDomain = defaults.logDomain;
 
-            identifyUser: function (user, method) {
-                const observer = window.LeoObserver;
+                window.C360DemoSettings = {
+                    defaults: defaults,
+                    storageKeys: storageKeys,
+                    dataSourceId: dataSourceId,
+                    logDomain: logDomain
+                };
+                window.leoC360DataSourceId = dataSourceId;
+                window.leoTrackingBatchSize = 10;
+                window.leoObserverLogDomain = logDomain;
 
-                // Replace this with the production identity/profile call when available.
-                if (observer && typeof observer.updateProfileBySession === 'function') {
-                    observer.updateProfileBySession(user);
+                var c360TrackingBase = "https://" + window.leoObserverLogDomain;
+                window.leoTrackingEndpoint = c360TrackingBase + "/data/api/v1/tracking/logs";
+                window.leoCdpProxyPath = "/data/cdp-sdk/html/cdp-event-proxy.html";
+                window.srcTouchpointName = encodeURIComponent(document.title);
+                window.srcTouchpointUrl = encodeURIComponent(location.href);
+
+                var src = "https://gcore.jsdelivr.net/gh/LEO-CDP/leo-customer360@main/customer360-event-api/static/c360-web-sdk/observer/leo.proxy.js".trim();
+                if (src === "" || !/^(https?:)?\/\//i.test(src)) {
+                    src = c360TrackingBase + "/data/cdp-sdk/observer/leo.proxy.js";
                 }
 
-                return this.send(method === 'signup' ? 'sign_up' : 'user_login', {
-                    user_id: user.user_id,
-                    email: user.email,
-                    method: method
+                console.log("[C360 SDK] Loading Leo Observer proxy", {
+                    dataSourceId: window.leoC360DataSourceId,
+                    trackingEndpoint: window.leoTrackingEndpoint,
+                    proxyScript: src
                 });
-            },
 
-            trackClick: function (target, details) {
-                return this.send('ui_click', Object.assign({ target: target }, details || {}));
-            },
+                var jsNode = document.createElement('script');
+                jsNode.async = true;
+                jsNode.defer = true;
+                jsNode.src = src;
+                jsNode.onload = function () {
+                    console.log("[C360 SDK] Leo Observer proxy script loaded", src);
+                };
+                jsNode.onerror = function (error) {
+                    console.error("[C360 SDK] Leo Observer proxy script failed to load", src, error);
+                };
+                var firstScript = document.getElementsByTagName('script')[0];
+                firstScript.parentNode.insertBefore(jsNode, firstScript);
+            })();
 
-            trackFormSubmit: function (formId, fields) {
-                return this.send('form_submit', { form_id: formId, fields: fields });
-            },
-
-            trackConversion: function (conversion) {
-                return this.send('purchase', conversion);
+            function invokeObserver(observer, methodName, args) {
+                if (!observer || typeof observer[methodName] !== 'function') return false;
+                observer[methodName].apply(observer, args);
+                return true;
             }
-        };
+
+            const OBSERVER_EVENT_HANDLERS = {
+                page_view: function (observer, payload) {
+                    return invokeObserver(observer, 'recordEventPageView', [payload]);
+                },
+                content_view: function (observer, payload) {
+                    return invokeObserver(observer, 'recordEventContentView', [payload]);
+                },
+                ui_click: function (observer, payload) {
+                    return invokeObserver(observer, 'recordEventClickDetails', [payload]);
+                },
+                form_submit: function (observer, payload) {
+                    return invokeObserver(observer, 'recordEventSubmitContact', [payload]);
+                },
+                user_login: function (observer, payload) {
+                    return invokeObserver(observer, 'recordEventUserLogin', [payload]);
+                },
+                sign_up: function (observer, payload) {
+                    return invokeObserver(observer, 'recordEventRegisterAccount', [payload]);
+                },
+                purchase: function (observer, payload) {
+                    return invokeObserver(observer, 'recordEventConversion', [
+                        payload.transaction_id || ('demo-' + Date.now()),
+                        payload.value || 0,
+                        payload.currency || 'VND',
+                        payload.items || [],
+                        payload
+                    ]);
+                },
+                ad_impression: function (observer, payload) {
+                    return invokeObserver(observer, 'recordEventContentView', [payload]);
+                },
+                ad_clicked: function (observer, payload) {
+                    return invokeObserver(observer, 'recordEventClickDetails', [payload]);
+                }
+            };
+
+            function isObserverReady(methodName) {
+                return Boolean(window.LeoObserver && typeof window.LeoObserver[methodName] === 'function');
+            }
+
+            function readUrlAttribution() {
+                const params = new URLSearchParams(window.location.search);
+                const attribution = {};
+                const utmFields = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'];
+                const uuidFields = [
+                    { paramName: 'leocpid', fieldName: 'campaign_id' },
+                    { paramName: 'leoexvrid', fieldName: 'experiment_variant_id' }
+                ];
+                const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+                utmFields.forEach(function (fieldName) {
+                    const value = params.get(fieldName);
+                    if (value && value.trim()) attribution[fieldName] = value.trim();
+                });
+                uuidFields.forEach(function (field) {
+                    const value = params.get(field.paramName);
+                    if (!value) return;
+                    if (uuidPattern.test(value.trim())) {
+                        attribution[field.fieldName] = value.trim();
+                    } else {
+                        console.warn('[C360 SDK] Ignoring invalid attribution UUID', field.paramName, value);
+                    }
+                });
+
+                return attribution;
+            }
+
+            const URL_ATTRIBUTION = readUrlAttribution();
+
+            function createTrackingPayload(eventData) {
+                const payload = Object.assign(
+                    {
+                        page_url: window.location.href,
+                        occurred_at: new Date().toISOString()
+                    },
+                    URL_ATTRIBUTION,
+                    eventData || {}
+                );
+
+                delete payload.event;
+                return payload;
+            }
+
+            function sendToLeoObserver(eventName, payload) {
+                const handler = OBSERVER_EVENT_HANDLERS[eventName];
+                return handler ? handler(window.LeoObserver, payload) : false;
+            }
+
+            function emitSdkDebugEvent(eventName, payload) {
+                window.dispatchEvent(new CustomEvent('c360:sdk-event', {
+                    detail: Object.assign({ event: eventName }, payload)
+                }));
+            }
+
+            /*
+             * C360DemoSDK is the only tracking API used by the page script.
+             * Custom event data is passed directly as event_data to LeoObserver.
+             */
+            const C360DemoSDK = window.C360DemoSDK = {
+                pendingPageViews: [],
+                attribution: Object.assign({}, URL_ATTRIBUTION),
+
+                send: function (eventName, eventData) {
+                    const payload = createTrackingPayload(eventData);
+                    const sentToObserver = sendToLeoObserver(eventName, payload);
+
+                    console.log("[C360 SDK] Event", eventName, {
+                        sentToLeoObserver: sentToObserver,
+                        payload: payload
+                    });
+                    emitSdkDebugEvent(eventName, payload);
+                    return payload;
+                },
+
+                trackPageView: function (pageData) {
+                    const pageView = {
+                        page_name: pageData.pageName,
+                        menu_key: pageData.menuKey,
+                        title: pageData.title
+                    };
+
+                    if (!isObserverReady('recordEventPageView')) {
+                        C360DemoSDK.pendingPageViews.push(pageView);
+                        console.warn("[C360 SDK] Queued page_view until Leo Observer is ready", pageView);
+                        return pageView;
+                    }
+
+                    return C360DemoSDK.send('page_view', pageView);
+                },
+
+                flushPendingPageViews: function () {
+                    if (!isObserverReady('recordEventPageView')) {
+                        console.warn("[C360 SDK] Cannot flush page_views; Leo Observer is unavailable");
+                        return;
+                    }
+
+                    while (C360DemoSDK.pendingPageViews.length) {
+                        const pageView = C360DemoSDK.pendingPageViews.shift();
+                        console.log("[C360 SDK] Sending queued page_view after proxy-ready callback");
+                        C360DemoSDK.send('page_view', pageView);
+                    }
+                },
+
+                identifyUser: function (user, method) {
+                    const observer = window.LeoObserver;
+
+                    if (observer && typeof observer.updateProfileBySession === 'function') {
+                        observer.updateProfileBySession(user);
+                    }
+
+                    return C360DemoSDK.send(method === 'signup' ? 'sign_up' : 'user_login', {
+                        user_id: user.user_id,
+                        email: user.email,
+                        phone_number: user.phone_number,
+                        full_name: user.full_name,
+                        method: method
+                    });
+                },
+
+                trackClick: function (target, details) {
+                    return C360DemoSDK.send('ui_click', Object.assign({ target: target }, details || {}));
+                },
+
+                trackFormSubmit: function (formId, eventData) {
+                    return C360DemoSDK.send('form_submit', Object.assign({ form_id: formId }, eventData || {}));
+                },
+
+                trackConversion: function (conversion) {
+                    return C360DemoSDK.send('purchase', conversion);
+                }
+            };
+
+            // The proxy can call this after it loads; keep page-view queuing here.
+            window.leoObserverProxyReady = function (session) {
+                console.log("[C360 SDK] Leo Observer proxy ready", {
+                    session: session || null,
+                    visitorId: window.LeoObserverProxy && window.LeoObserverProxy.visitorId,
+                    sessionKey: window.LeoObserverProxy && window.LeoObserverProxy.sessionKey
+                });
+                C360DemoSDK.flushPendingPageViews();
+            };
+        })(window, window.jQuery, window.Handlebars);
+    </script>
+
+    <!--
+        Lottery demo page layer.
+        Developer note: Keep rendering, navigation, form, and ad UI behavior
+        here. Send customer events through window.C360DemoSDK only.
+    -->
+    <script>
+        (function (window, $, Handlebars) {
+            "use strict";
 
         const LOTTERY_MENU_CONFIG = {
             home: {
@@ -907,9 +1072,8 @@
 
             function trackAdEvent(eventType, extraData) {
                 const eventData = Object.assign({
-                    event: eventType,
                     ad_id: adData.adId,
-                    campaign_id: adData.campaign.id,
+                    campaign: adData.campaign.name,
                     creative_id: adData.creative.id,
                     placement_id: adData.placement.id,
                     destination_url: adData.destination.url,
@@ -918,7 +1082,9 @@
 
                 C360DemoSDK.send(eventType, eventData);
                 if (eventType.indexOf('ad_') === 0) {
-                    window.dispatchEvent(new CustomEvent('c360:ad-event', { detail: eventData }));
+                    window.dispatchEvent(new CustomEvent('c360:ad-event', {
+                        detail: Object.assign({ event: eventType }, eventData)
+                    }));
                 }
             }
 
@@ -1026,9 +1192,27 @@
         function initLotteryAlertForm() {
             $('#lottery-alert-form').on('submit', function (event) {
                 event.preventDefault();
+                const marketingConsent = $('#alert-email-marketing-consent').is(':checked');
+                if (!marketingConsent) {
+                    $('#alert-form-status').text('Vui lòng đồng ý nhận email tiếp thị trước khi đăng ký.');
+                    return;
+                }
+                const fullName = $('#alert-full-name').val().trim();
+                const phoneNumber = $('#alert-phone').val().trim();
                 const email = $('#alert-email').val().trim();
-                C360DemoSDK.trackFormSubmit('lottery-alert', { email: email });
-                C360DemoSDK.identifyUser({ user_id: 'demo-subscriber', email: email }, 'signup');
+                const subscriber = {
+                    user_id: 'demo-subscriber',
+                    email: email,
+                    phone_number: phoneNumber,
+                    full_name: fullName
+                };
+                C360DemoSDK.trackFormSubmit('lottery-alert', {
+                    email: email,
+                    phone_number: phoneNumber,
+                    full_name: fullName,
+                    email_opt_in: true
+                });
+                C360DemoSDK.identifyUser(subscriber, 'signup');
                 C360DemoSDK.trackConversion({
                     transaction_id: 'demo-subscription-' + Date.now(),
                     value: 0,
@@ -1053,12 +1237,143 @@
             });
         }
 
+        function initDataLayerDemo() {
+            if (!window.dataLayer) {
+                window.dataLayer = [];
+            }
+
+            const $eventJson = $('#c360-data-layer-event-json');
+            const status = document.getElementById('c360-data-layer-status');
+            const preview = document.getElementById('c360-data-layer-preview');
+
+            function setStatus(message, type) {
+                status.className = 'small alert alert-' + type + ' py-2';
+                status.textContent = message;
+            }
+
+            function getLatestPurchaseEvent() {
+                if (!Array.isArray(window.dataLayer)) {
+                    throw new TypeError('window.dataLayer is not an array');
+                }
+
+                for (let index = window.dataLayer.length - 1; index >= 0; index -= 1) {
+                    const entry = window.dataLayer[index];
+                    if (entry && typeof entry === 'object' && entry.event === 'leo_purchase') {
+                        return entry;
+                    }
+                }
+                return null;
+            }
+
+            function renderLatestPurchaseEvent() {
+                const event = getLatestPurchaseEvent();
+                preview.textContent = event
+                    ? JSON.stringify(event, null, 2)
+                    : 'Chưa có event leo_purchase trong window.dataLayer.';
+            }
+
+            function pushEventFromEditor() {
+                let event;
+                try {
+                    event = JSON.parse($eventJson.val());
+                } catch (error) {
+                    setStatus('JSON không hợp lệ: ' + error.message, 'danger');
+                    return;
+                }
+
+                if (!event || typeof event !== 'object' || Array.isArray(event) || event.event !== 'leo_purchase') {
+                    setStatus('Event phải là object JSON có "event": "leo_purchase".', 'danger');
+                    return;
+                }
+                if (!event.ecommerce || typeof event.ecommerce !== 'object' || Array.isArray(event.ecommerce)) {
+                    setStatus('Event cần có object ecommerce.', 'danger');
+                    return;
+                }
+
+                if (!Array.isArray(window.dataLayer)) {
+                    setStatus('window.dataLayer không phải array; không thể push event.', 'danger');
+                    return;
+                }
+
+                window.dataLayer.push(event);
+                renderLatestPurchaseEvent();
+                setStatus('Đã push vào window.dataLayer. Event chưa được gửi tới LEO.', 'success');
+                console.log('[Data Layer demo] Pushed event', event);
+            }
+
+            function sendLatestPurchaseEvent() {
+                let event;
+                try {
+                    event = getLatestPurchaseEvent();
+                } catch (error) {
+                    setStatus(error.message, 'danger');
+                    return;
+                }
+
+                if (!event) {
+                    setStatus('Không tìm thấy event leo_purchase. Hãy push một event trước.', 'warning');
+                    return;
+                }
+
+                const ecommerce = event.ecommerce;
+                const transactionId = String(ecommerce && ecommerce.transaction_id || '').trim();
+                const value = Number(ecommerce && ecommerce.value);
+                const currency = String(ecommerce && ecommerce.currency || '').trim();
+                const items = ecommerce && ecommerce.items;
+                if (!transactionId || !Number.isFinite(value) || !currency || !Array.isArray(items)) {
+                    setStatus('ecommerce cần transaction_id, value dạng số, currency và items array.', 'danger');
+                    return;
+                }
+
+                if (
+                    !window.LeoObserverProxy ||
+                    !window.LeoObserverProxy.isReady ||
+                    !window.LeoObserver ||
+                    typeof window.LeoObserver.recordEventConversion !== 'function' ||
+                    !window.C360DemoSDK ||
+                    typeof window.C360DemoSDK.trackConversion !== 'function'
+                ) {
+                    setStatus('LEO Observer chưa sẵn sàng. Chờ trạng thái ready rồi thử lại.', 'warning');
+                    return;
+                }
+
+                const trackingEvent = {
+                    transaction_id: transactionId,
+                    value: value,
+                    currency: currency,
+                    items: items,
+                    data_layer_event: event.event,
+                    ecommerce: ecommerce
+                };
+                window.C360DemoSDK.trackConversion(trackingEvent);
+                preview.textContent = JSON.stringify({
+                    source: 'window.dataLayer',
+                    mapped_event: trackingEvent
+                }, null, 2);
+                setStatus('Đã map event từ Data Layer sang custom conversion event của LEO.', 'success');
+            }
+
+            $('#c360-data-layer-push').on('click', pushEventFromEditor);
+            $('#c360-data-layer-send').on('click', sendLatestPurchaseEvent);
+            window.C360DemoDataLayerAdapter = {
+                pushEventFromEditor: pushEventFromEditor,
+                sendLatestPurchaseEvent: sendLatestPurchaseEvent
+            };
+
+            if (!Array.isArray(window.dataLayer)) {
+                setStatus('window.dataLayer đã tồn tại nhưng không phải array.', 'warning');
+                return;
+            }
+            renderLatestPurchaseEvent();
+        }
+
         function initPage() {
             initSettings();
             initNavigation();
             initAccountActions();
             initLotteryAlertForm();
             initProductTracking();
+            initDataLayerDemo();
             loadAdvertisingBanner();
             loadLotteryInformation('home', { trackPageView: true });
         }

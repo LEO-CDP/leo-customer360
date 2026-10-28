@@ -30,7 +30,7 @@ header-includes:
 
 Marketing has progressively moved from mass communication toward segmentation, targeting, personalization, automation, and artificial intelligence. The AI era now makes it possible to infer latent customer states from large volumes of behavioral data, generate personalized interactions at scale, and continuously optimize customer experiences. Yet a central problem remains: most marketing systems still treat the customer primarily as a target, a profile, or a conversion opportunity.
 
-![The conceptual intersection of marketing, psychology, and dynamical systems underlying Persona as a Vector.](kotler_jung_einstein.png){width=95%}
+![The conceptual intersection of marketing, psychology, and dynamical systems underlying Persona as a Vector.](assets/kotler_jung_einstein.png){width=95%}
 
 This paper proposes **Persona as a Vector**, an attractor-based theory for a more human-centric form of personalization. The framework models a customer's current persona as a multidimensional state vector rather than a static label. A desired future identity is represented as a Desired Persona Vector. The difference between the two states defines a **Transformation Gap**. The desired state acts as a conceptual attractor: not a literal physical force, but a meaningful state toward which behavior, motivation, identity, and experience may evolve.
 
@@ -129,7 +129,7 @@ Jung's broader concept of the **Self** refers to psychological wholeness, while 
 
 Thus:
 
-![Observed Persona as a partial representation of the Human Psychological State.](observed_persona.png){width=95%}
+![Observed Persona as a partial representation of the Human Psychological State.](assets/observed_persona.png){width=95%}
 
 A marketing system never observes the whole person. It observes traces: clicks, searches, purchases, conversations, location, content engagement, transactions, preferences, and declared information. Persona is therefore an **inferred representation**, not a complete description of the individual.
 
@@ -1345,7 +1345,7 @@ where:
 
 The weights can be adapted by domain and strategy. The important principle is that value should not be reduced to short-term revenue.
 
-![Metrics for Persona Transformation](persona-metrics.png){width=95%}
+![Metrics for Persona Transformation](assets/persona-metrics.png){width=95%}
 
 \newpage
 
@@ -1588,7 +1588,7 @@ Instead, the customer can be understood as:
 
 > **a dynamic Persona moving through a space of possible states.**
 
-![Persona as a Vector: From Human Understanding to Transformation](persona-as-vector.png){width=95%}
+![Persona as a Vector: From Human Understanding to Transformation](assets/persona-as-vector.png){width=95%}
 
 The proposed framework can be summarized as:
 

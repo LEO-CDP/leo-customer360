@@ -12,7 +12,7 @@ flowchart TD
         JSONL["JSONL Event Streams\ns3://bucket/events/batch_*.jsonl"]
     end
 
-    subgraph TrackingAPI["data-tracking-api Tier"]
+    subgraph TrackingAPI["customer360-event-api Tier"]
         INGEST["POST /api/v1/tracking/logs"]
         SCHEMA["Dynamic JSON + identity validation"]
         STREAM["Redis Streams consumer group"]
@@ -71,9 +71,9 @@ $$\text{s3://}\langle\text{bucket}\rangle\text{/raw/}\langle\text{tenant\_id}\ra
 
 ---
 
-## 4. Ingestion Tier Integration (`data-tracking-api`)
+## 4. Ingestion Tier Integration (`customer360-event-api`)
 
-For extreme ingress spikes (e.g. 50,000+ events/sec during flash sales), client events route to `data-tracking-api`:
+For extreme ingress spikes (e.g. 50,000+ events/sec during flash sales), client events route to `customer360-event-api`:
 - **Endpoint**: `POST /api/v1/tracking/logs` (also exposed under `/data/api/v1/tracking/logs` behind the public proxy)
 - **Mechanism**: The tracking API validates dynamic JSON and supported customer identifiers, then returns `202 Accepted` after publishing the immutable batch to a Redis Stream. A consumer-group worker writes the batch to an S3-compatible object store without blocking the frontend on S3 latency.
 - **Object format**: Each batch is an immutable NDJSON object at `s3://data-tracking-<data_source_id>/YYYY-MM-DD-HH/<uuid>.jsonl`. Each line contains `data_source_id`, UTC `received_at`, and the original event, including normalized identity fields such as `session_id`, `anonymous_id`, `device_id`, `device_fingerprint`, and `user_id`.

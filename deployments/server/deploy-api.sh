@@ -1,12 +1,12 @@
+
 #!/usr/bin/env bash
 # Deploy customer360-api (FastAPI) onto the "api" server VM for an env.
 #   ./deploy-api.sh <uat|prod>
 #
-# Ships the repo's customer360-api/ to the box over SSH (tar-over-ssh), installs Docker if
+# Ships the repo's customer360-api/ and customer360-dao/ to the box over SSH (tar-over-ssh), installs Docker if
 # missing, builds the image, and (re)runs it as a container with --network host on :8008,
-# wired to the PRIVATE customer360 DB and to the backend box's Dagster GraphQL (:3000).
-# Re-runnable. Target box = servers["$API_SERVER_KEY"] (default "api"); the Dagster host is
-# servers["$BACKEND_SERVER_KEY"] (default "backend") private IP. Overrides: BASTION_USER/SSH_KEY.
+# wired to the PRIVATE customer360 DB and to Dagster's GraphQL (DAGSTER_HOST:DAGSTER_PORT, the VKS node + NodePort).
+# Re-runnable. Target box = servers["$API_SERVER_KEY"] (default "api"). Overrides: BASTION_USER/SSH_KEY.
 set -euo pipefail
 cd "$(dirname "$0")"                 # deployments/server
 REPO_ROOT="$(cd ../.. && pwd)"       # repo root (contains customer360-api/)
@@ -20,29 +20,21 @@ esac
 [[ -f .env ]] && { set -a; source ./.env; set +a; }
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/c360-api_ed25519}"
 API_SERVER_KEY="${API_SERVER_KEY:-api}"
-BACKEND_SERVER_KEY="${BACKEND_SERVER_KEY:-backend}"
-# Read a tfvars value: content between quotes for strings (keeps '#'), or the bare
-# token with any trailing comment stripped for unquoted numbers/bools (e.g. redis_port).
-tfval() {
-  local line; line="$(grep -E "^[[:space:]]*$1[[:space:]]*=" "$2" 2>/dev/null | head -1)"
-  case "$line" in
-    *\"*\"*) line="${line#*\"}"; printf '%s' "${line%%\"*}" ;;
-    *) line="${line#*=}"; line="${line%%#*}"; printf '%s' "$(printf '%s' "$line" | tr -d '[:space:]')" ;;
-  esac
-}
+. "$(cd "$(dirname "$0")/.." && pwd)/lib/tfvars.sh"   # tfval + srv_ip
 
 # --- resolve server IPs by map key from THIS deployment's outputs ---
 terraform workspace select "$ENV" >/dev/null 2>&1 || { echo "ERROR: no '$ENV' server workspace — deploy the server first."; exit 1; }
 SERVERS_JSON="$(terraform output -json servers 2>/dev/null || true)"
 [[ -n "$SERVERS_JSON" ]] || { echo "ERROR: no servers output."; exit 1; }
 # select an IP field for a given server map key; JSON on stdin (avoids Windows/MSYS temp-path issues)
-srv_ip() { printf '%s' "$SERVERS_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); s=d.get(sys.argv[1]) or {}; print(next((i.get(sys.argv[2]) for i in (s.get("internal_interfaces") or []) if i.get(sys.argv[2])), ""))' "$1" "$2"; }
 API_FIP="$(srv_ip "$API_SERVER_KEY" floating_ip)"
-DAG_HOST="$(srv_ip "$BACKEND_SERVER_KEY" fixed_ip)"
+# DAGSTER_HOST/DAGSTER_PORT point the API at Dagster on VKS (node IP + NodePort). Unset => the API runs without Dagster (127.0.0.1).
+DAG_HOST="${DAGSTER_HOST:-}"
+DAGSTER_PORT="${DAGSTER_PORT:-3000}"
 [[ -n "$API_FIP" ]] || { echo "ERROR: no floating IP for server key '$API_SERVER_KEY'."; exit 1; }
 BASTION="${BASTION_USER:-leocdp360}@$API_FIP"
 SSH_OPTS=(-i "$SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
-echo ">> Target (api): $BASTION   Dagster host (backend): ${DAG_HOST:-<none>}:3000"
+echo ">> Target (api): $BASTION   Dagster host: ${DAG_HOST:-<none>}:$DAGSTER_PORT"
 
 # --- DB connection from the postgres deployment ---
 pg="../postgres"
@@ -75,6 +67,11 @@ if [[ -n "$REDIS_HOST" ]]; then echo ">> Redis: ${REDIS_HOST}:${REDIS_PORT} (cac
 #     of the dev local-JWT login. Client secret from ../sso/.env (bootstrap-realm.py). ---
 sso="../sso"
 SSO_LOGIN="false"; SSO_URL=""; KC_REALM=""; KC_CLIENT=""; KC_SECRET=""
+KC_TOKEN_EXPIRES_MINUTES="${KEYCLOAK_TOKEN_EXPIRES_MINUTES:-60}"
+[[ "$KC_TOKEN_EXPIRES_MINUTES" =~ ^[0-9]+$ ]] && (( KC_TOKEN_EXPIRES_MINUTES >= 1 && KC_TOKEN_EXPIRES_MINUTES <= 1440 )) || {
+  echo "ERROR: KEYCLOAK_TOKEN_EXPIRES_MINUTES must be an integer from 1 to 1440." >&2
+  exit 1
+}
 if [[ "$(tfval api_sso_enabled "$sso/overlays/$ENV.tfvars")" == "true" ]]; then
   SSO_URL="$(tfval api_sso_login_url "$sso/overlays/$ENV.tfvars")"
   KC_REALM="$(tfval api_keycloak_realm "$sso/overlays/$ENV.tfvars")"
@@ -92,18 +89,23 @@ fi
 # --- CD image source: pull the CI-built image from GHCR by default; set
 #     BUILD_LOCAL=1 to fall back to shipping source + building on the VM. ---
 . "$(cd "$(dirname "$0")/.." && pwd)/lib/ghcr.sh"
+# ensure_s3_bucket (shipped to the box via `declare -f` in the ssh block below) lives
+# here; must be sourced or that declare fails under set -e and silently truncates the
+# remote script -> ssh runs nothing, container never updates, deploy still reports OK.
+. "$(cd "$(dirname "$0")/.." && pwd)/lib/s3.sh"
 SERVICE="customer360-api"
 GHCR_USER="${GHCR_USER:-${GITHUB_ACTOR:-token}}"
 GHCR_TOKEN="${GHCR_TOKEN:-${GITHUB_TOKEN:-}}"
 if [[ "${BUILD_LOCAL:-0}" == "1" ]]; then
-  DEPLOY_MODE="build"; IMAGE=""
+  DEPLOY_MODE="build"; IMAGE=""; TAG=""
   echo ">> Image: BUILD_LOCAL=1 — building $SERVICE on the VM from source."
-  echo ">> Shipping customer360-api/ ..."
-  tar -C "$REPO_ROOT" -czf - customer360-api \
+  echo ">> Shipping customer360-api/ and customer360-dao/ ..."
+  tar -C "$REPO_ROOT" -czf - customer360-api customer360-dao \
     | ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo mkdir -p /opt/c360 && sudo chown "$(id -un)" /opt/c360 && tar -C /opt/c360 -xzf -'
 else
   DEPLOY_MODE="ghcr"
-  IMAGE="$(image_ref "$SERVICE" "$(resolve_tag "overlays/$ENV.tfvars")")"
+  TAG="$(resolve_tag "overlays/$ENV.tfvars")"
+  IMAGE="$(image_ref "$SERVICE" "$TAG")"
   echo ">> Image: $IMAGE   (pull from GHCR; BUILD_LOCAL=1 to build on the VM)"
 fi
 
@@ -151,30 +153,85 @@ echo ">> Installing Docker (if needed), building, and (re)starting the container
 PW_B64="$(printf %s "$DB_PASS" | base64 | tr -d '\n')"
 REDIS_PW_B64="$(printf %s "${REDIS_PASS:-}" | base64 | tr -d '\n')"
 KC_SECRET_B64="$(printf %s "$KC_SECRET" | base64 | tr -d '\n')"
-EVENT_QUERY_MAX_DAYS="${EVENT_QUERY_MAX_DAYS:-90}"
+EVENT_QUERY_MAX_DAYS="${EVENT_QUERY_MAX_DAYS:-180}"
+# Event-S3 read config from ../storage. EVENT_S3_BUCKET stays empty on purpose:
+# empty = per-source read mode (bucket data-tracking-<source_id>); endpoint/region/
+# creds are still needed to reach those buckets.
+store="../storage"
+EVENT_S3_ENDPOINT_URL="${ANALYTICS_S3_ENDPOINT_URL:-${S3_ENDPOINT_URL:-$(tfval s3_endpoint "$store/overlays/$ENV.tfvars")}}"
+EVENT_S3_REGION="${S3_REGION:-$(tfval region "$store/overlays/$ENV.tfvars")}"; EVENT_S3_REGION="${EVENT_S3_REGION:-us-east-1}"
 EVENT_S3_BUCKET="${EVENT_S3_BUCKET:-}"
 EVENT_RAW_PREFIX="${EVENT_RAW_PREFIX:-events}"
-EVENT_S3_ENDPOINT_URL="${ANALYTICS_S3_ENDPOINT_URL:-${S3_ENDPOINT_URL:-}}"
-EVENT_S3_REGION="${S3_REGION:-us-east-1}"
-EVENT_S3_ACCESS_KEY_ID="${S3_ACCESS_KEY_ID:-}"
-EVENT_S3_SECRET_B64="$(printf %s "${S3_SECRET_ACCESS_KEY:-}" | base64 | tr -d '\n')"
-EVENT_S3_FORCE_PATH_STYLE="${S3_FORCE_PATH_STYLE:-false}"
-ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "${DAG_HOST:-127.0.0.1}" "${REDIS_HOST:-}" "${REDIS_PORT:-}" "$REDIS_PW_B64" "$SSO_LOGIN" "$SSO_URL" "$KC_REALM" "$KC_CLIENT" "$KC_SECRET_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" "$OTEL_B64" "$EVENT_QUERY_MAX_DAYS" "$EVENT_S3_BUCKET" "$EVENT_RAW_PREFIX" "$EVENT_S3_ENDPOINT_URL" "$EVENT_S3_REGION" "$EVENT_S3_ACCESS_KEY_ID" "$EVENT_S3_SECRET_B64" "$EVENT_S3_FORCE_PATH_STYLE" "$SMTP_B64" < <(declare -f docker_pull_retry; cat <<'REMOTE'
+EVENT_S3_ACCESS_KEY_ID="${S3_ACCESS_KEY_ID:-${TF_VAR_access_key:-$(tfval access_key "$store/terraform.tfvars")}}"
+EVENT_S3_SECRET_B64="$(printf %s "${S3_SECRET_ACCESS_KEY:-${TF_VAR_secret_key:-$(tfval secret_key "$store/terraform.tfvars")}}" | base64 | tr -d '\n')"
+EVENT_S3_FORCE_PATH_STYLE="${S3_FORCE_PATH_STYLE:-true}"
+S3_AUTO_CREATE="${S3_AUTO_CREATE_BUCKETS:-$(tfval s3_auto_create_buckets "$store/overlays/$ENV.tfvars")}"; S3_AUTO_CREATE="${S3_AUTO_CREATE:-true}"
+MASTER_PROFILE_S3_BUCKET="${MASTER_PROFILE_S3_BUCKET:-$(tfval master_profile_s3_bucket "$store/overlays/$ENV.tfvars")}"; MASTER_PROFILE_S3_BUCKET="${MASTER_PROFILE_S3_BUCKET:-c360-master-profiles}"
+PRODUCT_IMPORT_S3_BUCKET="${PRODUCT_IMPORT_S3_BUCKET:-$(tfval product_import_s3_bucket "$store/overlays/$ENV.tfvars")}"; PRODUCT_IMPORT_S3_BUCKET="${PRODUCT_IMPORT_S3_BUCKET:-c360-product-imports}"
+CONTENT_IMPORT_S3_BUCKET="${CONTENT_IMPORT_S3_BUCKET:-$(tfval content_import_s3_bucket "$store/overlays/$ENV.tfvars")}"; CONTENT_IMPORT_S3_BUCKET="${CONTENT_IMPORT_S3_BUCKET:-c360-content-imports}"
+SOURCE_GIT_COMMIT_HASH="${GITHUB_SHA:-$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)}"
+# Expected commit hash for the post-deploy /health assertion. A ghcr sha-<git> tag bakes
+# that sha; a local build bakes SOURCE_GIT_COMMIT_HASH; a release vX.Y.Z tag bakes an
+# unknown commit sha, so leave it empty there (the box then only asserts a hash is served).
+if [[ "$DEPLOY_MODE" == "build" ]]; then EXPECTED_GIT_HASH="$SOURCE_GIT_COMMIT_HASH"
+elif [[ "${TAG:-}" == sha-* ]]; then EXPECTED_GIT_HASH="${TAG#sha-}"
+else EXPECTED_GIT_HASH=""; fi
+# Region must be a short lowercase token (boto3 rejects anything else).
+[[ "$EVENT_S3_REGION" =~ ^[a-z0-9-]{1,32}$ ]] || { echo "ERROR: S3_REGION='${EVENT_S3_REGION:0:24}...' is not a region (expected e.g. us-east-1)." >&2; exit 1; }
+echo ">> S3 buckets: master=$MASTER_PROFILE_S3_BUCKET product-import=$PRODUCT_IMPORT_S3_BUCKET content-import=$CONTENT_IMPORT_S3_BUCKET (auto_create=$S3_AUTO_CREATE)"
+# customer360-agent wiring resolved LOCALLY (srv_ip isn't shipped to the box): empty
+# AGENT_IP => keep the DAO default; token base64'd like the other secrets.
+AGENT_IP="$(srv_ip agent fixed_ip)"
+AGENT_SERVICE_URL=""; [[ -n "$AGENT_IP" ]] && AGENT_SERVICE_URL="http://$AGENT_IP:${AGENT_PORT:-8009}"
+AGENT_API_TOKEN_B64="$(printf %s "${AGENT_API_TOKEN:-}" | base64 | tr -d '\r\n')"
+# Docs/support RAG service (docs-vector-search) for /assistant/ask and /support/ask: private ip of the
+# "docs" box, resolved like the frontend deploy does (an explicit DOCS_SEARCH_URL wins). The secret must
+# equal the docs deploy's DOCS_INTERNAL_AUTH_SECRET, or the docs service refuses the on-screen facts.
+DOCS_SEARCH_URL="${DOCS_SEARCH_URL:-}"
+if [[ -z "$DOCS_SEARCH_URL" ]]; then
+  DOCS_IP="$(srv_ip "${DOCS_SEARCH_SERVER_KEY:-docs}" fixed_ip)"
+  [[ -n "$DOCS_IP" ]] && DOCS_SEARCH_URL="http://$DOCS_IP:${DOCS_SEARCH_PORT:-8001}"
+fi
+if [[ -n "$DOCS_SEARCH_URL" ]]; then echo ">> Docs assistant -> $DOCS_SEARCH_URL"; else echo "::warning::no docs box fixed_ip in $ENV - the API keeps the default DOCS_SEARCH_URL; /assistant/ask returns 502 until the docs box is applied."; fi
+DOCS_INTERNAL_AUTH_SECRET_B64="$(printf %s "${DOCS_INTERNAL_AUTH_SECRET:-${DOCS_INTERNAL_SECRET:-leoragbot}}" | base64 | tr -d '\r\n')"
+# ssh flattens argv and silently drops empty args (shifting later fields); pass one
+# base64 newline-joined blob so empties survive, split remotely with mapfile.
+ARGV_B64="$(printf '%s\n' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "${DAG_HOST:-127.0.0.1}" "${REDIS_HOST:-}" "${REDIS_PORT:-}" "$REDIS_PW_B64" "$SSO_LOGIN" "$SSO_URL" "$KC_REALM" "$KC_CLIENT" "$KC_SECRET_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\r\n')" "$OTEL_B64" "$EVENT_QUERY_MAX_DAYS" "$EVENT_S3_BUCKET" "$EVENT_RAW_PREFIX" "$EVENT_S3_ENDPOINT_URL" "$EVENT_S3_REGION" "$EVENT_S3_ACCESS_KEY_ID" "$EVENT_S3_SECRET_B64" "$EVENT_S3_FORCE_PATH_STYLE" "$SMTP_B64" "$S3_AUTO_CREATE" "$MASTER_PROFILE_S3_BUCKET" "$SOURCE_GIT_COMMIT_HASH" "$AGENT_SERVICE_URL" "$AGENT_API_TOKEN_B64" "$EXPECTED_GIT_HASH" "$KC_TOKEN_EXPIRES_MINUTES" "$PRODUCT_IMPORT_S3_BUCKET" "$CONTENT_IMPORT_S3_BUCKET" "$DOCS_SEARCH_URL" "$DOCS_INTERNAL_AUTH_SECRET_B64" "$DAGSTER_PORT" | base64 | tr -d '\r\n')"
+ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$ARGV_B64" < <(declare -f docker_pull_retry; declare -f ensure_s3_bucket; cat <<'REMOTE'
 set -euo pipefail
-DB_HOST="$1"; DB_PORT="$2"; DB_NAME="$3"; DB_USER="$4"; DB_PW="$(printf %s "$5" | base64 -d)"; DAG_HOST="$6"
-REDIS_HOST="$7"; REDIS_PORT="$8"; REDIS_PW="$(printf %s "${9:-}" | base64 -d 2>/dev/null || true)"
-SSO_LOGIN="${10:-false}"; SSO_URL="${11:-}"; KC_REALM="${12:-}"; KC_CLIENT="${13:-}"; KC_SECRET="$(printf %s "${14:-}" | base64 -d 2>/dev/null || true)"
-DEPLOY_MODE="${15:-build}"; IMAGE="${16:-}"; GHCR_USER="${17:-token}"; GHCR_TOKEN="$(printf %s "${18:-}" | base64 -d 2>/dev/null || true)"
-OTEL_B64="${19:-}"
-EVENT_QUERY_MAX_DAYS="${20:-90}"
-EVENT_S3_BUCKET="${21:-}"
-EVENT_RAW_PREFIX="${22:-events}"
-EVENT_S3_ENDPOINT_URL="${23:-}"
-EVENT_S3_REGION="${24:-us-east-1}"
-EVENT_S3_ACCESS_KEY_ID="${25:-}"
-EVENT_S3_SECRET_ACCESS_KEY="$(printf %s "${26:-}" | base64 -d 2>/dev/null || true)"
-EVENT_S3_FORCE_PATH_STYLE="${27:-false}"
-SMTP_B64="${28:-}"
+mapfile -t A < <(printf %s "${1:-}" | base64 -d)   # fields in order, empties preserved
+DB_HOST="${A[0]}"; DB_PORT="${A[1]}"; DB_NAME="${A[2]}"; DB_USER="${A[3]}"; DB_PW="$(printf %s "${A[4]}" | base64 -d)"; DAG_HOST="${A[5]}"
+REDIS_HOST="${A[6]:-}"; REDIS_PORT="${A[7]:-}"; REDIS_PW="$(printf %s "${A[8]:-}" | base64 -d 2>/dev/null || true)"
+SSO_LOGIN="${A[9]:-false}"; SSO_URL="${A[10]:-}"; KC_REALM="${A[11]:-}"; KC_CLIENT="${A[12]:-}"; KC_SECRET="$(printf %s "${A[13]:-}" | base64 -d 2>/dev/null || true)"
+DEPLOY_MODE="${A[14]:-build}"; IMAGE="${A[15]:-}"; GHCR_USER="${A[16]:-token}"; GHCR_TOKEN="$(printf %s "${A[17]:-}" | base64 -d 2>/dev/null || true)"
+OTEL_B64="${A[18]:-}"
+EVENT_QUERY_MAX_DAYS="${A[19]:-180}"
+EVENT_S3_BUCKET="${A[20]:-}"
+EVENT_RAW_PREFIX="${A[21]:-events}"
+EVENT_S3_ENDPOINT_URL="${A[22]:-}"
+EVENT_S3_REGION="${A[23]:-us-east-1}"
+# Re-check post-transport: fail loud if a non-region value ever lands here.
+[[ "$EVENT_S3_REGION" =~ ^[a-z0-9-]{1,32}$ ]] || { echo "ERROR: received S3_REGION is not a region ('${EVENT_S3_REGION:0:16}...') -- deploy arg transport corrupted." >&2; exit 1; }
+EVENT_S3_ACCESS_KEY_ID="${A[24]:-}"
+EVENT_S3_SECRET_ACCESS_KEY="$(printf %s "${A[25]:-}" | base64 -d 2>/dev/null || true)"
+EVENT_S3_FORCE_PATH_STYLE="${A[26]:-false}"
+SMTP_B64="${A[27]:-}"
+S3_AUTO_CREATE_BUCKETS="${A[28]:-true}"
+MASTER_PROFILE_S3_BUCKET="${A[29]:-c360-master-profiles}"
+GIT_COMMIT_HASH="${A[30]:-unknown}"
+AGENT_SERVICE_URL="${A[31]:-}"
+AGENT_API_TOKEN="$(printf %s "${A[32]:-}" | base64 -d 2>/dev/null || true)"
+EXPECTED_GIT_HASH="${A[33]:-}"
+KC_TOKEN_EXPIRES_MINUTES="${A[34]:-60}"
+PRODUCT_IMPORT_S3_BUCKET="${A[35]:-c360-product-imports}"
+CONTENT_IMPORT_S3_BUCKET="${A[36]:-c360-content-imports}"
+DOCS_SEARCH_URL="${A[37]:-}"
+DOCS_INTERNAL_AUTH_SECRET="$(printf %s "${A[38]:-}" | base64 -d 2>/dev/null || true)"
+DAGSTER_PORT="${A[39]:-3000}"
+[[ "$KC_TOKEN_EXPIRES_MINUTES" =~ ^[0-9]+$ ]] && (( KC_TOKEN_EXPIRES_MINUTES >= 1 && KC_TOKEN_EXPIRES_MINUTES <= 1440 )) || {
+  echo "ERROR: received KEYCLOAK_TOKEN_EXPIRES_MINUTES is invalid." >&2
+  exit 1
+}
 if ! command -v docker >/dev/null 2>&1; then
   sudo apt-get update -qq
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io
@@ -209,7 +266,7 @@ DB_USER=$DB_USER
 DB_PASSWORD=$DB_PW
 DB_SCHEMA=$DB_NAME
 DAGSTER_GRAPHQL_HOST=$DAG_HOST
-DAGSTER_GRAPHQL_PORT=3000
+DAGSTER_GRAPHQL_PORT=$DAGSTER_PORT
 EVENT_QUERY_MAX_DAYS=$EVENT_QUERY_MAX_DAYS
 EVENT_S3_BUCKET=$EVENT_S3_BUCKET
 EVENT_RAW_PREFIX=$EVENT_RAW_PREFIX
@@ -218,7 +275,19 @@ S3_REGION=$EVENT_S3_REGION
 S3_ACCESS_KEY_ID=$EVENT_S3_ACCESS_KEY_ID
 S3_SECRET_ACCESS_KEY=$EVENT_S3_SECRET_ACCESS_KEY
 S3_FORCE_PATH_STYLE=$EVENT_S3_FORCE_PATH_STYLE
+S3_AUTO_CREATE_BUCKETS=$S3_AUTO_CREATE_BUCKETS
+MASTER_PROFILE_S3_BUCKET=$MASTER_PROFILE_S3_BUCKET
+PRODUCT_IMPORT_S3_BUCKET=$PRODUCT_IMPORT_S3_BUCKET
+CONTENT_IMPORT_S3_BUCKET=$CONTENT_IMPORT_S3_BUCKET
 ENVF
+# --- customer360-agent: URL + token resolved locally and passed in via ARGV (srv_ip
+#     runs on the deployer, not the box). Empty URL => keep the DAO default; token
+#     written only when set (must match the agent's AGENT_API_TOKEN). ---
+[[ -n "$AGENT_SERVICE_URL" ]] && echo "AGENT_SERVICE_URL=$AGENT_SERVICE_URL" >> "$env_file"
+[[ -n "$AGENT_API_TOKEN" ]] && echo "AGENT_API_TOKEN=$AGENT_API_TOKEN" >> "$env_file"
+# Docs service for the LEO Assistant / support endpoints; empty URL => keep the DAO default.
+[[ -n "$DOCS_SEARCH_URL" ]] && echo "DOCS_SEARCH_URL=$DOCS_SEARCH_URL" >> "$env_file"
+[[ -n "$DOCS_INTERNAL_AUTH_SECRET" ]] && echo "DOCS_INTERNAL_AUTH_SECRET=$DOCS_INTERNAL_AUTH_SECRET" >> "$env_file"
 if [[ -n "$REDIS_HOST" && -n "$REDIS_PW" ]]; then
   cat >> "$env_file" <<ENVR
 REDIS_HOST=$REDIS_HOST
@@ -238,6 +307,7 @@ KEYCLOAK_REALM=$KC_REALM
 KEYCLOAK_CLIENT_ID=$KC_CLIENT
 KEYCLOAK_CLIENT_SECRET=$KC_SECRET
 KEYCLOAK_VERIFY_SSL=false
+KEYCLOAK_TOKEN_EXPIRES_MINUTES=$KC_TOKEN_EXPIRES_MINUTES
 ENVS
 else
   echo "SSO_LOGIN=false" >> "$env_file"
@@ -256,14 +326,29 @@ else
   # The Dockerfile uses `RUN --mount=type=cache` (BuildKit-only) but docker.io ships no
   # buildx, so strip the mount (it's only a pip-cache optimization) and use the classic builder.
   sed -i 's/ --mount=[^ ]*//g' /opt/c360/customer360-api/Dockerfile
-  sudo docker build -t customer360-api /opt/c360/customer360-api
+  BUILD_DATE_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+  sudo docker build --build-arg "BUILD_DATE_TIME=$BUILD_DATE_TIME" \
+    --build-arg "GIT_COMMIT_HASH=$GIT_COMMIT_HASH" \
+    -t customer360-api -f /opt/c360/customer360-api/Dockerfile /opt/c360
   RUN_IMG="customer360-api"
 fi
+ensure_s3_bucket "$RUN_IMG" /opt/c360/api.env "$MASTER_PROFILE_S3_BUCKET" "$S3_AUTO_CREATE_BUCKETS"
+ensure_s3_bucket "$RUN_IMG" /opt/c360/api.env "$PRODUCT_IMPORT_S3_BUCKET" "$S3_AUTO_CREATE_BUCKETS"
+ensure_s3_bucket "$RUN_IMG" /opt/c360/api.env "$CONTENT_IMPORT_S3_BUCKET" "$S3_AUTO_CREATE_BUCKETS"
 sudo docker rm -f customer360-api >/dev/null 2>&1 || true
-# --log-opt: cap the json-file log (unbounded by default) so it can't fill the VM disk.
-sudo docker run -d --name customer360-api --restart unless-stopped --log-opt max-size=10m --log-opt max-file=3 --network host --env-file /opt/c360/api.env "$RUN_IMG"
+# Keep logs visible to Portainer through the shared Docker socket while bounding disk usage.
+sudo docker run -d --name customer360-api --restart unless-stopped \
+  --log-driver=json-file --log-opt max-size=10m --log-opt max-file=3 \
+  --network host --env-file /opt/c360/api.env "$RUN_IMG"
 sleep 3
 sudo docker ps --filter name=customer360-api --format '   running: {{.Names}} ({{.Status}}) image={{.Image}}'
+LOG_DRIVER="$(sudo docker inspect -f '{{.HostConfig.LogConfig.Type}}' customer360-api 2>/dev/null || true)"
+LOG_PATH="$(sudo docker inspect -f '{{.LogPath}}' customer360-api 2>/dev/null || true)"
+if [[ "$LOG_DRIVER" == "json-file" && -n "$LOG_PATH" ]]; then
+  echo "   Portainer logs: enabled (driver=${LOG_DRIVER}, rotated 10m x 3)"
+else
+  echo "::warning::Portainer logs could not be verified for customer360-api (driver=${LOG_DRIVER:-unknown})"
+fi
 # Post-start SMTP health (non-fatal): runs the SAME check GET /metadata/smtp
 # serves, in-container -- no HTTP auth/token needed. 'reachable' => the Brevo
 # credential authenticates; 'disabled' => mock (fine); anything else prints a
@@ -276,6 +361,25 @@ case "$SMTP_STATUS" in
   disabled)  echo "   -> email dispatch is mock (no SMTP configured for this env)." ;;
   *) echo "::warning::customer360-api SMTP health: status=${SMTP_STATUS:-error} (email may not send -- check the env's smtp.<env>.env / BREVO_SMTP_PASSWORD secret)" ;;
 esac
+# Post-deploy freshness gate (HARD): the running container must serve /health with a
+# GIT_COMMIT_HASH. Empty/unknown/unreachable => silent no-op, crash-loop, or an image so
+# old it has no such key => fail loudly instead of a false green. When the expected sha is
+# known (sha-<git> tag / local build) also assert it MATCHES, catching a stale/wrong image.
+DEPLOYED_HASH=""
+for _ in $(seq 1 10); do
+  DEPLOYED_HASH="$(sudo docker exec customer360-api python -c "import urllib.request,json;print(json.load(urllib.request.urlopen('http://127.0.0.1:8008/health',timeout=3)).get('GIT_COMMIT_HASH',''))" 2>/dev/null || true)"
+  [ -n "$DEPLOYED_HASH" ] && [ "$DEPLOYED_HASH" != "unknown" ] && break
+  sleep 3
+done
+if [ -z "$DEPLOYED_HASH" ] || [ "$DEPLOYED_HASH" = "unknown" ]; then
+  echo "::error::customer360-api post-deploy check FAILED: /health served no GIT_COMMIT_HASH after ~30s (container not running the new image / crash-loop)." >&2
+  exit 1
+fi
+if [ -n "$EXPECTED_GIT_HASH" ] && [ "$DEPLOYED_HASH" != "$EXPECTED_GIT_HASH" ]; then
+  echo "::error::customer360-api post-deploy check FAILED: /health GIT_COMMIT_HASH=$DEPLOYED_HASH != expected $EXPECTED_GIT_HASH (stale image / deploy skew)." >&2
+  exit 1
+fi
+echo "   post-deploy OK: customer360-api serving GIT_COMMIT_HASH=$DEPLOYED_HASH"
 REMOTE
 )
 

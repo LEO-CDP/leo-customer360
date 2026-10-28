@@ -7,27 +7,27 @@ the SQLAlchemy Session, matching this repo's hermetic-testing convention.
 
 import unittest
 import uuid
+from contextlib import nullcontext
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from core.ai_providers.base import AIProviderError
-from core.ai_providers.campaign_planner import GeneratedCampaignPlan
+from leo_customer360_agent.client import AIProviderError, GeneratedCampaignPlan
 from core.repositories.campaign_draft_repository import (
     APPROVAL_STATUS_APPROVED,
     APPROVAL_STATUS_IN_REVIEW,
     APPROVAL_STATUS_REJECTED,
     CampaignDraftApprovalBlockedError,
+    CampaignDraftActorNotFoundError,
     CampaignDraftConflictError,
     CampaignDraftRepository,
     CampaignDraftValidationError,
     CampaignSegmentNotFoundError,
-    CampaignTemplateNotFoundError,
 )
+from leo_customer360_dao.models.system import SysUser
 
 DEMO_TENANT_ID = uuid.uuid4()
 DEMO_SEGMENT_ID = uuid.uuid4()
-DEMO_TEMPLATE_ID = uuid.uuid4()
 CONTENT_ITEM_1 = uuid.uuid4()
 CONTENT_ITEM_2 = uuid.uuid4()
 
@@ -47,6 +47,9 @@ class _FakeScalarsResult:
         # None means "no conflict" in these tests (no real concurrent writer).
         return None
 
+    def scalar_one_or_none(self):
+        return self._items[0] if self._items else None
+
 
 class FakeSession:
     """Minimal SQLAlchemy Session stand-in: execute() always returns the
@@ -56,11 +59,15 @@ class FakeSession:
 
     def __init__(self, candidate_content_items=None):
         self._candidate_content_items = candidate_content_items or []
+        self.audit_user_exists = True
         self.added: list = []
         self.committed = False
         self.flushed = False
 
-    def execute(self, _stmt):
+    def execute(self, statement):
+        descriptions = statement.column_descriptions
+        if descriptions and descriptions[0]["entity"] is SysUser:
+            return _FakeScalarsResult([uuid.uuid4()] if self.audit_user_exists else [])
         return _FakeScalarsResult(self._candidate_content_items)
 
     def add(self, obj):
@@ -105,7 +112,7 @@ def _fake_segment(is_active=True, status_code=1, segment_tag="vip_lapsed"):
 
 
 def _fake_template(status="Approved"):
-    return SimpleNamespace(template_id=DEMO_TEMPLATE_ID, status=status)
+    return None
 
 
 def _valid_generated_plan(content_item_ids=None) -> GeneratedCampaignPlan:
@@ -137,9 +144,7 @@ class CreateDraftTests(unittest.TestCase):
         )
 
     def _patch_template(self, template=None, side_effect=None):
-        if side_effect is not None:
-            return patch.object(CampaignDraftRepository, "_get_template", side_effect=side_effect)
-        return patch.object(CampaignDraftRepository, "_get_template", return_value=template)
+        return nullcontext()
 
     def _patch_generate(self, plan=None, side_effect=None):
         if side_effect is not None:
@@ -164,7 +169,6 @@ class CreateDraftTests(unittest.TestCase):
                 tenant_id=DEMO_TENANT_ID,
                 created_by=None,
                 segment_id=DEMO_SEGMENT_ID,
-                template_id=DEMO_TEMPLATE_ID,
                 objective="Objective",
             )
 
@@ -174,11 +178,10 @@ class CreateDraftTests(unittest.TestCase):
         with self._patch_segment(_fake_segment()), self._patch_template(_fake_template()), self._patch_generate(
             _valid_generated_plan(content_item_ids=[str(CONTENT_ITEM_1), str(CONTENT_ITEM_2)])
         ):
-            campaign = self.repo.create_draft(
+            campaign =             self.repo.create_draft(
                 tenant_id=DEMO_TENANT_ID,
                 created_by=uuid.uuid4(),
                 segment_id=DEMO_SEGMENT_ID,
-                template_id=DEMO_TEMPLATE_ID,
                 objective="Win back lapsed customers",
             )
 
@@ -201,7 +204,6 @@ class CreateDraftTests(unittest.TestCase):
                     tenant_id=DEMO_TENANT_ID,
                     created_by=None,
                     segment_id=DEMO_SEGMENT_ID,
-                    template_id=DEMO_TEMPLATE_ID,
                     objective="Objective",
                 )
         self.assertEqual(self.session.added, [])
@@ -216,35 +218,6 @@ class CreateDraftTests(unittest.TestCase):
                     tenant_id=DEMO_TENANT_ID,
                     created_by=None,
                     segment_id=DEMO_SEGMENT_ID,
-                    template_id=DEMO_TEMPLATE_ID,
-                    objective="Objective",
-                )
-        self.assertEqual(self.session.added, [])
-
-    def test_create_draft_refuses_template_not_found(self):
-        with self._patch_segment(_fake_segment()), self._patch_template(template=None), self._patch_generate(
-            _valid_generated_plan()
-        ):
-            with self.assertRaises(CampaignTemplateNotFoundError):
-                self.repo.create_draft(
-                    tenant_id=DEMO_TENANT_ID,
-                    created_by=None,
-                    segment_id=DEMO_SEGMENT_ID,
-                    template_id=DEMO_TEMPLATE_ID,
-                    objective="Objective",
-                )
-        self.assertEqual(self.session.added, [])
-
-    def test_create_draft_refuses_template_not_approved(self):
-        with self._patch_segment(_fake_segment()), self._patch_template(_fake_template(status="Draft")), self._patch_generate(
-            _valid_generated_plan()
-        ):
-            with self.assertRaises(CampaignDraftValidationError):
-                self.repo.create_draft(
-                    tenant_id=DEMO_TENANT_ID,
-                    created_by=None,
-                    segment_id=DEMO_SEGMENT_ID,
-                    template_id=DEMO_TEMPLATE_ID,
                     objective="Objective",
                 )
         self.assertEqual(self.session.added, [])
@@ -261,7 +234,6 @@ class CreateDraftTests(unittest.TestCase):
                     tenant_id=DEMO_TENANT_ID,
                     created_by=None,
                     segment_id=DEMO_SEGMENT_ID,
-                    template_id=DEMO_TEMPLATE_ID,
                     objective="Objective",
                 )
         self.assertEqual(self.session.added, [])
@@ -275,7 +247,6 @@ class CreateDraftTests(unittest.TestCase):
                     tenant_id=DEMO_TENANT_ID,
                     created_by=None,
                     segment_id=DEMO_SEGMENT_ID,
-                    template_id=DEMO_TEMPLATE_ID,
                     objective="Objective",
                 )
         self.assertEqual(self.session.added, [])
@@ -289,7 +260,6 @@ class CreateDraftTests(unittest.TestCase):
                 tenant_id=DEMO_TENANT_ID,
                 created_by=None,
                 segment_id=DEMO_SEGMENT_ID,
-                template_id=DEMO_TEMPLATE_ID,
                 objective="Objective",
             )
 
@@ -305,7 +275,6 @@ class ApproveRejectTests(unittest.TestCase):
         self.campaign = SimpleNamespace(
             campaign_id=uuid.uuid4(),
             tenant_id=DEMO_TENANT_ID,
-            template_id=DEMO_TEMPLATE_ID,
             approval_status=APPROVAL_STATUS_IN_REVIEW,
             approved_by=None,
             approved_at=None,
@@ -319,9 +288,7 @@ class ApproveRejectTests(unittest.TestCase):
         return patch.object(CampaignDraftRepository, "_get_content_item_links", return_value=links)
 
     def _patch_template(self, template=None, side_effect=None):
-        if side_effect is not None:
-            return patch.object(CampaignDraftRepository, "_get_template", side_effect=side_effect)
-        return patch.object(CampaignDraftRepository, "_get_template", return_value=template)
+        return nullcontext()
 
     def test_approve_success_sets_approved_and_records_review(self):
         with self._patch_get_campaign(), self._patch_content_links([]), self._patch_template(_fake_template()):
@@ -331,13 +298,6 @@ class ApproveRejectTests(unittest.TestCase):
         review_rows = [obj for obj in self.session.added if type(obj).__name__ == "CampaignReview"]
         self.assertEqual(len(review_rows), 1)
         self.assertEqual(review_rows[0].decision, "approve")
-
-    def test_approve_blocked_when_linked_template_not_approved(self):
-        with self._patch_get_campaign(), self._patch_content_links([]), self._patch_template(
-            _fake_template(status="NeedsReview")
-        ):
-            with self.assertRaises(CampaignDraftApprovalBlockedError):
-                self.repo.approve(DEMO_TENANT_ID, self.campaign.campaign_id, uuid.uuid4())
 
     def test_approve_blocked_when_content_item_archived(self):
         link = SimpleNamespace(content_item_id=CONTENT_ITEM_1)
@@ -423,8 +383,6 @@ class CandidateContentItemFilteringTests(unittest.TestCase):
         with patch(
             "core.repositories.campaign_draft_repository.SegmentRepository.get_segment",
             return_value=_fake_segment(),
-        ), patch.object(
-            CampaignDraftRepository, "_get_template", return_value=_fake_template()
         ), patch(
             "core.repositories.campaign_draft_repository.generate_campaign_plan",
             return_value=_valid_generated_plan(content_item_ids=[]),
@@ -433,7 +391,6 @@ class CandidateContentItemFilteringTests(unittest.TestCase):
                 tenant_id=DEMO_TENANT_ID,
                 created_by=None,
                 segment_id=DEMO_SEGMENT_ID,
-                template_id=DEMO_TEMPLATE_ID,
                 objective="Objective",
             )
 
@@ -453,6 +410,7 @@ class ReviewerContentPlanAdjustmentTests(unittest.TestCase):
         self.campaign = SimpleNamespace(
             campaign_id=self.campaign_id,
             tenant_id=DEMO_TENANT_ID,
+            segment_id=None,
             objective="Original objective",
             strategy_summary="Original strategy",
             start_date=date.today() + timedelta(days=1),
@@ -494,7 +452,7 @@ class OptimisticConcurrencyTests(unittest.TestCase):
         self.campaign = SimpleNamespace(
             campaign_id=uuid.uuid4(),
             tenant_id=DEMO_TENANT_ID,
-            template_id=None,
+            segment_id=None,
             approval_status=APPROVAL_STATUS_IN_REVIEW,
             approved_by=None,
             approved_at=None,
@@ -505,12 +463,28 @@ class OptimisticConcurrencyTests(unittest.TestCase):
         """A concurrent writer already changed approval_status/updated_at."""
 
         class _ConflictResult:
+            def scalar_one_or_none(self_inner):
+                return uuid.uuid4()
+
             def first(self_inner):
                 return SimpleNamespace(updated_at=datetime(2026, 1, 2), approval_status=APPROVAL_STATUS_APPROVED)
 
         session = self.session
         session.execute = lambda _stmt: _ConflictResult()
         return session
+
+    def test_edit_rejects_actor_missing_from_active_tenant(self):
+        self.session.audit_user_exists = False
+
+        with self.assertRaises(CampaignDraftActorNotFoundError):
+            self.repo.edit_draft(
+                DEMO_TENANT_ID,
+                self.campaign.campaign_id,
+                uuid.uuid4(),
+                objective="Updated objective",
+            )
+
+        self.assertFalse(self.session.committed)
 
     def test_approve_raises_conflict_when_row_changed_concurrently(self):
         self._conflicting_session()

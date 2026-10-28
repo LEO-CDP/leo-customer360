@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from core.database import get_db
-from core.schemas.identity import ProfileAttributeRead
+from leo_customer360_dao.schemas.identity import ProfileAttributeRead
 
 
 class FakeProfileAttributeCRUD:
@@ -72,9 +72,9 @@ class FakeProfileAttributeCRUD:
             limit_timeframe="5_annually",
             blocked_values=["null", "-1"],
             blocked_patterns=["^[0-]*$"],
-            is_scoring_model=False,
-            scoring_model_name=None,
-            scoring_model_version=None,
+            is_ai_agent=False,
+            agent_code=None,
+            agent_version=None,
             value_type="identifier",
             value_min=None,
             value_max=None,

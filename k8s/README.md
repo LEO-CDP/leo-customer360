@@ -125,7 +125,7 @@ MinIO are **not** deployed — the app points at the managed services instead.
 
 ## Notes / gotchas
 
-- The Dagster image is built from a **new `backend-system/Dockerfile`** (there
+- The Dagster image is built from a **new `customer360-backend/Dockerfile`** (there
   was no compose service for it) running `dagster dev` with the 7 workspace code
   locations; `DAGSTER_HOME` is on a PVC.
 - `FRONTEND_API_HOSTNAME` and the Keycloak hostname are **browser-facing** —

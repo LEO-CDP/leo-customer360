@@ -1,0 +1,15 @@
+# Base for customer360-backend (Dagster) on VKS. Not deployed directly —
+# deploy-backend-vks.sh generates ../generated/<env>/ on top of this with the image and
+# the ConfigMap/Secret resolved from the Terraform state of ../../../postgres, ../storage, ../cache.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: customer360
+
+resources:
+  - dagster.yaml
+
+labels:
+  - includeSelectors: true
+    pairs:
+      app.kubernetes.io/name: customer360-backend
+      app.kubernetes.io/part-of: customer360

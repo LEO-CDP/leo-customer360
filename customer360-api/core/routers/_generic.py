@@ -12,10 +12,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.cache import cache_response, invalidate_prefix
-from core.config import settings
-from core.crud.base import CRUDBase
+from leo_customer360_dao.config import settings
+from leo_customer360_dao.crud.base import CRUDBase
 from core.database import get_db
-from core.models.base import Base
+from leo_customer360_dao.models.base import Base
 
 
 def build_crud_router(
@@ -28,6 +28,7 @@ def build_crud_router(
     read_schema: type[BaseModel],
     prefix: str,
     tags: list[str],
+    crud_factory: Optional[Callable[[Session], Any]] = None,
     create_validator: Optional[Callable[[Session, dict[str, Any]], None]] = None,
     update_validator: Optional[Callable[[Session, Any, dict[str, Any]], None]] = None,
     create_transform: Optional[Callable[[Session, dict[str, Any]], dict[str, Any]]] = None,
@@ -36,9 +37,14 @@ def build_crud_router(
     create_hook: Optional[Callable[[Any], None]] = None,
     update_hook: Optional[Callable[[Any], None]] = None,
     read_hook: Optional[Callable[[Session, Any], None]] = None,
+    cache_reads: bool = True,
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=tags)  # type: ignore[arg-type]
     crud = CRUDBase(model)
+
+    def get_crud(db: Session):
+        """Resolve the configured persistence adapter for one request."""
+        return crud_factory(db) if crud_factory is not None else crud
     cache_prefix = model.__tablename__
     # Most crm_*/cdp_* models carry a tenant_id column (see database-schema.sql's
     # "ROW LEVEL SECURITY" section); when present, expose it as an optional
@@ -48,8 +54,9 @@ def build_crud_router(
     # convenience for narrowing results, not a security boundary by itself.
     has_tenant = hasattr(model, "tenant_id")
 
+    @router.get("", response_model=list[read_schema], include_in_schema=False)
     @router.get("/", response_model=list[read_schema])
-    @cache_response(f"{cache_prefix}/list", ttl=settings.cache_ttl_seconds)
+    @cache_response(f"{cache_prefix}/list", ttl=settings.cache_ttl_seconds, enabled=cache_reads)
     def list_items(
         skip: int = 0,
         limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
@@ -57,27 +64,28 @@ def build_crud_router(
         db: Session = Depends(get_db),
     ):
         filters = {"tenant_id": tenant_id} if has_tenant else {}
-        return crud.list(db, skip=skip, limit=limit, **filters)
+        return get_crud(db).list(db, skip=skip, limit=limit, **filters)
 
     @router.get("/count")
-    @cache_response(f"{cache_prefix}/count", ttl=settings.cache_ttl_seconds)
+    @cache_response(f"{cache_prefix}/count", ttl=settings.cache_ttl_seconds, enabled=cache_reads)
     def count_items(
         tenant_id: Optional[uuid.UUID] = None,
         db: Session = Depends(get_db),
     ):
         filters = {"tenant_id": tenant_id} if has_tenant else {}
-        return {"count": crud.count(db, **filters)}
+        return {"count": get_crud(db).count(db, **filters)}
 
     @router.get("/{item_id}", response_model=read_schema)
-    @cache_response(f"{cache_prefix}/item", ttl=settings.cache_ttl_seconds)
+    @cache_response(f"{cache_prefix}/item", ttl=settings.cache_ttl_seconds, enabled=cache_reads)
     def get_item(item_id: pk_type, db: Session = Depends(get_db)):  # type: ignore[valid-type]
-        obj = crud.get(db, item_id)
+        obj = get_crud(db).get(db, item_id)
         if obj is None:
             raise HTTPException(status_code=404, detail=f"{model.__name__} '{item_id}' not found")
         if read_hook is not None:
             read_hook(db, obj)
         return obj
 
+    @router.post("", response_model=read_schema, status_code=201, include_in_schema=False)
     @router.post("/", response_model=read_schema, status_code=201)
     def create_item(payload: create_schema, db: Session = Depends(get_db)):  # type: ignore[valid-type]
         obj_in = payload.model_dump()
@@ -89,7 +97,7 @@ def build_crud_router(
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
         try:
-            obj = crud.create(db, obj_in)
+            obj = get_crud(db).create(db, obj_in)
         except IntegrityError as exc:
             db.rollback()
             if integrity_error_detail is None:
@@ -105,6 +113,7 @@ def build_crud_router(
 
     @router.patch("/{item_id}", response_model=read_schema)
     def update_item(item_id: pk_type, payload: update_schema, db: Session = Depends(get_db)):  # type: ignore[valid-type]
+        crud = get_crud(db)
         obj = crud.get(db, item_id)
         if obj is None:
             raise HTTPException(status_code=404, detail=f"{model.__name__} '{item_id}' not found")
@@ -133,6 +142,7 @@ def build_crud_router(
 
     @router.delete("/{item_id}", status_code=204)
     def delete_item(item_id: pk_type, db: Session = Depends(get_db)):  # type: ignore[valid-type]
+        crud = get_crud(db)
         obj = crud.get(db, item_id)
         if obj is None:
             raise HTTPException(status_code=404, detail=f"{model.__name__} '{item_id}' not found")
@@ -142,16 +152,16 @@ def build_crud_router(
     return router
 
 
-def insert_before_item_routes(router: APIRouter) -> None:
+def insert_before_item_routes(router: APIRouter, param_name: Optional[str] = None) -> None:
     """Moves the APIRoute most recently appended to ``router`` (i.e. the last
     entry in ``router.routes``) so it's registered ahead of the generic
-    ``GET/PATCH/DELETE /{item_id}`` routes added by :func:`build_crud_router`.
+    parameterized item routes added by :func:`build_crud_router` (or custom routers).
 
     Necessary because those routes use an untyped path template
     ("/{item_id}", with pk_type conversion happening in the handler
     signature rather than the path itself) so they match ANY single-segment
     path -- including literal static sub-paths like "/segmentable-profile-
-    attributes" added afterwards via ``@router.get(...)`` decorators.
+    attributes" or "/count" added afterwards via ``@router.get(...)`` decorators.
     Starlette dispatches to the first fully-matching route in registration
     order, so without this the static route would be shadowed by "/{item_id}"
     (returning a 422 "invalid UUID" instead of ever running).
@@ -160,7 +170,8 @@ def insert_before_item_routes(router: APIRouter) -> None:
     route onto a router returned by :func:`build_crud_router`.
     """
     new_route = router.routes.pop()
+    marker = "{" + param_name + "}" if param_name else "{"
     item_id_index = next(
-        i for i, route in enumerate(router.routes) if "{item_id}" in getattr(route, "path", "")
+        i for i, route in enumerate(router.routes) if marker in getattr(route, "path", "")
     )
     router.routes.insert(item_id_index, new_route)

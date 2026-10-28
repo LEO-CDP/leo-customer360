@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 
 from core.database import get_db
-from core.models.segmentation import CdpSegment
+from leo_customer360_dao.models.segmentation import CdpSegment
 from core.routers._generic import build_crud_router
 from core.routers.segment_api import (
     _segment_integrity_error_detail,
@@ -26,11 +26,11 @@ from core.routers.segment_api import (
     _trigger_segment_recompute_after_create,
     _trigger_segment_recompute_after_update,
 )
-from core.schemas.segmentation import SegmentCreate, SegmentRead, SegmentUpdate
+from leo_customer360_dao.schemas.segmentation import SegmentCreate, SegmentRead, SegmentUpdate
 
 
 class FakeSegmentCRUD:
-    """Stands in for core.crud.base.CRUDBase(CdpSegment): an in-memory
+    """Stands in for leo_customer360_dao.crud.base.CRUDBase(CdpSegment): an in-memory
     dict-backed store instead of a real database, so the router's HTTP-level
     wiring (status codes, request/response schemas, filters) can be tested
     without SQLAlchemy/PostgreSQL."""
@@ -409,9 +409,7 @@ class _FakeScalarOne:
 
 
 class _FakeExecSession:
-    """Minimal Session double recording every execute() call, returning a
-    single canned result (this app-level test never issues more than one
-    query per request)."""
+    """Canned repository result used by the HTTP boundary tests."""
 
     def __init__(self, result: Any = None):
         self.result = result
@@ -441,17 +439,13 @@ class SegmentMatchedProfilesTests(unittest.TestCase):
     def _client_for(self, fake_segment: Optional[SimpleNamespace], fake_session: _FakeExecSession) -> TestClient:
         self.app.dependency_overrides[get_db] = lambda: fake_session
         
-        # Mock SegmentRepository to use the fake_session for queries
+        # Mock the repository boundary; query construction is covered by DAO tests.
         def mock_repo_factory(db):
-            # Import the real SegmentRepository
-            from core.repositories.segment_respository import SegmentRepository
-            
-            # Create a real repository instance with the fake_session
-            repo = SegmentRepository(db)
-            
-            # Override get_segment to return fake_segment
-            original_get_segment = repo.get_segment
+            repo = SimpleNamespace()
             repo.get_segment = lambda seg_id: fake_segment
+            result = fake_session.result
+            repo.get_matched_profiles = lambda *args, **kwargs: result.all() if result else []
+            repo.count_matched_profiles = lambda *args, **kwargs: result.scalar_one() if result else 0
             
             return repo
         
@@ -495,7 +489,7 @@ class SegmentMatchedProfilesTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"count": 0})
 
-    def test_matched_profiles_count_executes_tenant_scoped_query(self):
+    def test_matched_profiles_count_returns_repository_result(self):
         tenant_id = uuid.uuid4()
         segment = SimpleNamespace(
             segment_id=uuid.uuid4(),
@@ -509,11 +503,6 @@ class SegmentMatchedProfilesTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"count": 7})
-        sql, params = fake_session.executed[0]
-        self.assertIn("cdp_master_profiles", sql)
-        self.assertIn("cdp_domain_profiles", sql)
-        self.assertIn("churn_risk_tier IN ('high', 'critical')", sql)
-        self.assertEqual(params["tenant_id"], str(tenant_id))
 
     def test_matched_profiles_returns_rows_from_query(self):
         tenant_id = uuid.uuid4()

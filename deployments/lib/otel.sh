@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # otel.sh — shared OpenTelemetry (OTLP -> Jaeger) env wiring for the deploy scripts.
 #
-# The three FastAPI images (customer360-api, ads-server, frontend-admin) are
+# The three FastAPI images (customer360-api, customer360-promotions, customer360-frontend) are
 # instrumented with OpenTelemetry ZERO-CODE auto-instrumentation (see each
 # service Dockerfile: `opentelemetry-bootstrap -a install` +
 # `opentelemetry-instrument uvicorn ...`). This helper emits the OTEL_* lines
@@ -31,7 +31,7 @@ otel_env_lines() {
   local svc="$1" env="$2" jhost="${3:-127.0.0.1}"
   local enabled sampler endpoint disabled
 
-  if [[ "$env" == "prod" ]]; then enabled="true"; sampler="0.1"; else enabled="false"; sampler="1.0"; fi
+  if [[ "$env" == "prod" ]]; then enabled="true"; sampler="0.1"; else enabled="false"; sampler="0.1"; fi  # uat: 1.0 filled the 300m Jaeger badger store (OOM loop); override OTEL_SAMPLER_ARG=1.0 for a short profiling run
   enabled="${OTEL_ENABLED:-$enabled}"
   sampler="${OTEL_SAMPLER_ARG:-$sampler}"
   endpoint="${OTEL_ENDPOINT:-http://${jhost}:4318}"

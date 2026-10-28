@@ -1,6 +1,6 @@
 # Caddy reverse proxy for the Customer 360 platform — single public host, path-routed,
 # TLS terminated here (auto Let's Encrypt). Runs on the api box (--network host), so
-# 127.0.0.1:<port> reaches the co-located containers and 10.100.1.4 reaches the backend box.
+# 127.0.0.1:<port> reaches the co-located containers; other upstreams come from the overlay (Dagster = the VKS node NodePort).
 #
 # Values are injected as env by deploy-caddy.sh ({$VAR} is substituted at load).
 # Order matters: specific handle/handle_path blocks match first; the bare `handle`
@@ -9,6 +9,27 @@
 	email {$ACME_EMAIL}
 	# Staging tip: to avoid Let's Encrypt rate limits while testing DNS, uncomment:
 	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+# --- customer360-event-api backend, shared by /data/* and /cdp-sdk/* -------------------
+# DATA_UPSTREAM may hold ONE address or several separated by spaces. Several = a weighted
+# canary across the old tracking vServer and the VKS Service, e.g.
+#   data_upstream  = "10.100.1.8:8010 49.213.73.13:8010"
+#   data_lb_policy = "weighted_round_robin 5 5"     # 50/50; "1 9" to shift 10% to VKS
+#
+# The passive health checks are what make the canary safe to leave running. Ingestion
+# returns 503 when it cannot enqueue to Redis, and /health does NOT report that (it answers
+# 200 "degraded" — only an unreachable S3 makes it 503). So an ACTIVE health check would
+# happily keep sending beacons to a backend that is rejecting every one of them. Watching
+# real responses catches it: 3 x 5xx inside 30s pulls that backend out and the survivor
+# takes the whole load, with no config change.
+(event_api_backend) {
+	reverse_proxy {$DATA_UPSTREAM} {
+		lb_policy {$DATA_LB_POLICY}
+		fail_duration 30s
+		max_fails 3
+		unhealthy_status 5xx
+	}
 }
 
 {$CADDY_DOMAIN} {
@@ -33,14 +54,23 @@
 		reverse_proxy {$API_UPSTREAM}
 	}
 
-	# --- ads-server under /ads. Forward UNSTRIPPED (ads-server sets root_path=/ads via
+	# --- customer360-promotions under /ads. Forward UNSTRIPPED (customer360-promotions sets root_path=/ads via
 	#     ADS_ROOT_PATH) so Swagger's openapi.json + any redirects keep the /ads prefix,
 	#     same as the customer360-api block above. ---
 	handle /ads/* {
 		reverse_proxy {$ADS_UPSTREAM}
 	}
 
-	# The web SDK iframe must reach data-tracking-api, not the frontend catch-all.
+	# --- customer360-agent under /agent/* -> the agent box (:8009), prefix STRIPPED
+	#     (handle_path): /agent/health -> /health, /agent/plan/zalo -> /plan/zalo.
+	#     /health stays open; /plan/* is gated by the Bearer AGENT_API_TOKEN (constant-time
+	#     check in the agent's require_token) — that token is the ONLY thing making the LLM
+	#     planning endpoint safe to expose, so it MUST stay set on the agent box in uat/prod. ---
+	handle_path /agent/* {
+		reverse_proxy {$AGENT_UPSTREAM}
+	}
+
+	# The web SDK iframe must reach customer360-event-api, not the frontend catch-all.
 	# SAMEORIGIN cannot allow an iframe embedded by a different origin.
 	@cdp_sdk path /cdp-sdk/*
 	handle @cdp_sdk {
@@ -48,10 +78,10 @@
 			-X-Frame-Options
 			Content-Security-Policy "frame-ancestors {$SDK_FRAME_ANCESTOR}"
 		}
-		reverse_proxy {$DATA_UPSTREAM}
+		import event_api_backend
 	}
 
-	# --- data-tracking-api under /data. STRIPPED (handle_path): the tracking service has NO
+	# --- customer360-event-api under /data. STRIPPED (handle_path): the tracking service has NO
 	#     root_path of its own and its hot path is a single POST (no self-referential absolute
 	#     redirects), so stripping /data is safe and needs zero app change — a beacon posts to
 	#     https://{$CADDY_DOMAIN}/data/api/v1/tracking/logs -> the app sees /api/v1/tracking/logs.
@@ -60,7 +90,7 @@
 	#      For parity with /c360api + /ads, switch to `handle /data/*` UNSTRIPPED and set the app's
 	#      root_path=/data instead — see deploy-tracking.sh ROOT_PATH.) ---
 	handle_path /data/* {
-		reverse_proxy {$DATA_UPSTREAM}
+		import event_api_backend
 	}
 
 	# --- Jaeger trace UI under /jaeger, via its oauth2-proxy (Keycloak SSO). UNSTRIPPED
@@ -82,7 +112,7 @@
 		reverse_proxy {$DOCS_UPSTREAM}
 	}
 
-	# --- everything else -> the admin UI (frontend-admin). Keep this block LAST. ---
+	# --- everything else -> the admin UI (customer360-frontend). Keep this block LAST. ---
 	handle {
 		reverse_proxy {$FRONTEND_UPSTREAM}
 	}

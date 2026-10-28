@@ -1,4 +1,4 @@
-# PROD overlay — frontend-admin runs on a DEDICATED vServer (server key "frontend",
+# PROD overlay — customer360-frontend runs on a DEDICATED vServer (server key "frontend",
 # defined in ../server/overlays/prod.tfvars). Read by deploy-frontend.sh; no secrets.
 
 frontend_server_key = "frontend" # dedicated public web-tier box (c360-api-prod-frontend)

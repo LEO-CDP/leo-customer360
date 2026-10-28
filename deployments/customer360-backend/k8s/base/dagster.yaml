@@ -1,0 +1,72 @@
+# customer360-backend (Dagster orchestrator) on GreenNode VKS — every resource in one file.
+#
+# Replaces the vServer model (one docker container on the jobs box, --network host).
+# `dagster dev` runs the webserver + daemon + all code locations in ONE process, so this is
+# a SINGLETON: replicas 1 with Recreate, no HPA and no PodDisruptionBudget (a PDB on a
+# single replica only blocks node drains). Two pods would run two daemons and double every
+# schedule/sensor tick. Splitting webserver/daemon is a later phase
+# (deployments/docs/dagster-scaling-analysis.md §5).
+#
+# State is external: run/event/schedule storage in the managed Postgres `dagster` DB and
+# compute logs in vStorage, both rendered at start by entrypoint.sh -> render_dagster_instance.py.
+# No PVC. Namespace is shared with event-api/promotions and created by deploy-backend-vks.sh.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dagster
+  labels: { app: dagster }
+spec:
+  replicas: 1
+  # The first pull of the large Dagster image can take several minutes on a fresh VKS node.
+  # Keep the controller deadline longer than the deploy script's rollout wait.
+  progressDeadlineSeconds: 1200
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: dagster }
+  template:
+    metadata:
+      labels: { app: dagster }
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull # shared with event-api/promotions; created by the deploy script
+      containers:
+        - name: dagster
+          image: ghcr.io/leo-cdp/leo-customer360/customer360-dagster:latest
+          command: ["/app/entrypoint.sh"]
+          args: ["dagster", "dev", "-w", "workspace.yaml", "-h", "0.0.0.0", "-p", "3000"]
+          ports:
+            - { containerPort: 3000, name: http }
+          env:
+            - { name: DAGSTER_HOME, value: /dagster_home }
+          envFrom:
+            - configMapRef: { name: dagster-config }
+            - secretRef: { name: dagster-secrets }
+          # Loading the code locations takes a while: the startup probe gives it up to 3 min
+          # before liveness/readiness apply. Readiness uses the webserver; liveness only asks
+          # whether the port answers — restarting does not fix a Postgres outage.
+          startupProbe:
+            tcpSocket: { port: 3000 }
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            httpGet: { path: /server_info, port: 3000 }
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: 3000 }
+            periodSeconds: 15
+            failureThreshold: 6
+          resources: # per-env numbers are in ../overlays/<env>/
+            requests: { cpu: 250m, memory: 768Mi }
+            limits: { cpu: "2", memory: 1536Mi }
+---
+# ClusterIP only: the API reaches Dagster in-cluster at dagster:3000 (DAGSTER_GRAPHQL_HOST).
+# The UI has no auth, so it is deliberately NOT exposed: kubectl port-forward svc/dagster 3000:3000.
+apiVersion: v1
+kind: Service
+metadata:
+  name: dagster
+  labels: { app: dagster }
+spec:
+  selector: { app: dagster }
+  ports:
+    - { port: 3000, targetPort: 3000, name: http }

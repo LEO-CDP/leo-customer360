@@ -16,13 +16,13 @@ containerized deployment.
 
 | Service | Image (built locally) | Role | Port (host) |
 |---|---|---|---|
-| `postgres` | `customer360-postgres:local` (postgis/postgis:16-3.5 + pgvector) | Primary datastore, auto-provisioned with [`database-schema.sql`](../../database-init/database-schema.sql) | `${POSTGRES_HOST_PORT:-5432}` → 5432 |
+| `postgres` | `customer360-postgres:local` (postgis/postgis:16-3.5 + pgvector) | Primary datastore, auto-provisioned with [`database-schema.sql`](../../customer360-database/database-schema.sql) | `${POSTGRES_HOST_PORT:-5432}` → 5432 |
 | `redis` | `customer360-redis:local` (redis:8-alpine) | Response cache **and Keycloak token cache** for customer360-api (see [`core/cache.py`](../../customer360-api/core/cache.py) / [`core/auth.py`](../../customer360-api/core/auth.py)) | `${REDIS_HOST_PORT:-6580}` → 6580 |
 | `keycloak-db-init` | reuses `customer360-postgres:local` | **One-shot** job that creates the dedicated `db_keycloak` database on the shared `postgres` instance, then exits | none |
 | `keycloak` | `keycloak/keycloak:26.7` | Local SSO/identity provider — issues + introspects the access tokens customer360-api requires on every endpoint except `/health` | `${KEYCLOAK_HOST_PORT:-8080}` → 8080 |
-| `dagster` | `customer360-dagster:local` (Python 3.11-slim) | Dagster webserver and daemon for all nine backend-system code locations, including identity resolution | `${DAGSTER_UI_PORT:-3000}` → 3000 |
+| `dagster` | `customer360-dagster:local` (Python 3.11-slim) | Dagster webserver and daemon for all eight customer360-backend code locations, including identity resolution and AI-agent runners | `${DAGSTER_UI_PORT:-3000}` → 3000 |
 | `api` | `customer360-api:local` (Python 3.11-slim) | Customer 360 / CIR REST API (FastAPI), Keycloak-secured | `${C360_API_PORT:-8008}` → 8008 |
-| `tracking-api` | `customer360-tracking-api:local` (Python 3.11-slim) | CDP tracking-log ingestion; AWS S3 in production, MinIO in dev | `${C360_TRACKING_API_PORT:-8010}` → 8010 |
+| `tracking-api` | `customer360-event-api:local` (Python 3.11-slim) | CDP tracking-log ingestion; AWS S3 in production, MinIO in dev | `${C360_TRACKING_API_PORT:-8010}` → 8010 |
 | `cir-demo-seed` | reuses `customer360-dagster:local` | **Dev only** one-shot job that seeds demo data, then exits | none |
 
 All services share one bridge network, `customer360-network`, and are isolated
@@ -93,7 +93,7 @@ credentials. `.env.example` is the committed template.
 >    Postgres/Redis image bootstrap variables (`POSTGRES_USER`, `--requirepass`, etc.).
 > 2. Application services (`api`, Dagster, demo seed, and `tracking-api`) get
 >    the whole file injected via `env_file:`, exactly like
->    `customer360-api`/`backend-system` read it for non-Docker local dev
+>    `customer360-api`/`customer360-backend` read it for non-Docker local dev
 >    (`pydantic-settings` / `python-dotenv`). Infrastructure containers receive
 >    only the explicit variables they need.
 > 3. **`DB_HOST` / `REDIS_HOST` in `.env` are overridden by `docker-compose.yml`**
@@ -101,7 +101,7 @@ credentials. `.env.example` is the committed template.
 >    `api`/`dagster`/`cir-demo-seed`/`tracking-api` containers, regardless of
 >    what's in the file.
 >    The `localhost` defaults in `.env.example` are only correct when you run
->    `customer360-api`/`backend-system` directly on the host
+>    `customer360-api`/`customer360-backend` directly on the host
 >    (`./start.sh`, `./run-demo.sh`) against the dockerized Postgres/Redis via
 >    their published host ports.
 
@@ -131,10 +131,10 @@ docker compose --profile dev up -d --build
 The same six long-running services, **plus** `cir-demo-seed`, a one-shot job (`restart: "no"`)
 that waits for `postgres` to be healthy, then runs, in order:
 
-1. `identity_resolution/scripts/init_sample_data.py` — seeds 1000 synthetic Adjust raw profiles
+1. `customer360-seeding/dev-backend-seeding/init_sample_data.py` — seeds 1000 synthetic Adjust raw profiles
    (retail + banking, ~30% deliberate duplicates).
-2. `identity_resolution/scripts/run_demo_resolution.py` — drains them through identity resolution.
-3. `identity_resolution/scripts/seed_full_demo_data.py` — seeds the full CRM journey graph,
+2. `identity_resolution/scripts/test_resolution_task.py` — drains them through identity resolution.
+3. `customer360-seeding/dev-backend-seeding/seed_full_demo_data.py` — seeds the full CRM journey graph,
    relations, transactions, behavioral events, and master-profile enrichment.
 
 Check it completed successfully:
@@ -202,7 +202,7 @@ docker inspect -f '{{.State.Health.Status}}' customer360-postgres
 docker inspect -f '{{.State.Health.Status}}' customer360-redis
 docker inspect -f '{{.State.Health.Status}}' customer360-dagster
 docker inspect -f '{{.State.Health.Status}}' customer360-api
-docker inspect -f '{{.State.Health.Status}}' customer360-tracking-api
+docker inspect -f '{{.State.Health.Status}}' customer360-event-api
 curl -s http://localhost:${C360_API_PORT:-8008}/health
 curl -s http://localhost:${C360_TRACKING_API_PORT:-8010}/health
 ```
@@ -312,7 +312,7 @@ tune per environment (dev/staging/prod). Highlights:
 | `REDIS_PASSWORD` | `change_me_redis_password` | **Change in every real environment.** Applied via `--requirepass`. |
 | `CACHE_ENABLED` | `true` | Kill switch for the whole Redis caching layer in customer360-api (fails open regardless). |
 | `CACHE_TTL_SECONDS` | `60` | Max staleness window for cached GET responses. Lower for tighter consistency, raise to cut DB load further. |
-| `CIR_POLL_INTERVAL_SECONDS` | `30` | How often the `cir` worker polls `cdp_raw_profiles_stage` for unresolved rows. |
+| `CIR_POLL_INTERVAL_SECONDS` | `600` | How often the `cir` worker polls `cdp_raw_profiles_stage` for unresolved rows (10 minutes). |
 | `CIR_BATCH_SIZE` | `5000` | Rows per resolution batch. |
 | `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` | `10` / `20` | customer360-api SQLAlchemy pool sizing — tune with expected concurrent request volume. |
 | `SSO_LOGIN` | `false` | Customer 360 API auth mode from `.env.example`; set `true` for Keycloak-protected deployments. The dev no-SSO Compose path is selected when this is `false`. |
@@ -325,14 +325,17 @@ tune per environment (dev/staging/prod). Highlights:
 | `C360_TRACKING_API_PORT` | `8010` | Host-published port for the CDP tracking-log API. |
 | `OBJECT_STORAGE_MODE` | `s3` | `s3` in the production-shaped stack; `minio` is forced by the dev Compose files. |
 | `S3_ENDPOINT_URL` | empty | Optional S3-compatible endpoint. Dev Compose overrides it to `http://minio:9000`. |
+| `PRODUCT_IMPORT_S3_BUCKET` | `c360-product-imports` | Product TSV staging bucket; the Customer 360 API creates it at startup if absent. |
+| `CONTENT_IMPORT_S3_BUCKET` | `c360-content-imports` | Content-import bucket provisioned by the Customer 360 API at startup. |
 | `S3_REGION` | `us-east-1` | AWS region used by the tracking API. |
 | `S3_AUTO_CREATE_BUCKETS` | `true` | Creates `data-tracking-[data_source_id]` on first write; set `false` when infrastructure provisions buckets. |
 | `TRACKING_SESSION_TTL_SECONDS` | `86400` | TTL for non-payload session metadata in Redis. |
 | `TRACKING_RATE_LIMIT_REQUESTS` / `TRACKING_RATE_LIMIT_WINDOW_SECONDS` | `120` / `60` | Per-source-IP Redis request window for tracking ingestion. |
 | `TRACKING_RATE_LIMIT_FAIL_OPEN` | `true` | Allows ingestion when Redis is unavailable; set `false` for strict production enforcement. |
+| `TRACKING_RATE_LIMIT_WHITELIST` | empty | Comma-separated trusted client IPs/CIDRs exempt from rate limiting; keep empty in production. |
 | `TRACKING_BOT_FILTER_ENABLED` | `true` | Discards configured crawler user agents before storage and rate-limit accounting. |
 | `TRACKING_BOT_USER_AGENT_PATTERNS` | `googlebot,...` | Comma-separated, case-insensitive user-agent substrings to filter. |
-| `LEO_GOOGLE_GENAI_API_KEY` | placeholder | Leave as `YOUR_...` to keep CIR persona-name generation offline (see `identity_resolution/persona.py`). |
+| `LEO_GOOGLE_GENAI_API_KEY` | placeholder | Leave as `YOUR_...` to keep CIR persona-name generation offline (see `leo_customer360_dao/agentic_engines/persona.py`). |
 
 ---
 
@@ -351,7 +354,7 @@ the same limitation as [`dev-start-pgsql.sh`](../../dev-c360.sh)'s
 - **Existing environment with data to keep (staging/prod):** apply the DDL
   delta by hand against the running container, e.g.:
   ```bash
-  docker cp database-init/database-schema.sql customer360-postgres:/tmp/database-schema.sql
+  docker cp customer360-database/database-schema.sql customer360-postgres:/tmp/database-schema.sql
   docker exec -u postgres customer360-postgres \
     psql -d customer360 -v ON_ERROR_STOP=1 -f /tmp/database-schema.sql
   ```
@@ -442,7 +445,7 @@ non-Docker dev scripts:
 
 - [`dev-start-pgsql.sh`](../../dev-c360.sh) → container `pgsql16_vector`
 - `customer360-api/start.sh` / `stop.sh` → runs uvicorn directly on the host
-- `backend-system/identity_resolution/run-demo.sh` → runs the CIR scripts directly on the host
+- `customer360-backend/identity_resolution/run-demo.sh` → runs the CIR scripts directly on the host
 
 They use different container names and (by default) the same host ports, so
 only run one Postgres/Redis path at a time on a given port — or remap ports

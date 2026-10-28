@@ -3,7 +3,7 @@
 > Snapshot date: 2026-09-15
 >
 > Scope: Phase 0 baseline and contract, plus the Phase 1 Bronze ingestion
-> implementation in `data-tracking-api`.
+> implementation in `customer360-event-api`.
 
 ## Baseline Snapshot
 
@@ -12,9 +12,9 @@ taken. Values below are aggregate-only and contain no event payloads.
 
 | Measure | Local value | Source |
 |---|---:|---|
-| `cdp_raw_events` count | 7,706 | `SELECT count(*)` |
-| Oldest `cdp_raw_events.event_time` | 2025-09-14 17:06:12.214493+00 | PostgreSQL |
-| Newest `cdp_raw_events.event_time` | 2026-09-14 12:06:13.165638+00 | PostgreSQL |
+| Legacy PostgreSQL event ledger count before S3 cutover | 7,706 | Historical baseline |
+| Oldest legacy event time before S3 cutover | 2025-09-14 17:06:12.214493+00 | Historical PostgreSQL baseline |
+| Newest legacy event time before S3 cutover | 2026-09-14 12:06:13.165638+00 | Historical PostgreSQL baseline |
 | Redis tracking stream length | 0 | `XLEN data-tracking:events` |
 | Redis pending tracking messages | 0 | `XPENDING data-tracking:events s3-writers` |
 | S3 tracking bucket/object/byte totals | unavailable | local client had no S3 credentials |
@@ -25,7 +25,7 @@ MinIO/S3 endpoint with credentials that can list only the event buckets.
 
 ## Confirmed Current Boundaries
 
-- `data-tracking-api` validates identity-bearing batches, enriches each event,
+- `customer360-event-api` validates identity-bearing batches, enriches each event,
   and hands them to either Redis Streams or the bounded in-process queue.
 - Redis acknowledges and deletes a message only after the S3 write returns.
 - Bronze objects are immutable batches; retries reuse deterministic event and

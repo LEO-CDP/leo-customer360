@@ -17,7 +17,7 @@ from core.init_core_data import (
     seed_default_segments,
     seed_default_segments_with_breakdown,
 )
-from tests.conftest import FakeDBSession
+from conftest import FakeDBSession
 
 
 class _AllResult:
@@ -42,9 +42,9 @@ class _ScalarResult:
 
 class SeedDefaultSegmentsTests(unittest.TestCase):
     def test_default_segments_have_valid_domains(self):
-        allowed_domains = {"all", "retail", "travel", "education", "real_estate"}
+        allowed_domains = {"all", "retail", "travel", "education", "real_estate", "banking", "media"}
 
-        self.assertGreaterEqual(len(DEFAULT_SEGMENTS), 25)
+        self.assertEqual(len(DEFAULT_SEGMENTS), 53)
         for segment in DEFAULT_SEGMENTS:
             self.assertIn("domain", segment)
             self.assertIn(segment["domain"], allowed_domains)
@@ -180,6 +180,36 @@ class SeedDefaultSegmentsTests(unittest.TestCase):
         self.assertIn("tenant_id = :tenant_id", sql)
         self.assertIn("churn_risk_tier IN ('high', 'critical')", sql)
 
+    def test_seed_uses_transform_create_for_sql_rules_and_final_generated_sql(self):
+        from core.repositories.segment_repository import SegmentRepository
+
+        tenant_id = uuid.uuid4()
+        age_seg = next(s for s in DEFAULT_SEGMENTS if s["segment_tag"] == "age_30_44")
+        seeded = SegmentRepository.transform_create(
+            {
+                "tenant_id": tenant_id,
+                "domain": age_seg["domain"],
+                "segment_tag": age_seg["segment_tag"],
+                "audience_tags": age_seg.get("audience_tags", []),
+                "segment_name": age_seg["segment_name"],
+                "description": age_seg["description"],
+                "json_rules": age_seg["json_rules"],
+                "sql_rules": age_seg["sql_rules"],
+                "processed_by": "human",
+            }
+        )
+        self.assertEqual(
+            seeded["audience_tags"],
+            [
+                "demographic/age-range/30-34",
+                "demographic/age-range/35-39",
+                "demographic/age-range/40-44",
+            ],
+        )
+        self.assertIn("audience_tags && ARRAY[", seeded["sql_rules"])
+        self.assertIn(f"WHERE tenant_id = '{tenant_id}'::uuid AND (", seeded["final_generated_sql"])
+        self.assertIn("audience_tags && ARRAY[", seeded["final_generated_sql"])
+
 
 class InitCoreDataTests(unittest.TestCase):
     def test_init_core_data_seeds_and_closes_session(self):
@@ -193,9 +223,15 @@ class InitCoreDataTests(unittest.TestCase):
             ]
         )
 
-        with patch("core.init_core_data.SessionLocal", return_value=session):
+        with (
+            patch("core.init_core_data.SessionLocal", return_value=session),
+            patch("core.init_core_data.seed_default_segments", return_value=0),
+            patch("core.init_core_data.seed_default_audience_tags", return_value=1558) as seed_audience_tags,
+            patch("core.init_core_data.seed_root_admin_user", return_value=False),
+        ):
             init_core_data()
 
+        seed_audience_tags.assert_called_once_with(session)
         self.assertTrue(session.closed)
 
     def test_init_core_data_swallows_unexpected_seeding_errors(self):

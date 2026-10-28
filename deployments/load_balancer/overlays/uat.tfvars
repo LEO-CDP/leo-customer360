@@ -23,7 +23,7 @@ zone_id = "HCM03-1C" # only AZ enabled for this account
 
 # After the beta.leocdp.com cutover the app is fronted by Caddy (deployments/proxy):
 # the LB does dumb :80/:443 TCP passthrough -> Caddy. Ops tools stay on their own ports.
-# member_ip = each box PRIVATE ip (see `terraform output servers`): api 10.100.1.5, backend 10.100.1.4.
+# member_ip = each box PRIVATE ip (see `terraform output servers`): api 10.100.1.5 (Dagster = the VKS node NodePort).
 backends = {
   # HTTPS front door: Caddy (deployments/proxy) terminates TLS + path-routes
   #   beta.leocdp.com/ -> frontend · /c360api -> api · /auth -> keycloak · /ads -> ads
@@ -42,10 +42,11 @@ backends = {
   }
   # --- ops tools stay raw on their own ports (they don't sub-path cleanly; see proxy/README) ---
   "dagster" = {
-    member_ip   = "10.100.1.4" # c360-api-uat-backend (backend-system / Dagster)
-    member_port = 3000
+    member_ip   = "10.100.1.11" # VKS node labelled c360.pool=dagster (customer360-backend/README.md "Cutover"); was the backend vServer 10.100.1.4:3000
+    member_port = 30300         # the dagster Service's NodePort
     listen_port = 3000
     health_path = null
+    ingress_cidr = "10.100.1.0/24" # Dagster UI has no auth: only the subnet (Caddy/api box), not the internet
   }
   "portainer" = {
     member_ip   = "10.100.1.5" # Portainer DIRECT (own login, self-signed TLS)
@@ -69,7 +70,7 @@ backends = {
     health_path = "/misc/ping"
   }
 }
-# data-tracking-api is fronted by Caddy at https://beta.leocdp.com/data (no dedicated LB listener;
+# customer360-event-api is fronted by Caddy at https://beta.leocdp.com/data (no dedicated LB listener;
 # it rides the existing :443 caddy_https passthrough). Jaeger is likewise fronted by Caddy at
 # https://beta.leocdp.com/jaeger — no dedicated LB listener.
 

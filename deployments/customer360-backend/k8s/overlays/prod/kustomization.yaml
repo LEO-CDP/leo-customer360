@@ -1,0 +1,12 @@
+# PROD profile for customer360-backend. Not applied yet.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+patches:
+  - target: { kind: Deployment, name: dagster }
+    patch: |-
+      - { op: replace, path: /spec/template/spec/containers/0/resources/requests/memory, value: 2Gi }
+      - { op: replace, path: /spec/template/spec/containers/0/resources/limits/memory, value: 4Gi }

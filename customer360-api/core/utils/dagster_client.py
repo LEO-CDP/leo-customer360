@@ -1,20 +1,20 @@
 """OOP wrapper around ``dagster_graphql.DagsterGraphQLClient`` for triggering
-``backend-system``'s Dagster jobs asynchronously from the API process.
+``customer360-backend``'s Dagster jobs asynchronously from the API process.
 
-Why this exists: several backend-system pipelines (segment membership
+Why this exists: several customer360-backend pipelines (segment membership
 recompute, identity resolution, scoring, ...) do full-table scans against
 ``cdp_master_profiles``, which can hold 1M+ rows in production. Running that
 kind of work synchronously inside an HTTP request handler would block an API
 worker for as long as the scan takes and risks request-timeout failures
 under load. Instead, this module submits a run of the target service's
-already-existing Dagster job (``backend-system/<service>/dagster_defs.py``)
+already-existing Dagster job (``customer360-backend/<service>/dagster_defs.py``)
 to the Dagster webserver's GraphQL API and returns immediately with a
 ``run_id`` -- the actual work executes out-of-process in a Dagster run
 worker, tracked/retried by Dagster itself, and progress can be polled via
 ``get_status()``.
 
-customer360-api and backend-system/* are separate deployables (see
-backend-system/README.md's "Independent code locations" section) -- this
+customer360-api and customer360-backend/* are separate deployables (see
+customer360-backend/README.md's "Independent code locations" section) -- this
 module only talks to the Dagster webserver over HTTP/GraphQL, it never
 imports any service's business-logic package directly.
 
@@ -24,8 +24,8 @@ Layout:
     than a raw 500.
   - ``DagsterService`` -- base class wrapping ONE Dagster code location's
     default job: knows how to ``submit()`` a run and ``get_status()`` a
-    previously submitted run_id. Subclassed once per backend-system service.
-  - One subclass per backend-system code location, each adding
+    previously submitted run_id. Subclassed once per customer360-backend service.
+  - One subclass per customer360-backend code location, each adding
     domain-specific convenience methods on top of ``submit()``:
     ``AnalyticsDagsterService``, ``IdentityResolutionDagsterService``,
     ``ScoringDagsterService``, ``SegmentationDagsterService``,
@@ -34,11 +34,11 @@ Layout:
   - ``DagsterClient`` -- facade exposing one attribute per service
     (``dagster_client.segmentation``, ``dagster_client.analytics``, ...).
     The module-level ``dagster_client`` singleton is the intended entry
-    point for the rest of the codebase (mirrors the ``core.config.settings``
+    point for the rest of the codebase (mirrors the ``leo_customer360_dao.config.settings``
     singleton pattern).
 
-``scoring``/``data_synch``/``email_engine``/``notification_engine`` currently
-wrap placeholder Dagster jobs. ``analytics`` now wraps the hourly data-source
+``ai_agents_runners``/``data_synch``/``email_engine``/``notification_engine``
+currently wrap their Dagster jobs. ``analytics`` now wraps the hourly data-source
 tracking-log aggregation job; all service classes and job/location settings
 remain centralized here.
 """
@@ -49,7 +49,7 @@ from typing import Any, Callable, Optional
 
 from dagster_graphql import DagsterGraphQLClient, DagsterGraphQLClientError
 
-from core.config import settings
+from leo_customer360_dao.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -239,7 +239,7 @@ class DagsterService:
 
 
 class AnalyticsDagsterService(DagsterService):
-    """backend-system/analytics -- data-source tracking-log aggregation."""
+    """customer360-backend/analytics -- data-source tracking-log aggregation."""
 
     def __init__(self) -> None:
         super().__init__(
@@ -258,7 +258,7 @@ class AnalyticsDagsterService(DagsterService):
 
 
 class IdentityResolutionDagsterService(DagsterService):
-    """backend-system/identity_resolution -- Customer Identity Resolution
+    """customer360-backend/identity_resolution -- Customer Identity Resolution
     (CIR) batch cycle."""
 
     def __init__(self) -> None:
@@ -278,6 +278,7 @@ class IdentityResolutionDagsterService(DagsterService):
         trigger_reason: str,
         tenant_id: Optional[str] = None,
         persona_archetype_id: Optional[str] = None,
+        master_profile_id: Optional[str] = None,
     ) -> str:
         """Triggers ``identity_resolution_job`` after a
         ``cdp_persona_archetypes`` row is created/edited. When
@@ -293,47 +294,76 @@ class IdentityResolutionDagsterService(DagsterService):
         run_config = None
         if tenant_id:
             tags["tenant_id"] = str(tenant_id)
-        if persona_archetype_id:
+        if persona_archetype_id or master_profile_id:
             if not tenant_id:
-                raise ValueError("tenant_id is required when persona_archetype_id is provided")
-            tags["persona_archetype_id"] = str(persona_archetype_id)
+                raise ValueError("tenant_id is required for a targeted persona refresh")
+            if persona_archetype_id and master_profile_id:
+                raise ValueError("persona_archetype_id and master_profile_id are mutually exclusive")
+            config = {"tenant_id": str(tenant_id)}
+            if persona_archetype_id:
+                tags["persona_archetype_id"] = str(persona_archetype_id)
+                config["persona_archetype_id"] = str(persona_archetype_id)
+            else:
+                tags["master_profile_id"] = str(master_profile_id)
+                config["master_profile_id"] = str(master_profile_id)
             run_config = {
                 "ops": {
                     "resolve_identities_op": {
-                        "config": {
-                            "tenant_id": str(tenant_id),
-                            "persona_archetype_id": str(persona_archetype_id),
-                        }
+                        "config": config
                     }
                 }
             }
         return self.submit(run_config=run_config, tags=tags)
 
 
-class ScoringDagsterService(DagsterService):
-    """backend-system/scoring -- profile scoring run (placeholder job today,
-    see backend-system/scoring/dagster_defs.py)."""
+class AgentWorkflowDagsterService(DagsterService):
+    """customer360-backend/ai_agents_runners -- master workflow run."""
 
     def __init__(self) -> None:
         super().__init__(
-            job_name=settings.dagster_scoring_job_name,
-            location_name=settings.dagster_scoring_location_name,
-            repository_name=settings.dagster_scoring_repository_name,
+            job_name=settings.dagster_ai_agents_runners_job_name,
+            location_name=settings.dagster_ai_agents_runners_location_name,
+            repository_name=settings.dagster_ai_agents_runners_repository_name,
         )
 
-    def run_scoring(self) -> str:
-        """Triggers a scoring run across profiles (Lead/Churn/CLV/CX/Data
-        Quality models)."""
-        return self.submit()
+    def run_workflow(
+        self,
+        tenant_id: str,
+        segment_id: str,
+        trigger_event: Optional[dict[str, Any]] = None,
+    ) -> str:
+        """Triggers one tenant/segment master workflow run from the API."""
+        if not tenant_id or not segment_id:
+            raise ValueError("tenant_id and segment_id are required")
+        run_config = {
+            "ops": {
+                "run_agent_workflow_master_op": {
+                    "config": {
+                        "trigger": "api",
+                        "tenant_id": str(tenant_id),
+                        "segment_id": str(segment_id),
+                        "trigger_event": trigger_event or {},
+                    }
+                }
+            }
+        }
+        return self.submit(
+            run_config=run_config,
+            tags={"trigger": "api", "tenant_id": str(tenant_id), "segment_id": str(segment_id)},
+        )
+
+
+# Compatibility alias for integrations that imported the former service name.
+ScoringDagsterService = AgentWorkflowDagsterService
 
 
 class SegmentationDagsterService(DagsterService):
-    """backend-system/segmentation -- segment membership recompute.
+    """customer360-backend/segmentation -- segment membership recompute.
 
     ``refresh``/``create``/``update`` all submit the SAME underlying
     ``segmentation_job`` -- there is no separate Dagster op per action,
     since a segment row's create/update itself is a synchronous DB write
-    (see ``core/crud/segmentation.py``); what these need Dagster for is the
+    (see ``leo_customer360_dao/crud/segmentation.py``); what these need Dagster for is the
     potentially-expensive membership recompute that should follow. What
     differs per method is the ``trigger_reason`` tag attached to the run
     (useful for filtering run history in the Dagster UI) and the docstring
@@ -343,7 +373,7 @@ class SegmentationDagsterService(DagsterService):
     ``refresh`` can optionally pass ``segment_id``; ``create`` and ``update``
     always pass it so only the changed segment is recomputed. All values are sent via
     ``RecomputeSegmentsConfig`` (see
-    ``backend-system/segmentation/dagster_defs.py``) -- this can never
+    ``customer360-backend/segmentation/dagster_defs.py``) -- this can never
     accidentally trigger a cross-tenant/global recompute from an on-demand
     API call. ``tenant_id`` must be the caller's own tenant
     (``request.state.tenant_id``), enforced by the router, not this class.
@@ -397,8 +427,7 @@ class SegmentationDagsterService(DagsterService):
 
 
 class DataSynchDagsterService(DagsterService):
-    """backend-system/data_synch -- external data synchronization
-    (placeholder job today, see backend-system/data_synch/dagster_defs.py)."""
+    """Submit tenant-scoped campaign audience exports."""
 
     def __init__(self) -> None:
         super().__init__(
@@ -407,15 +436,111 @@ class DataSynchDagsterService(DagsterService):
             repository_name=settings.dagster_data_synch_repository_name,
         )
 
-    def run_sync(self) -> str:
-        """Triggers a data synchronization run."""
-        return self.submit()
+    def run_sync(
+        self,
+        *,
+        tenant_id: str,
+        campaign_id: str,
+        platform: str,
+        segment_id: str | None = None,
+        audience_name: str | None = None,
+        dry_run: bool = False,
+        batch_size: int = 1000,
+    ) -> str:
+        """Submit one idempotent campaign audience synchronization run."""
+        if not tenant_id or not campaign_id or not platform:
+            raise ValueError("tenant_id, campaign_id, and platform are required")
+        if not 1 <= batch_size <= 100_000:
+            raise ValueError("batch_size must be between 1 and 100000")
+        return self.submit(
+            run_config={
+                "ops": {
+                    "run_data_synch_op": {
+                        "config": {
+                            "tenant_id": str(tenant_id),
+                            "campaign_id": str(campaign_id),
+                            "platform": platform,
+                            "segment_id": segment_id,
+                            "audience_name": audience_name,
+                            "dry_run": dry_run,
+                            "batch_size": batch_size,
+                        }
+                    }
+                }
+            },
+            tags={
+                "tenant_id": str(tenant_id),
+                "campaign_id": str(campaign_id),
+                "platform": platform,
+                "sync_type": "campaign_audience",
+            },
+        )
+
+
+class ProductContentImportDagsterService(DagsterService):
+    """Submits asynchronous tenant-scoped product catalog imports."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            job_name=settings.dagster_product_content_import_job_name,
+            location_name=settings.dagster_data_synch_location_name,
+            repository_name=settings.dagster_data_synch_repository_name,
+        )
+
+    def import_products(self, *, tenant_id: str, bucket: str, object_key: str) -> str:
+        """Submit a staged S3 product import and return its Dagster run ID."""
+        if not tenant_id or not bucket or not object_key:
+            raise ValueError("tenant_id, bucket, and object_key are required")
+        return self.submit(
+            run_config={
+                "ops": {
+                    "import_product_content_op": {
+                        "config": {
+                            "tenant_id": str(tenant_id),
+                            "bucket": bucket,
+                            "object_key": object_key,
+                        }
+                    }
+                }
+            },
+            tags={"tenant_id": str(tenant_id), "import_type": "product_tsv"},
+        )
+
+
+class ContentItemImportDagsterService(DagsterService):
+    """Submits asynchronous tenant-scoped content TSV imports."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            job_name=settings.dagster_content_item_import_job_name,
+            location_name=settings.dagster_data_synch_location_name,
+            repository_name=settings.dagster_data_synch_repository_name,
+        )
+
+    def import_content(self, *, tenant_id: str, bucket: str, object_key: str) -> str:
+        """Submit a staged S3 content import and return its Dagster run ID."""
+        if not tenant_id or not bucket or not object_key:
+            raise ValueError("tenant_id, bucket, and object_key are required")
+        return self.submit(
+            run_config={
+                "ops": {
+                    "import_content_items_op": {
+                        "config": {
+                            "tenant_id": str(tenant_id),
+                            "bucket": bucket,
+                            "object_key": object_key,
+                        }
+                    }
+                }
+            },
+            tags={"tenant_id": str(tenant_id), "import_type": "content_tsv"},
+        )
 
 
 class EmailEngineDagsterService(DagsterService):
-    """backend-system/email_engine -- outbound email campaign/journey
+    """customer360-backend/email_engine -- outbound email campaign/journey
     execution (placeholder job today, see
-    backend-system/email_engine/dagster_defs.py)."""
+    customer360-backend/email_engine/dagster_defs.py)."""
 
     def __init__(self) -> None:
         super().__init__(
@@ -430,10 +555,7 @@ class EmailEngineDagsterService(DagsterService):
 
 
 class CampaignActivationDagsterService(DagsterService):
-    """backend-system/campaign_activation -- real campaign orchestration
-   : validates an Approved campaign, snapshots its segment, marks
-    it Running, then submits the email_engine run that dispatches it (see
-    backend-system/campaign_activation/dagster_defs.py)."""
+    """Submit campaign activation and workflow execution to Dagster."""
 
     def __init__(self) -> None:
         super().__init__(
@@ -442,18 +564,28 @@ class CampaignActivationDagsterService(DagsterService):
             repository_name=settings.dagster_campaign_activation_repository_name,
         )
 
-    def activate(self, campaign_id: str, tenant_id: str) -> str:
-        """Triggers a campaign_activation run for one Approved campaign."""
+    def activate(
+        self, campaign_id: str, tenant_id: str, *, restart: bool = False,
+        expected_execution_id: str | None = None,
+    ) -> str:
+        """Triggers a campaign activation, optionally replaying a completed campaign."""
         run_config = {
-            "ops": {"activate_campaign_op": {"config": {"campaign_id": campaign_id, "tenant_id": tenant_id}}}
+            "ops": {"activate_campaign_op": {"config": {
+                "campaign_id": campaign_id,
+                "tenant_id": tenant_id,
+                "restart": restart,
+                "expected_execution_id": expected_execution_id,
+            }}}
         }
-        return self.submit(run_config=run_config, tags={"campaign_id": campaign_id, "tenant_id": tenant_id})
+        return self.submit(
+            run_config=run_config,
+            tags={"campaign_id": campaign_id, "tenant_id": tenant_id, "restart": str(restart).lower()},
+        )
 
 
 class NotificationEngineDagsterService(DagsterService):
-    """backend-system/notification_engine -- outbound push/SMS/in-app
-    notification dispatch (placeholder job today, see
-    backend-system/notification_engine/dagster_defs.py)."""
+    """customer360-backend/notification_engine -- outbound Zalo ZNS dispatch
+    (send_zalo_campaign_op), see customer360-backend/notification_engine/dagster_defs.py."""
 
     def __init__(self) -> None:
         super().__init__(
@@ -462,13 +594,18 @@ class NotificationEngineDagsterService(DagsterService):
             repository_name=settings.dagster_notification_engine_repository_name,
         )
 
-    def dispatch(self) -> str:
-        """Triggers a notification dispatch run."""
-        return self.submit()
+    def dispatch(self, campaign_id: str, tenant_id: str) -> str:
+        """Triggers a notification_engine (Zalo ZNS) dispatch run for one campaign.
+        API-side trigger contract (mirrors EmailEngineDagsterService.send_campaign);
+        the live activation path also submits this job from campaign_activation."""
+        run_config = {
+            "ops": {"send_zalo_campaign_op": {"config": {"campaign_id": campaign_id, "tenant_id": tenant_id}}}
+        }
+        return self.submit(run_config=run_config, tags={"campaign_id": campaign_id, "tenant_id": tenant_id})
 
 
 class DagsterClient:
-    """Facade grouping one ``DagsterService`` per backend-system code
+    """Facade grouping one ``DagsterService`` per customer360-backend code
     location. Use the module-level ``dagster_client`` singleton below
     rather than instantiating this directly.
 
@@ -483,9 +620,12 @@ class DagsterClient:
     def __init__(self) -> None:
         self.analytics = AnalyticsDagsterService()
         self.identity_resolution = IdentityResolutionDagsterService()
-        self.scoring = ScoringDagsterService()
+        self.ai_agents_runners = AgentWorkflowDagsterService()
+        self.scoring = self.ai_agents_runners
         self.segmentation = SegmentationDagsterService()
         self.data_synch = DataSynchDagsterService()
+        self.product_content_import = ProductContentImportDagsterService()
+        self.content_item_import = ContentItemImportDagsterService()
         self.email_engine = EmailEngineDagsterService()
         self.campaign_activation = CampaignActivationDagsterService()
         self.notification_engine = NotificationEngineDagsterService()

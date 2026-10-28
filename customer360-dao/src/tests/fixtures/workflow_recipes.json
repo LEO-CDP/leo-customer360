@@ -1,0 +1,2185 @@
+{
+  "welcome": {
+    "industry": "Retail & E-Commerce",
+    "name": "Welcome series",
+    "intent": "Welcome new sign-ups and follow up only when they have not engaged.",
+    "workflow": {
+      "schema_version": 2,
+      "root": {
+        "id": "n1",
+        "type": "trigger",
+        "config": {
+          "segment_id": null,
+          "event": "signup"
+        },
+        "children": [
+          {
+            "id": "n2",
+            "type": "email",
+            "config": {
+              "subject": "Welcome, {{first_name}}",
+              "body": "Here is how to get started."
+            },
+            "children": [
+              {
+                "id": "n3",
+                "type": "wait_event",
+                "config": {
+                  "event": "email_opened",
+                  "amount": 2,
+                  "unit": "days"
+                },
+                "children": [
+                  {
+                    "id": "n4",
+                    "type": "update_profile",
+                    "config": {
+                      "action": "add_tag",
+                      "tag": "welcome_engaged"
+                    },
+                    "children": [
+                      {
+                        "id": "n5",
+                        "type": "exit",
+                        "config": {
+                          "kind": "goal"
+                        },
+                        "children": []
+                      }
+                    ],
+                    "branch": "happened"
+                  },
+                  {
+                    "id": "n6",
+                    "type": "notification",
+                    "config": {
+                      "body": "{{first_name}}, your welcome gift is waiting."
+                    },
+                    "children": [
+                      {
+                        "id": "n7",
+                        "type": "exit",
+                        "config": {
+                          "kind": "exit"
+                        },
+                        "children": []
+                      }
+                    ],
+                    "branch": "timeout"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "engagement_score_follow_up": {
+    "industry": "Retail & E-Commerce",
+    "name": "Engagement score follow-up",
+    "intent": "Use engagement score to personalize follow-up and stop after a purchase.",
+    "workflow": {
+      "schema_version": 2,
+      "root": {
+        "id": "n1",
+        "type": "trigger",
+        "config": {
+          "segment_id": null,
+          "event": "inactive_30d"
+        },
+        "children": [
+          {
+            "id": "n2",
+            "type": "wait",
+            "config": {
+              "amount": 1,
+              "unit": "hours"
+            },
+            "children": [
+              {
+                "id": "n3",
+                "type": "condition",
+                "config": {
+                  "field": "engagement_score",
+                  "op": "ge",
+                  "value": "60"
+                },
+                "children": [
+                  {
+                    "id": "n4",
+                    "type": "email",
+                    "config": {
+                      "subject": "{{first_name}}, your personalized update",
+                      "body": "Your personalized recommendations are ready. Come back when you are ready."
+                    },
+                    "children": [
+                      {
+                        "id": "n5",
+                        "type": "wait_event",
+                        "config": {
+                          "event": "purchase",
+                          "amount": 2,
+                          "unit": "days"
+                        },
+                        "children": [
+                          {
+                            "id": "n6",
+                            "type": "exit",
+                            "config": {
+                              "kind": "goal"
+                            },
+                            "children": [],
+                            "branch": "happened"
+                          },
+                          {
+                            "id": "n7",
+                            "type": "push",
+                            "config": {
+                              "title": "Still thinking it over?",
+                              "body": "{{first_name}}, your personalized recommendations are one tap away."
+                            },
+                            "children": [
+                              {
+                                "id": "n8",
+                                "type": "exit",
+                                "config": {
+                                  "kind": "exit"
+                                },
+                                "children": []
+                              }
+                            ],
+                            "branch": "timeout"
+                          }
+                        ]
+                      }
+                    ],
+                    "branch": "yes"
+                  },
+                  {
+                    "id": "n9",
+                    "type": "push",
+                    "config": {
+                      "title": "Your recommendations are ready",
+                      "body": "{{first_name}}, come back for your personalized recommendations."
+                    },
+                    "children": [
+                      {
+                        "id": "n10",
+                        "type": "wait_event",
+                        "config": {
+                          "event": "purchase",
+                          "amount": 2,
+                          "unit": "days"
+                        },
+                        "children": [
+                          {
+                            "id": "n11",
+                            "type": "exit",
+                            "config": {
+                              "kind": "goal"
+                            },
+                            "children": [],
+                            "branch": "happened"
+                          },
+                          {
+                            "id": "n12",
+                            "type": "exit",
+                            "config": {
+                              "kind": "exit"
+                            },
+                            "children": [],
+                            "branch": "timeout"
+                          }
+                        ]
+                      }
+                    ],
+                    "branch": "no"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "winback": {
+    "industry": "Retail & E-Commerce",
+    "name": "Win-back",
+    "intent": "Re-engage inactive customers and stop follow-ups after a purchase.",
+    "workflow": {
+      "schema_version": 2,
+      "root": {
+        "id": "n1",
+        "type": "trigger",
+        "config": {
+          "segment_id": null,
+          "event": "inactive_30d"
+        },
+        "children": [
+          {
+            "id": "n2",
+            "type": "email",
+            "config": {
+              "subject": "We miss you, {{first_name}}",
+              "body": "Take a look at what is new since your last visit."
+            },
+            "children": [
+              {
+                "id": "n3",
+                "type": "wait_event",
+                "config": {
+                  "event": "purchase",
+                  "amount": 7,
+                  "unit": "days"
+                },
+                "children": [
+                  {
+                    "id": "n4",
+                    "type": "exit",
+                    "config": {
+                      "kind": "goal"
+                    },
+                    "children": [],
+                    "branch": "happened"
+                  },
+                  {
+                    "id": "n5",
+                    "type": "notification",
+                    "config": {
+                      "body": "{{first_name}}, we would love to welcome you back."
+                    },
+                    "children": [
+                      {
+                        "id": "n6",
+                        "type": "update_profile",
+                        "config": {
+                          "action": "add_tag",
+                          "tag": "winback_unresponsive"
+                        },
+                        "children": [
+                          {
+                            "id": "n7",
+                            "type": "exit",
+                            "config": {
+                              "kind": "exit"
+                            },
+                            "children": []
+                          }
+                        ]
+                      }
+                    ],
+                    "branch": "timeout"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "post_purchase": {
+    "industry": "Retail & E-Commerce",
+    "name": "Post-purchase care",
+    "intent": "Thank customers after an order and tailor follow-up to their engagement.",
+    "workflow": {
+      "schema_version": 2,
+      "root": {
+        "id": "n1",
+        "type": "trigger",
+        "config": {
+          "segment_id": null,
+          "event": "purchase"
+        },
+        "children": [
+          {
+            "id": "n2",
+            "type": "wait",
+            "config": {
+              "amount": 3,
+              "unit": "days"
+            },
+            "children": [
+              {
+                "id": "n3",
+                "type": "email",
+                "config": {
+                  "subject": "How was your order, {{first_name}}?",
+                  "body": "We hope everything arrived safely. Tell us what you think."
+                },
+                "children": [
+                  {
+                    "id": "n4",
+                    "type": "wait",
+                    "config": {
+                      "amount": 4,
+                      "unit": "days"
+                    },
+                    "children": [
+                      {
+                        "id": "n5",
+                        "type": "condition",
+                        "config": {
+                          "field": "engagement_score",
+                          "op": "ge",
+                          "value": "60"
+                        },
+                        "children": [
+                          {
+                            "id": "n6",
+                            "type": "update_profile",
+                            "config": {
+                              "action": "add_tag",
+                              "tag": "advocate"
+                            },
+                            "children": [
+                              {
+                                "id": "n7",
+                                "type": "exit",
+                                "config": {
+                                  "kind": "goal"
+                                },
+                                "children": []
+                              }
+                            ],
+                            "branch": "yes"
+                          },
+                          {
+                            "id": "n8",
+                            "type": "push",
+                            "config": {
+                              "title": "Need help with your order?",
+                              "body": "We are here if anything is off, {{first_name}}."
+                            },
+                            "children": [
+                              {
+                                "id": "n9",
+                                "type": "exit",
+                                "config": {
+                                  "kind": "exit"
+                                },
+                                "children": []
+                              }
+                            ],
+                            "branch": "no"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "travel_preparation": {
+    "industry": "Travel & Hospitality",
+    "name": "Trip preparation",
+    "intent": "Send useful trip information and check whether travelers have seen it.",
+    "workflow": {
+      "schema_version": 2,
+      "root": {
+        "id": "n1",
+        "type": "trigger",
+        "config": {
+          "segment_id": null,
+          "event": "purchase"
+        },
+        "children": [
+          {
+            "id": "n2",
+            "type": "wait",
+            "config": {
+              "amount": 7,
+              "unit": "days"
+            },
+            "children": [
+              {
+                "id": "n3",
+                "type": "email",
+                "config": {
+                  "subject": "Your trip is coming up, {{first_name}}",
+                  "body": "Review your itinerary and travel details before departure."
+                },
+                "children": [
+                  {
+                    "id": "n4",
+                    "type": "wait_event",
+                    "config": {
+                      "event": "email_opened",
+                      "amount": 2,
+                      "unit": "days"
+                    },
+                    "children": [
+                      {
+                        "id": "n5",
+                        "type": "update_profile",
+                        "config": {
+                          "action": "add_tag",
+                          "tag": "travel_info_viewed"
+                        },
+                        "children": [
+                          {
+                            "id": "n6",
+                            "type": "exit",
+                            "config": {
+                              "kind": "goal"
+                            },
+                            "children": []
+                          }
+                        ],
+                        "branch": "happened"
+                      },
+                      {
+                        "id": "n7",
+                        "type": "notification",
+                        "config": {
+                          "body": "{{first_name}}, your trip details are ready to review."
+                        },
+                        "children": [
+                          {
+                            "id": "n8",
+                            "type": "exit",
+                            "config": {
+                              "kind": "exit"
+                            },
+                            "children": []
+                          }
+                        ],
+                        "branch": "timeout"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "course_enrollment": {
+    "industry": "Education",
+    "name": "Course enrollment",
+    "intent": "Welcome learners, then guide them toward their first course resource.",
+    "workflow": {
+      "schema_version": 2,
+      "root": {
+        "id": "n1",
+        "type": "trigger",
+        "config": {
+          "segment_id": null,
+          "event": "signup"
+        },
+        "children": [
+          {
+            "id": "n2",
+            "type": "email",
+            "config": {
+              "subject": "Your learning journey starts here, {{first_name}}",
+              "body": "Open your course guide and choose a good time for your first lesson."
+            },
+            "children": [
+              {
+                "id": "n3",
+                "type": "wait_event",
+                "config": {
+                  "event": "email_clicked",
+                  "amount": 3,
+                  "unit": "days"
+                },
+                "children": [
+                  {
+                    "id": "n4",
+                    "type": "update_profile",
+                    "config": {
+                      "action": "add_tag",
+                      "tag": "course_engaged"
+                    },
+                    "children": [
+                      {
+                        "id": "n5",
+                        "type": "exit",
+                        "config": {
+                          "kind": "goal"
+                        },
+                        "children": []
+                      }
+                    ],
+                    "branch": "happened"
+                  },
+                  {
+                    "id": "n6",
+                    "type": "notification",
+                    "config": {
+                      "body": "{{first_name}}, your course guide is ready when you are."
+                    },
+                    "children": [
+                      {
+                        "id": "n7",
+                        "type": "exit",
+                        "config": {
+                          "kind": "exit"
+                        },
+                        "children": []
+                      }
+                    ],
+                    "branch": "timeout"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "replenishment_reminder": {
+    "industry": "Retail & E-Commerce",
+    "name": "Replenishment reminder",
+    "intent": "Remind repeat-purchase customers when it may be time to restock.",
+    "workflow": {
+      "schema_version": 2,
+      "root": {
+        "id": "n1",
+        "type": "trigger",
+        "config": {
+          "segment_id": null,
+          "event": "purchase"
+        },
+        "children": [
+          {
+            "id": "n2",
+            "type": "wait",
+            "config": {
+              "amount": 30,
+              "unit": "days"
+            },
+            "children": [
+              {
+                "id": "n3",
+                "type": "email",
+                "config": {
+                  "subject": "Ready for a restock, {{first_name}}?",
+                  "body": "If you are running low, your usual items are ready to reorder."
+                },
+                "children": [
+                  {
+                    "id": "n4",
+                    "type": "wait_event",
+                    "config": {
+                      "event": "purchase",
+                      "amount": 7,
+                      "unit": "days"
+                    },
+                    "children": [
+                      {
+                        "id": "n5",
+                        "type": "exit",
+                        "config": {
+                          "kind": "goal"
+                        },
+                        "children": [],
+                        "branch": "happened"
+                      },
+                      {
+                        "id": "n6",
+                        "type": "push",
+                        "config": {
+                          "title": "Need a restock?",
+                          "body": "{{first_name}}, your favorites are easy to reorder."
+                        },
+                        "children": [
+                          {
+                            "id": "n7",
+                            "type": "exit",
+                            "config": {
+                              "kind": "exit"
+                            },
+                            "children": []
+                          }
+                        ],
+                        "branch": "timeout"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "retail_loyalty": {
+    "industry": "Retail & E-Commerce",
+    "name": "Loyalty member activation",
+    "intent": "Recognize loyalty members and invite other shoppers to join the program.",
+    "workflow": {
+      "schema_version": 2,
+      "root": {
+        "id": "n1",
+        "type": "trigger",
+        "config": {
+          "segment_id": null,
+          "event": "purchase"
+        },
+        "children": [
+          {
+            "id": "n2",
+            "type": "condition",
+            "config": {
+              "field": "segmentation_tags",
+              "op": "has",
+              "value": "loyalty_member"
+            },
+            "children": [
+              {
+                "id": "n3",
+                "type": "push",
+                "config": {
+                  "title": "A thank-you for being a member",
+                  "body": "{{first_name}}, take a look at your latest member rewards."
+                },
+                "children": [
+                  {
+                    "id": "n4",
+                    "type": "exit",
+                    "config": {
+                      "kind": "goal"
+                    },
+                    "children": []
+                  }
+                ],
+                "branch": "yes"
+              },
+              {
+                "id": "n5",
+                "type": "email",
+                "config": {
+                  "subject": "Get more from your next visit, {{first_name}}",
+                  "body": "Join our loyalty program to hear about member benefits."
+                },
+                "children": [
+                  {
+                    "id": "n6",
+                    "type": "update_profile",
+                    "config": {
+                      "action": "add_tag",
+                      "tag": "loyalty_invited"
+                    },
+                    "children": [
+                      {
+                        "id": "n7",
+                        "type": "exit",
+                        "config": {
+                          "kind": "exit"
+                        },
+                        "children": []
+                      }
+                    ]
+                  }
+                ],
+                "branch": "no"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "restaurant_feedback": {
+    "industry": "Hospitality & Food Service",
+    "name": "Dining follow-up",
+    "intent": "Thank guests after a visit and offer a second feedback route if needed.",
+    "workflow": {
+      "schema_version": 2,
+      "root": {
+        "id": "n1",
+        "type": "trigger",
+        "config": {
+          "segment_id": null,
+          "event": "purchase"
+        },
+        "children": [
+          {
+            "id": "n2",
+            "type": "wait",
+            "config": {
+              "amount": 1,
+              "unit": "days"
+            },
+            "children": [
+              {
+                "id": "n3",
+                "type": "email",
+                "config": {
+                  "subject": "Thanks for visiting, {{first_name}}",
+                  "body": "We hope you enjoyed your meal. We would value your feedback."
+                },
+                "children": [
+                  {
+                    "id": "n4",
+                    "type": "wait_event",
+                    "config": {
+                      "event": "email_clicked",
+                      "amount": 3,
+                      "unit": "days"
+                    },
+                    "children": [
+                      {
+                        "id": "n5",
+                        "type": "update_profile",
+                        "config": {
+                          "action": "add_tag",
+                          "tag": "restaurant_feedback"
+                        },
+                        "children": [
+                          {
+                            "id": "n6",
+                            "type": "exit",
+                            "config": {
+                              "kind": "goal"
+                            },
+                            "children": []
+                          }
+                        ],
+                        "branch": "happened"
+                      },
+                      {
+                        "id": "n7",
+                        "type": "notification",
+                        "config": {
+                          "body": "{{first_name}}, how was your recent dining experience?"
+                        },
+                        "children": [
+                          {
+                            "id": "n8",
+                            "type": "exit",
+                            "config": {
+                              "kind": "exit"
+                            },
+                            "children": []
+                          }
+                        ],
+                        "branch": "timeout"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "hospitality_prearrival": {
+    "industry": "Travel & Hospitality",
+    "name": "Pre-arrival guest journey",
+    "intent": "Share arrival information before a stay and check whether guests have seen it.",
+    "workflow": {
+      "schema_version": 2,
+      "root": {
+        "id": "n1",
+        "type": "trigger",
+        "config": {
+          "segment_id": null,
+          "event": "purchase"
+        },
+        "children": [
+          {
+            "id": "n2",
+            "type": "wait",
+            "config": {
+              "amount": 7,
+              "unit": "days"
+            },
+            "children": [
+              {
+                "id": "n3",
+                "type": "email",
+                "config": {
+                  "subject": "We look forward to welcoming you, {{first_name}}",
+                  "body": "Your stay is coming up. Review arrival details and let us know if you need help."
+                },
+                "children": [
+                  {
+                    "id": "n4",
+                    "type": "wait_event",
+                    "config": {
+                      "event": "email_opened",
+                      "amount": 2,
+                      "unit": "days"
+                    },
+                    "children": [
+                      {
+                        "id": "n5",
+                        "type": "update_profile",
+                        "config": {
+                          "action": "add_tag",
+                          "tag": "stay_prepared"
+                        },
+                        "children": [
+                          {
+                            "id": "n6",
+                            "type": "exit",
+                            "config": {
+                              "kind": "goal"
+                            },
+                            "children": []
+                          }
+                        ],
+                        "branch": "happened"
+                      },
+                      {
+                        "id": "n7",
+                        "type": "notification",
+                        "config": {
+                          "body": "{{first_name}}, reply if you need help getting ready for your stay."
+                        },
+                        "children": [
+                          {
+                            "id": "n8",
+                            "type": "exit",
+                            "config": {
+                              "kind": "exit"
+                            },
+                            "children": []
+                          }
+                        ],
+                        "branch": "timeout"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "account_opening": {
+    "industry": "Banking & Financial Services",
+    "name": "Account opening follow-up",
+    "intent": "Help new applicants finish opening an account, then tag those who start setup.",
+    "workflow": {
+      "schema_version": 2,
+      "root": {
+        "id": "n1",
+        "type": "trigger",
+        "config": {
+          "segment_id": null,
+          "event": "signup"
+        },
+        "children": [
+          {
+            "id": "n2",
+            "type": "email",
+            "config": {
+              "subject": "Finish opening your account, {{first_name}}",
+              "body": "Your application is almost complete. Pick up where you left off."
+            },
+            "children": [
+              {
+                "id": "n3",
+                "type": "wait_event",
+                "config": {
+                  "event": "email_clicked",
+                  "amount": 3,
+                  "unit": "days"
+                },
+                "children": [
+                  {
+                    "id": "n4",
+                    "type": "update_profile",
+                    "config": {
+                      "action": "add_tag",
+                      "tag": "account_setup_started"
+                    },
+                    "children": [
+                      {
+                        "id": "n5",
+                        "type": "exit",
+                        "config": {
+                          "kind": "goal"
+                        },
+                        "children": []
+                      }
+                    ],
+                    "branch": "happened"
+                  },
+                  {
+                    "id": "n6",
+                    "type": "notification",
+                    "config": {
+                      "body": "{{first_name}}, your account is waiting. Finish in a few minutes."
+                    },
+                    "children": [
+                      {
+                        "id": "n7",
+                        "type": "exit",
+                        "config": {
+                          "kind": "exit"
+                        },
+                        "children": []
+                      }
+                    ],
+                    "branch": "timeout"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "card_activation": {
+    "industry": "Banking & Financial Services",
+    "name": "Card activation reminder",
+    "intent": "Remind new cardholders to activate their card, with a stronger nudge for engaged customers.",
+    "workflow": {
+      "schema_version": 2,
+      "root": {
+        "id": "n1",
+        "type": "trigger",
+        "config": {
+          "segment_id": null,
+          "event": "purchase"
+        },
+        "children": [
+          {
+            "id": "n2",
+            "type": "wait",
+            "config": {
+              "amount": 2,
+              "unit": "days"
+            },
+            "children": [
+              {
+                "id": "n3",
+                "type": "condition",
+                "config": {
+                  "field": "engagement_score",
+                  "op": "ge",
+                  "value": "60"
+                },
+                "children": [
+                  {
+                    "id": "n4",
+                    "type": "push",
+                    "config": {
+                      "title": "Activate your card",
+                      "body": "{{first_name}}, one tap to start using your new card."
+                    },
+                    "children": [
+                      {
+                        "id": "n5",
+                        "type": "wait_event",
+                        "config": {
+                          "event": "purchase",
+                          "amount": 7,
+                          "unit": "days"
+                        },
+                        "children": [
+                          {
+                            "id": "n6",
+                            "type": "exit",
+                            "config": {
+                              "kind": "goal"
+                            },
+                            "children": [],
+                            "branch": "happened"
+                          },
+                          {
+                            "id": "n7",
+                            "type": "exit",
+                            "config": {
+                              "kind": "exit"
+                            },
+                            "children": [],
+                            "branch": "timeout"
+                          }
+                        ]
+                      }
+                    ],
+                    "branch": "yes"
+                  },
+                  {
+                    "id": "n8",
+                    "type": "email",
+                    "config": {
+                      "subject": "Activate your card to start earning rewards",
+                      "body": "Activate your card in the app to start using it today."
+                    },
+                    "children": [
+                      {
+                        "id": "n9",
+                        "type": "exit",
+                        "config": {
+                          "kind": "exit"
+                        },
+                        "children": []
+                      }
+                    ],
+                    "branch": "no"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "course_reengagement": {
+    "industry": "Education",
+    "name": "Course re-engagement",
+    "intent": "Bring back learners who stopped partway through a course.",
+    "workflow": {
+      "schema_version": 2,
+      "root": {
+        "id": "n1",
+        "type": "trigger",
+        "config": {
+          "segment_id": null,
+          "event": "inactive_30d"
+        },
+        "children": [
+          {
+            "id": "n2",
+            "type": "email",
+            "config": {
+              "subject": "Your course is waiting, {{first_name}}",
+              "body": "Pick up your next lesson where you stopped."
+            },
+            "children": [
+              {
+                "id": "n3",
+                "type": "wait_event",
+                "config": {
+                  "event": "email_opened",
+                  "amount": 3,
+                  "unit": "days"
+                },
+                "children": [
+                  {
+                    "id": "n4",
+                    "type": "update_profile",
+                    "config": {
+                      "action": "add_tag",
+                      "tag": "course_reengaged"
+                    },
+                    "children": [
+                      {
+                        "id": "n5",
+                        "type": "exit",
+                        "config": {
+                          "kind": "goal"
+                        },
+                        "children": []
+                      }
+                    ],
+                    "branch": "happened"
+                  },
+                  {
+                    "id": "n6",
+                    "type": "push",
+                    "config": {
+                      "title": "Your next lesson is ready",
+                      "body": "{{first_name}}, a short lesson is ready when you are."
+                    },
+                    "children": [
+                      {
+                        "id": "n7",
+                        "type": "exit",
+                        "config": {
+                          "kind": "exit"
+                        },
+                        "children": []
+                      }
+                    ],
+                    "branch": "timeout"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "appointment_reminder": {
+    "industry": "Healthcare",
+    "name": "Check-up reminder",
+    "intent": "Remind patients when a routine check-up is due and make booking easy.",
+    "workflow": {
+      "schema_version": 2,
+      "root": {
+        "id": "n1",
+        "type": "trigger",
+        "config": {
+          "segment_id": null,
+          "event": "purchase"
+        },
+        "children": [
+          {
+            "id": "n2",
+            "type": "wait",
+            "config": {
+              "amount": 7,
+              "unit": "days"
+            },
+            "children": [
+              {
+                "id": "n3",
+                "type": "email",
+                "config": {
+                  "subject": "Your routine check-up is due, {{first_name}}",
+                  "body": "Choose a time that suits you. Use the app or reply to schedule."
+                },
+                "children": [
+                  {
+                    "id": "n4",
+                    "type": "wait_event",
+                    "config": {
+                      "event": "email_clicked",
+                      "amount": 3,
+                      "unit": "days"
+                    },
+                    "children": [
+                      {
+                        "id": "n5",
+                        "type": "update_profile",
+                        "config": {
+                          "action": "add_tag",
+                          "tag": "checkup_scheduling"
+                        },
+                        "children": [
+                          {
+                            "id": "n6",
+                            "type": "exit",
+                            "config": {
+                              "kind": "goal"
+                            },
+                            "children": []
+                          }
+                        ],
+                        "branch": "happened"
+                      },
+                      {
+                        "id": "n7",
+                        "type": "notification",
+                        "config": {
+                          "body": "{{first_name}}, book your check-up in two taps."
+                        },
+                        "children": [
+                          {
+                            "id": "n8",
+                            "type": "exit",
+                            "config": {
+                              "kind": "exit"
+                            },
+                            "children": []
+                          }
+                        ],
+                        "branch": "timeout"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "post_visit_care": {
+    "industry": "Healthcare",
+    "name": "Post-visit follow-up",
+    "intent": "Check in after a visit and route patients who need more support to a care contact.",
+    "workflow": {
+      "schema_version": 2,
+      "root": {
+        "id": "n1",
+        "type": "trigger",
+        "config": {
+          "segment_id": null,
+          "event": "purchase"
+        },
+        "children": [
+          {
+            "id": "n2",
+            "type": "wait",
+            "config": {
+              "amount": 1,
+              "unit": "days"
+            },
+            "children": [
+              {
+                "id": "n3",
+                "type": "email",
+                "config": {
+                  "subject": "How are you feeling, {{first_name}}?",
+                  "body": "If anything is unclear after your visit, we are here to help."
+                },
+                "children": [
+                  {
+                    "id": "n4",
+                    "type": "condition",
+                    "config": {
+                      "field": "engagement_score",
+                      "op": "ge",
+                      "value": "60"
+                    },
+                    "children": [
+                      {
+                        "id": "n5",
+                        "type": "update_profile",
+                        "config": {
+                          "action": "add_tag",
+                          "tag": "care_plan_engaged"
+                        },
+                        "children": [
+                          {
+                            "id": "n6",
+                            "type": "exit",
+                            "config": {
+                              "kind": "goal"
+                            },
+                            "children": []
+                          }
+                        ],
+                        "branch": "yes"
+                      },
+                      {
+                        "id": "n7",
+                        "type": "notification",
+                        "config": {
+                          "body": "{{first_name}}, reply if you would like a call from our care team."
+                        },
+                        "children": [
+                          {
+                            "id": "n8",
+                            "type": "exit",
+                            "config": {
+                              "kind": "exit"
+                            },
+                            "children": []
+                          }
+                        ],
+                        "branch": "no"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "table_reservation": {
+    "industry": "Hospitality & Food Service",
+    "name": "Table reservation reminder",
+    "intent": "Confirm an upcoming booking, then check whether the guest returns.",
+    "workflow": {
+      "schema_version": 2,
+      "root": {
+        "id": "n1",
+        "type": "trigger",
+        "config": {
+          "segment_id": null,
+          "event": "purchase"
+        },
+        "children": [
+          {
+            "id": "n2",
+            "type": "wait",
+            "config": {
+              "amount": 1,
+              "unit": "days"
+            },
+            "children": [
+              {
+                "id": "n3",
+                "type": "notification",
+                "config": {
+                  "body": "{{first_name}}, your table is booked for tomorrow. Reply to change it."
+                },
+                "children": [
+                  {
+                    "id": "n4",
+                    "type": "wait_event",
+                    "config": {
+                      "event": "purchase",
+                      "amount": 2,
+                      "unit": "days"
+                    },
+                    "children": [
+                      {
+                        "id": "n5",
+                        "type": "exit",
+                        "config": {
+                          "kind": "goal"
+                        },
+                        "children": [],
+                        "branch": "happened"
+                      },
+                      {
+                        "id": "n6",
+                        "type": "exit",
+                        "config": {
+                          "kind": "exit"
+                        },
+                        "children": [],
+                        "branch": "timeout"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "policy_renewal": {
+    "industry": "Insurance",
+    "name": "Policy renewal reminder",
+    "intent": "Remind policyholders before renewal, then follow up by SMS if they have not renewed.",
+    "workflow": {
+      "schema_version": 2,
+      "root": {
+        "id": "n1",
+        "type": "trigger",
+        "config": {
+          "segment_id": null,
+          "event": "purchase"
+        },
+        "children": [
+          {
+            "id": "n2",
+            "type": "wait",
+            "config": {
+              "amount": 30,
+              "unit": "days"
+            },
+            "children": [
+              {
+                "id": "n3",
+                "type": "email",
+                "config": {
+                  "subject": "Your policy renews soon, {{first_name}}",
+                  "body": "Review your cover and renew in a few minutes."
+                },
+                "children": [
+                  {
+                    "id": "n4",
+                    "type": "wait_event",
+                    "config": {
+                      "event": "email_clicked",
+                      "amount": 14,
+                      "unit": "days"
+                    },
+                    "children": [
+                      {
+                        "id": "n5",
+                        "type": "exit",
+                        "config": {
+                          "kind": "goal"
+                        },
+                        "children": [],
+                        "branch": "happened"
+                      },
+                      {
+                        "id": "n6",
+                        "type": "notification",
+                        "config": {
+                          "body": "{{first_name}}, renew your policy to keep your cover active."
+                        },
+                        "children": [
+                          {
+                            "id": "n7",
+                            "type": "exit",
+                            "config": {
+                              "kind": "exit"
+                            },
+                            "children": []
+                          }
+                        ],
+                        "branch": "timeout"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "quote_followup": {
+    "industry": "Insurance",
+    "name": "Quote follow-up",
+    "intent": "Finish unfinished quotes. Higher-scoring prospects get an email, others get a push reminder.",
+    "workflow": {
+      "schema_version": 2,
+      "root": {
+        "id": "n1",
+        "type": "trigger",
+        "config": {
+          "segment_id": null,
+          "event": "cart_abandoned"
+        },
+        "children": [
+          {
+            "id": "n2",
+            "type": "wait",
+            "config": {
+              "amount": 1,
+              "unit": "hours"
+            },
+            "children": [
+              {
+                "id": "n3",
+                "type": "condition",
+                "config": {
+                  "field": "engagement_score",
+                  "op": "ge",
+                  "value": "50"
+                },
+                "children": [
+                  {
+                    "id": "n4",
+                    "type": "email",
+                    "config": {
+                      "subject": "{{first_name}}, finish your quote",
+                      "body": "Your quote is saved. Complete it in a few minutes."
+                    },
+                    "children": [
+                      {
+                        "id": "n5",
+                        "type": "wait_event",
+                        "config": {
+                          "event": "purchase",
+                          "amount": 3,
+                          "unit": "days"
+                        },
+                        "children": [
+                          {
+                            "id": "n6",
+                            "type": "exit",
+                            "config": {
+                              "kind": "goal"
+                            },
+                            "children": [],
+                            "branch": "happened"
+                          },
+                          {
+                            "id": "n7",
+                            "type": "exit",
+                            "config": {
+                              "kind": "exit"
+                            },
+                            "children": [],
+                            "branch": "timeout"
+                          }
+                        ]
+                      }
+                    ],
+                    "branch": "yes"
+                  },
+                  {
+                    "id": "n8",
+                    "type": "push",
+                    "config": {
+                      "title": "Your quote is saved",
+                      "body": "{{first_name}}, pick up where you left off."
+                    },
+                    "children": [
+                      {
+                        "id": "n9",
+                        "type": "exit",
+                        "config": {
+                          "kind": "exit"
+                        },
+                        "children": []
+                      }
+                    ],
+                    "branch": "no"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "b2b_reorder": {
+    "industry": "Manufacturing",
+    "name": "Supply reorder reminder",
+    "intent": "Remind trade customers when a reorder is due, then escalate by push if they have not ordered.",
+    "workflow": {
+      "schema_version": 2,
+      "root": {
+        "id": "n1",
+        "type": "trigger",
+        "config": {
+          "segment_id": null,
+          "event": "purchase"
+        },
+        "children": [
+          {
+            "id": "n2",
+            "type": "wait",
+            "config": {
+              "amount": 60,
+              "unit": "days"
+            },
+            "children": [
+              {
+                "id": "n3",
+                "type": "email",
+                "config": {
+                  "subject": "Time to reorder supplies, {{first_name}}",
+                  "body": "Your usual order is ready to confirm. Reorder in one step."
+                },
+                "children": [
+                  {
+                    "id": "n4",
+                    "type": "wait_event",
+                    "config": {
+                      "event": "purchase",
+                      "amount": 7,
+                      "unit": "days"
+                    },
+                    "children": [
+                      {
+                        "id": "n5",
+                        "type": "exit",
+                        "config": {
+                          "kind": "goal"
+                        },
+                        "children": [],
+                        "branch": "happened"
+                      },
+                      {
+                        "id": "n6",
+                        "type": "push",
+                        "config": {
+                          "title": "Reorder reminder",
+                          "body": "{{first_name}}, your supply order is ready to confirm."
+                        },
+                        "children": [
+                          {
+                            "id": "n7",
+                            "type": "exit",
+                            "config": {
+                              "kind": "exit"
+                            },
+                            "children": []
+                          }
+                        ],
+                        "branch": "timeout"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "product_registration": {
+    "industry": "Manufacturing",
+    "name": "Product registration",
+    "intent": "Ask new buyers to register their product for warranty support, then nudge by SMS.",
+    "workflow": {
+      "schema_version": 2,
+      "root": {
+        "id": "n1",
+        "type": "trigger",
+        "config": {
+          "segment_id": null,
+          "event": "signup"
+        },
+        "children": [
+          {
+            "id": "n2",
+            "type": "email",
+            "config": {
+              "subject": "Register your product, {{first_name}}",
+              "body": "Registering takes two minutes and activates your warranty."
+            },
+            "children": [
+              {
+                "id": "n3",
+                "type": "wait_event",
+                "config": {
+                  "event": "email_clicked",
+                  "amount": 7,
+                  "unit": "days"
+                },
+                "children": [
+                  {
+                    "id": "n4",
+                    "type": "update_profile",
+                    "config": {
+                      "action": "add_tag",
+                      "tag": "product_registered"
+                    },
+                    "children": [
+                      {
+                        "id": "n5",
+                        "type": "exit",
+                        "config": {
+                          "kind": "goal"
+                        },
+                        "children": []
+                      }
+                    ],
+                    "branch": "happened"
+                  },
+                  {
+                    "id": "n6",
+                    "type": "notification",
+                    "config": {
+                      "body": "{{first_name}}, register your product to activate your warranty."
+                    },
+                    "children": [
+                      {
+                        "id": "n7",
+                        "type": "exit",
+                        "config": {
+                          "kind": "exit"
+                        },
+                        "children": []
+                      }
+                    ],
+                    "branch": "timeout"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "trial_activation": {
+    "industry": "Media & Entertainment",
+    "name": "Trial activation",
+    "intent": "Welcome new subscribers and recommend a first title. Engaged trials get a push.",
+    "workflow": {
+      "schema_version": 2,
+      "root": {
+        "id": "n1",
+        "type": "trigger",
+        "config": {
+          "segment_id": null,
+          "event": "signup"
+        },
+        "children": [
+          {
+            "id": "n2",
+            "type": "email",
+            "config": {
+              "subject": "Your trial has started, {{first_name}}",
+              "body": "Here is how to find something to watch tonight."
+            },
+            "children": [
+              {
+                "id": "n3",
+                "type": "wait",
+                "config": {
+                  "amount": 1,
+                  "unit": "days"
+                },
+                "children": [
+                  {
+                    "id": "n4",
+                    "type": "condition",
+                    "config": {
+                      "field": "engagement_score",
+                      "op": "ge",
+                      "value": "60"
+                    },
+                    "children": [
+                      {
+                        "id": "n5",
+                        "type": "push",
+                        "config": {
+                          "title": "Pick your first show",
+                          "body": "{{first_name}}, new titles are waiting for you."
+                        },
+                        "children": [
+                          {
+                            "id": "n6",
+                            "type": "wait_event",
+                            "config": {
+                              "event": "purchase",
+                              "amount": 7,
+                              "unit": "days"
+                            },
+                            "children": [
+                              {
+                                "id": "n7",
+                                "type": "exit",
+                                "config": {
+                                  "kind": "goal"
+                                },
+                                "children": [],
+                                "branch": "happened"
+                              },
+                              {
+                                "id": "n8",
+                                "type": "exit",
+                                "config": {
+                                  "kind": "exit"
+                                },
+                                "children": [],
+                                "branch": "timeout"
+                              }
+                            ]
+                          }
+                        ],
+                        "branch": "yes"
+                      },
+                      {
+                        "id": "n9",
+                        "type": "email",
+                        "config": {
+                          "subject": "Here is what to watch next",
+                          "body": "Browse our top picks for new subscribers."
+                        },
+                        "children": [
+                          {
+                            "id": "n10",
+                            "type": "exit",
+                            "config": {
+                              "kind": "exit"
+                            },
+                            "children": []
+                          }
+                        ],
+                        "branch": "no"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "lapsed_viewer": {
+    "industry": "Media & Entertainment",
+    "name": "Lapsed viewer win-back",
+    "intent": "Bring back viewers who have been inactive for 30 days with new releases, then offer a text reminder.",
+    "workflow": {
+      "schema_version": 2,
+      "root": {
+        "id": "n1",
+        "type": "trigger",
+        "config": {
+          "segment_id": null,
+          "event": "inactive_30d"
+        },
+        "children": [
+          {
+            "id": "n2",
+            "type": "push",
+            "config": {
+              "title": "New releases you may like",
+              "body": "{{first_name}}, fresh titles just landed."
+            },
+            "children": [
+              {
+                "id": "n3",
+                "type": "wait_event",
+                "config": {
+                  "event": "purchase",
+                  "amount": 7,
+                  "unit": "days"
+                },
+                "children": [
+                  {
+                    "id": "n4",
+                    "type": "exit",
+                    "config": {
+                      "kind": "goal"
+                    },
+                    "children": [],
+                    "branch": "happened"
+                  },
+                  {
+                    "id": "n5",
+                    "type": "notification",
+                    "config": {
+                      "body": "{{first_name}}, a new season is ready to watch."
+                    },
+                    "children": [
+                      {
+                        "id": "n6",
+                        "type": "update_profile",
+                        "config": {
+                          "action": "add_tag",
+                          "tag": "lapsed_viewer"
+                        },
+                        "children": [
+                          {
+                            "id": "n7",
+                            "type": "exit",
+                            "config": {
+                              "kind": "exit"
+                            },
+                            "children": []
+                          }
+                        ]
+                      }
+                    ],
+                    "branch": "timeout"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "new_listing_alert": {
+    "industry": "Real Estate",
+    "name": "New listing alert",
+    "intent": "Send buyers new homes that match their search, then follow up by SMS if they do not engage.",
+    "workflow": {
+      "schema_version": 2,
+      "root": {
+        "id": "n1",
+        "type": "trigger",
+        "config": {
+          "segment_id": null,
+          "event": "signup"
+        },
+        "children": [
+          {
+            "id": "n2",
+            "type": "email",
+            "config": {
+              "subject": "New homes that match your search, {{first_name}}",
+              "body": "Here are the newest listings in your preferred area."
+            },
+            "children": [
+              {
+                "id": "n3",
+                "type": "wait_event",
+                "config": {
+                  "event": "email_clicked",
+                  "amount": 3,
+                  "unit": "days"
+                },
+                "children": [
+                  {
+                    "id": "n4",
+                    "type": "update_profile",
+                    "config": {
+                      "action": "add_tag",
+                      "tag": "listing_viewed"
+                    },
+                    "children": [
+                      {
+                        "id": "n5",
+                        "type": "exit",
+                        "config": {
+                          "kind": "goal"
+                        },
+                        "children": []
+                      }
+                    ],
+                    "branch": "happened"
+                  },
+                  {
+                    "id": "n6",
+                    "type": "notification",
+                    "config": {
+                      "body": "{{first_name}}, new listings are live. Take a look."
+                    },
+                    "children": [
+                      {
+                        "id": "n7",
+                        "type": "exit",
+                        "config": {
+                          "kind": "exit"
+                        },
+                        "children": []
+                      }
+                    ],
+                    "branch": "timeout"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "viewing_followup": {
+    "industry": "Real Estate",
+    "name": "Viewing follow-up",
+    "intent": "Follow up with buyers who looked at a home but did not book a second viewing.",
+    "workflow": {
+      "schema_version": 2,
+      "root": {
+        "id": "n1",
+        "type": "trigger",
+        "config": {
+          "segment_id": null,
+          "event": "cart_abandoned"
+        },
+        "children": [
+          {
+            "id": "n2",
+            "type": "wait",
+            "config": {
+              "amount": 1,
+              "unit": "days"
+            },
+            "children": [
+              {
+                "id": "n3",
+                "type": "email",
+                "config": {
+                  "subject": "Still interested in this home, {{first_name}}?",
+                  "body": "Book a second viewing at a time that works for you."
+                },
+                "children": [
+                  {
+                    "id": "n4",
+                    "type": "wait_event",
+                    "config": {
+                      "event": "purchase",
+                      "amount": 14,
+                      "unit": "days"
+                    },
+                    "children": [
+                      {
+                        "id": "n5",
+                        "type": "exit",
+                        "config": {
+                          "kind": "goal"
+                        },
+                        "children": [],
+                        "branch": "happened"
+                      },
+                      {
+                        "id": "n6",
+                        "type": "push",
+                        "config": {
+                          "title": "Book a second viewing",
+                          "body": "{{first_name}}, a slot is open this week."
+                        },
+                        "children": [
+                          {
+                            "id": "n7",
+                            "type": "exit",
+                            "config": {
+                              "kind": "exit"
+                            },
+                            "children": []
+                          }
+                        ],
+                        "branch": "timeout"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "plan_upgrade": {
+    "industry": "Telecommunications",
+    "name": "Plan upgrade offer",
+    "intent": "Offer a higher data plan to high-engagement customers and share plan details with others.",
+    "workflow": {
+      "schema_version": 2,
+      "root": {
+        "id": "n1",
+        "type": "trigger",
+        "config": {
+          "segment_id": null,
+          "event": "purchase"
+        },
+        "children": [
+          {
+            "id": "n2",
+            "type": "wait",
+            "config": {
+              "amount": 14,
+              "unit": "days"
+            },
+            "children": [
+              {
+                "id": "n3",
+                "type": "condition",
+                "config": {
+                  "field": "engagement_score",
+                  "op": "ge",
+                  "value": "70"
+                },
+                "children": [
+                  {
+                    "id": "n4",
+                    "type": "push",
+                    "config": {
+                      "title": "Upgrade for more data",
+                      "body": "{{first_name}}, a bigger plan is available for you."
+                    },
+                    "children": [
+                      {
+                        "id": "n5",
+                        "type": "wait_event",
+                        "config": {
+                          "event": "purchase",
+                          "amount": 7,
+                          "unit": "days"
+                        },
+                        "children": [
+                          {
+                            "id": "n6",
+                            "type": "exit",
+                            "config": {
+                              "kind": "goal"
+                            },
+                            "children": [],
+                            "branch": "happened"
+                          },
+                          {
+                            "id": "n7",
+                            "type": "exit",
+                            "config": {
+                              "kind": "exit"
+                            },
+                            "children": [],
+                            "branch": "timeout"
+                          }
+                        ]
+                      }
+                    ],
+                    "branch": "yes"
+                  },
+                  {
+                    "id": "n8",
+                    "type": "email",
+                    "config": {
+                      "subject": "Your plan at a glance",
+                      "body": "Review your data, calls and included extras."
+                    },
+                    "children": [
+                      {
+                        "id": "n9",
+                        "type": "exit",
+                        "config": {
+                          "kind": "exit"
+                        },
+                        "children": []
+                      }
+                    ],
+                    "branch": "no"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "line_activation": {
+    "industry": "Telecommunications",
+    "name": "Line activation",
+    "intent": "Help new subscribers activate their line by SMS, then tag those who have not activated.",
+    "workflow": {
+      "schema_version": 2,
+      "root": {
+        "id": "n1",
+        "type": "trigger",
+        "config": {
+          "segment_id": null,
+          "event": "signup"
+        },
+        "children": [
+          {
+            "id": "n2",
+            "type": "notification",
+            "config": {
+              "body": "{{first_name}}, activate your line in two minutes."
+            },
+            "children": [
+              {
+                "id": "n3",
+                "type": "wait_event",
+                "config": {
+                  "event": "purchase",
+                  "amount": 3,
+                  "unit": "days"
+                },
+                "children": [
+                  {
+                    "id": "n4",
+                    "type": "exit",
+                    "config": {
+                      "kind": "goal"
+                    },
+                    "children": [],
+                    "branch": "happened"
+                  },
+                  {
+                    "id": "n5",
+                    "type": "update_profile",
+                    "config": {
+                      "action": "add_tag",
+                      "tag": "line_not_activated"
+                    },
+                    "children": [
+                      {
+                        "id": "n6",
+                        "type": "exit",
+                        "config": {
+                          "kind": "exit"
+                        },
+                        "children": []
+                      }
+                    ],
+                    "branch": "timeout"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

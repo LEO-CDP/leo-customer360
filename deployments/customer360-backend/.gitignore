@@ -1,0 +1,8 @@
+# Optional local overrides / logs.
+.env
+*.log
+
+# VKS kubeconfig (cluster credentials) + the overlay deploy-backend-vks.sh renders from
+# Terraform state, which carries the DB, S3, Redis and SMTP secrets.
+kubeconfig-vks-*.yaml
+k8s/generated/

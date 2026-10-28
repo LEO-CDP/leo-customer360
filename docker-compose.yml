@@ -47,7 +47,7 @@ volumes:
 services:
   # ---------------------------------------------------------------------------
   # 1) PostgreSQL 16 + PostGIS + pgvector + contrib, auto-provisioned with
-  #    database-schema.sql and database-init/init-core-database.sql on first start.
+  #    database-schema.sql and customer360-database/init-core-database.sql on first start.
   # ---------------------------------------------------------------------------
   postgres:
     build:
@@ -214,12 +214,12 @@ services:
         psql -h postgres -U ${DB_USER:-postgres} -d ${DB_NAME:-customer360} -tc "SELECT 1 FROM pg_database WHERE datname = '$$DAGSTER_PG_DB'" | grep -q 1 || psql -h postgres -U ${DB_USER:-postgres} -d ${DB_NAME:-customer360} -c "CREATE DATABASE \"$$DAGSTER_PG_DB\""
 
   # ---------------------------------------------------------------------------
-  # 6) Dagster webserver - all nine backend-system code locations.
+  # 6) Dagster webserver - all eight customer360-backend code locations.
   # ---------------------------------------------------------------------------
   dagster:
     build:
-      context: ./backend-system
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: customer360-backend/Dockerfile
     image: customer360-dagster:local
     container_name: customer360-dagster
     restart: unless-stopped
@@ -242,12 +242,15 @@ services:
       DAGSTER_S3_SECRET_ACCESS_KEY: ${DAGSTER_S3_SECRET_ACCESS_KEY:-${S3_SECRET_ACCESS_KEY:-}}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-${DAGSTER_S3_ACCESS_KEY_ID:-}}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-${DAGSTER_S3_SECRET_ACCESS_KEY:-}}
+      AGENT_SERVICE_URL: http://agent:8009
       DAGSTER_HOME: /dagster_home
     command: ["dagster-webserver", "-w", "workspace.yaml", "-h", "0.0.0.0", "-p", "3000"]
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      agent:
         condition: service_healthy
       dagster-db-init:
         condition: service_completed_successfully
@@ -277,8 +280,8 @@ services:
   # run monitoring, and the run queue; it must not expose the webserver port.
   dagster-daemon:
     build:
-      context: ./backend-system
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: customer360-backend/Dockerfile
     image: customer360-dagster:local
     container_name: customer360-dagster-daemon
     restart: unless-stopped
@@ -301,12 +304,15 @@ services:
       DAGSTER_S3_SECRET_ACCESS_KEY: ${DAGSTER_S3_SECRET_ACCESS_KEY:-${S3_SECRET_ACCESS_KEY:-}}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-${DAGSTER_S3_ACCESS_KEY_ID:-}}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-${DAGSTER_S3_SECRET_ACCESS_KEY:-}}
+      AGENT_SERVICE_URL: http://agent:8009
       DAGSTER_HOME: /dagster_home
     command: ["dagster-daemon", "run", "-w", "workspace.yaml"]
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      agent:
         condition: service_healthy
       dagster-db-init:
         condition: service_completed_successfully
@@ -319,13 +325,57 @@ services:
           memory: 1g
 
   # ---------------------------------------------------------------------------
+  # 6b) Customer 360 AI Agent (FastAPI) - provider-agnostic AI campaign
+  #     planning (Gemini / OpenAI / any OpenAI-compatible local LLM via config).
+  #     Called over HTTP by the API and Dagster product imports.
+  # ---------------------------------------------------------------------------
+  agent:
+    build:
+      context: ./customer360-agent
+      dockerfile: Dockerfile
+    image: customer360-agent:local
+    container_name: customer360-agent
+    restart: unless-stopped
+    init: true
+    <<: *default-hardening
+    env_file:
+      - .env
+    environment:
+      # Postgres-backed prompt store: schema + defaults are created/seeded on startup.
+      AGENT_DATABASE_URL: postgresql+psycopg2://${DB_USER:-postgres}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-customer360}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${C360_AGENT_HOST:-127.0.0.1}:${C360_AGENT_PORT:-8009}:8009"
+    networks:
+      - customer360-network
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 256m
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8009/health', timeout=3)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
   # 7) Customer 360 API (FastAPI) - CRUD + reporting over the customer360
   #    schema, Redis-cached reads (see customer360-api/core/cache.py).
   # ---------------------------------------------------------------------------
   api:
     build:
-      context: ./customer360-api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: customer360-api/Dockerfile
     image: customer360-api:local
     container_name: customer360-api
     restart: unless-stopped
@@ -338,7 +388,7 @@ services:
       DB_PORT: 5432
       REDIS_HOST: redis
       REDIS_PORT: 6580
-      EVENT_QUERY_MAX_DAYS: ${EVENT_QUERY_MAX_DAYS:-90}
+      EVENT_QUERY_MAX_DAYS: ${EVENT_QUERY_MAX_DAYS:-180}
       EVENT_S3_BUCKET: ${EVENT_S3_BUCKET:-}
       EVENT_RAW_PREFIX: ${EVENT_RAW_PREFIX:-events}
       ANALYTICS_S3_ENDPOINT_URL: ${ANALYTICS_S3_ENDPOINT_URL:-${S3_ENDPOINT_URL:-}}
@@ -346,8 +396,11 @@ services:
       S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
       S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-false}
+      PRODUCT_IMPORT_S3_BUCKET: ${PRODUCT_IMPORT_S3_BUCKET:-c360-product-imports}
+      CONTENT_IMPORT_S3_BUCKET: ${CONTENT_IMPORT_S3_BUCKET:-c360-content-imports}
       DAGSTER_GRAPHQL_HOST: dagster
       SSO_LOGIN_URL: http://keycloak:8080
+      AGENT_SERVICE_URL: http://agent:8009
     depends_on:
       postgres:
         condition: service_healthy
@@ -356,6 +409,8 @@ services:
       keycloak:
         condition: service_healthy
       dagster:
+        condition: service_healthy
+      agent:
         condition: service_healthy
     ports:
       - "${C360_API_HOST:-127.0.0.1}:${C360_API_PORT:-8008}:8008"
@@ -380,15 +435,15 @@ services:
       start_period: 15s
 
   # ---------------------------------------------------------------------------
-  # 8) CDP data tracking API - writes hourly NDJSON batches to S3.
+  # 8) CDP event data tracking API - writes hourly NDJSON batches to S3.
   #    Production uses the AWS credential chain; configure S3_* in .env.
   # ---------------------------------------------------------------------------
   tracking-api:
     build:
-      context: ./data-tracking-api
+      context: ./customer360-event-api
       dockerfile: Dockerfile
-    image: customer360-tracking-api:local
-    container_name: customer360-tracking-api
+    image: customer360-event-api:local
+    container_name: customer360-event-api
     restart: unless-stopped
     init: true
     <<: *default-hardening
@@ -436,8 +491,8 @@ services:
   cir-demo-seed:
     profiles: ["dev"]
     build:
-      context: ./backend-system
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: customer360-backend/Dockerfile
     image: customer360-dagster:local
     container_name: customer360-cir-demo-seed
     restart: "no"
@@ -456,6 +511,6 @@ services:
     networks:
       - customer360-network
     command: >
-          sh -c "python identity_resolution/scripts/init_sample_data.py &&
-            python identity_resolution/scripts/run_demo_resolution.py &&
-            python identity_resolution/scripts/seed_full_demo_data.py"
+          sh -c "python /opt/customer360-seeding/init_sample_data.py &&
+            python identity_resolution/scripts/test_resolution_task.py &&
+            python /opt/customer360-seeding/seed_full_demo_data.py"

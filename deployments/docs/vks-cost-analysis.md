@@ -149,7 +149,7 @@ replaces Portainer + agents). See the technical doc §7.
 
 **One-time migration cost:** engineering to author manifests/Helm + platform add-ons + cutover, plus a
 brief parallel run during cutover. No new licensing (VKS control plane free; NGINX/cert-manager/
-oauth2-proxy are OSS). `data-tracking-api` is already CI-built (prerequisite done).
+oauth2-proxy are OSS). `customer360-event-api` is already CI-built (prerequisite done).
 
 ---
 

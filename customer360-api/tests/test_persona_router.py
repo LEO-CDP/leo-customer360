@@ -32,7 +32,7 @@ DEMO_TENANT_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 
 
 class FakePersonaRepository:
-    """Stands in for core.repositories.persona_repository.PersonaRepository:
+    """Stands in for leo_customer360_dao.repositories.persona_repository.PersonaRepository:
     an in-memory dict-backed store instead of a real database, so the
     persona routers' HTTP-level wiring (status codes, request/response
     schemas, filters) can be tested without SQLAlchemy/PostgreSQL."""
@@ -498,6 +498,17 @@ class PersonaArchetypesRouterTests(unittest.TestCase):
         for router in persona_router.all_persona_routers:
             app.include_router(router)
         app.dependency_overrides[get_db] = lambda: None
+
+        @app.middleware("http")
+        async def inject_authenticated_admin(request, call_next):
+            roles = [
+                role.strip()
+                for role in request.headers.get("X-Roles", "admin").split(",")
+                if role.strip()
+            ]
+            request.state.user = {"roles": roles}
+            return await call_next(request)
+
         self.client = TestClient(app)
 
     def test_list_archetypes_without_trailing_slash_is_not_swallowed_by_persona_id_route(self):

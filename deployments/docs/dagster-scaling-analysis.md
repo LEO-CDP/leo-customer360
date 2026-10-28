@@ -1,9 +1,11 @@
 # Customer 360 — Scaling the Dagster Backend (Orchestrator + Worker Pools)
 
-> **Status:** research / decision-support · **Date:** 2026-09-03 · **Scope:** `backend-system/` (Dagster) on VKS, UAT + PROD
+> **Historical note (2026-10-19):** Dagster now runs on the VKS cluster (`deployments/customer360-backend/`); the backend vServer described below was retired. Kept as the original analysis.
+
+> **Status:** research / decision-support · **Date:** 2026-09-03 · **Scope:** `customer360-backend/` (Dagster) on VKS, UAT + PROD
 > **Platform:** GreenNode / VNG Cloud VKS — see [`vks-target-architecture.svg`](./vks-target-architecture.svg)
 > **Companions:** [`vks-migration-technical-analysis.md`](./vks-migration-technical-analysis.md) · [`vks-cost-analysis.md`](./vks-cost-analysis.md)
-> **Source of truth for today's shape:** [`../../backend-system/deployment.md`](../../backend-system/deployment.md) · [`../../k8s/base/dagster.yaml`](../../k8s/base/dagster.yaml)
+> **Source of truth for today's shape:** [`../../customer360-backend/deployment.md`](../../customer360-backend/deployment.md) · [`../../k8s/base/dagster.yaml`](../../k8s/base/dagster.yaml)
 
 This document turns the conceptual target below into a concrete Dagster production
 topology, explains **why the current single-pod `dagster dev` cannot be scaled as-is**,
@@ -52,7 +54,7 @@ workers:
 ## 2. Current state (baseline)
 
 From [`k8s/base/dagster.yaml`](../../k8s/base/dagster.yaml) and
-[`backend-system/deployment.md`](../../backend-system/deployment.md):
+[`customer360-backend/deployment.md`](../../customer360-backend/deployment.md):
 
 | Aspect | Today |
 |---|---|
@@ -72,7 +74,7 @@ Implemented work vs. placeholders (from `deployment.md`):
 | `identity_resolution` | **implemented** — CIR batch-drain job + poll sensor | in-memory join |
 | `segmentation` | **implemented** — recompute job + poll sensor | Polars |
 | `analytics` | **implemented** — hourly tracking-log aggregation + schedule | Polars |
-| `scoring`, `personalization`, `campaign_activation`, `email_engine`, `notification_engine`, `data_synch` | **placeholder** jobs (runnable skeletons) | — |
+| `ai_agents_runners`, `campaign_activation`, `email_engine`, `notification_engine`, `data_synch` | **orchestration/placeholder** jobs | — |
 
 **Why this cannot just get `replicas: 2`:** SQLite has one writer, the PVC is `ReadWriteOnce`,
 and `dagster dev` is explicitly a **development** launcher that co-locates the webserver and
@@ -344,8 +346,7 @@ pool with the right requests/limits. Profiles below drive the mapping:
 | `campaign_activation` | orchestration / fan-out | **ingestion** | I/O + coordination, light CPU |
 | `email_engine` | outbound send fan-out | **ingestion** | network fan-out, light |
 | `notification_engine` | push/SMS/in-app dispatch | **ingestion** | network fan-out, light |
-| `scoring` | model inference | **ai** | CPU-heavy, model memory |
-| `personalization` | next-best-action (Polars + model) | **ai** | CPU + model memory |
+| `ai_agents_runners` | model/workflow orchestration | **ai** | CPU-heavy, model memory |
 | `identity_resolution` | large in-memory join / match | **compute** | memory-hungry joins |
 | `segmentation` | full-scan recompute (Polars) | **compute** | large scans, memory-hungry |
 | `analytics` | Polars aggregation over JSONL/Parquet | **compute** | memory-hungry columnar |
@@ -364,8 +365,8 @@ analytics_job = analytics_job.with_tags({
 ```
 
 > Note: `identity_resolution` and `segmentation` are memory-bound rather than CPU-bound, so they sit
-> in **compute** (16Gi) despite modest vCPU. `ai` is sized for future model inference; only `scoring`
-> and `personalization` truly need it, and both are **placeholders today** — see §9.
+> in **compute** (16Gi) despite modest vCPU. `ai` is sized for future model inference; the
+> `ai_agents_runners` location owns the consolidated workflow orchestration — see §9.
 
 ---
 
@@ -417,7 +418,7 @@ spec:
   flavors. Price it against the published vServer flavor rates in the cost doc before committing.
 - **This is why Option B (ephemeral) or KEDA-to-floor is recommended:** the `ai` pool alone reserves
   40 vCPU for jobs that are **placeholders today**. Standing capacity of that size is only justified
-  once real `scoring`/`personalization` load exists and you've measured queue depth.
+  once real `ai_agents_runners` load exists and you've measured queue depth.
 - **Right-sizing rule:** set pool ceilings from *measured* peak concurrent runs per queue over a
   representative window, not from the conceptual numbers. Treat `5/10/5` as **not-to-exceed ceilings**,
   not as a floor to provision on day one.
@@ -428,7 +429,7 @@ spec:
 
 1. **Phase 0 — storage (no topology change). ✅ Implemented, adaptive & fail-open.** The instance
    config is **rendered at container start** by `entrypoint.sh` →
-   [`scripts/render_dagster_instance.py`](../../backend-system/scripts/render_dagster_instance.py),
+   [`scripts/render_dagster_instance.py`](../../customer360-backend/scripts/render_dagster_instance.py),
    which probes the backends and writes `$DAGSTER_HOME/dagster.yaml`:
    **shared PostgreSQL** run/event/schedule storage (dedicated `dagster` DB, created best-effort) **if
    the DB is reachable, else local SQLite**; **S3/MinIO compute logs** (`S3ComputeLogManager`, path-style)
@@ -439,7 +440,7 @@ spec:
    **Existing-data cutover:** the old SQLite run history is operational metadata (business data lives
    in the customer360 DB + S3) and the VM's `DAGSTER_HOME` is ephemeral — `deploy-backend.sh` auto-backs
    it up before redeploy, and a best-effort importer
-   ([`backend-system/scripts/migrate_dagster_sqlite_to_postgres.py`](../../backend-system/scripts/migrate_dagster_sqlite_to_postgres.py))
+   ([`customer360-backend/scripts/migrate_dagster_sqlite_to_postgres.py`](../../customer360-backend/scripts/migrate_dagster_sqlite_to_postgres.py))
    + runbook in `deployment.md` cover migrating it into Postgres if needed.
 2. **Phase 1 — split the control plane.** Replace the `dagster dev` Deployment with
    `dagster-webserver ×2` + `dagster-daemon ×1`; add the webserver HPA. Storage from Phase 0 makes

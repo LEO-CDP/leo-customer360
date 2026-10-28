@@ -44,7 +44,7 @@ REDIS_CONTAINER="customer360-redis"
 KEYCLOAK_CONTAINER="customer360-keycloak"
 DAGSTER_CONTAINER="customer360-dagster"
 API_CONTAINER="customer360-api"
-TRACKING_CONTAINER="customer360-tracking-api"
+TRACKING_CONTAINER="customer360-event-api"
 ALL_CONTAINERS=("$POSTGRES_CONTAINER" "$REDIS_CONTAINER" "$KEYCLOAK_CONTAINER" "$DAGSTER_CONTAINER" "$API_CONTAINER" "$TRACKING_CONTAINER")
 
 # Required secrets that MUST be changed from the .env.example placeholder
@@ -412,7 +412,7 @@ cmd_down() {
 }
 
 cmd_seed_demo() {
-  local cir_dir="${SCRIPT_DIR}/backend-system/identity_resolution"
+  local cir_dir="${SCRIPT_DIR}/customer360-backend/identity_resolution"
   local venv_dir="${cir_dir}/.venv"
   local recreate_venv="0"
 
@@ -444,16 +444,16 @@ cmd_seed_demo() {
   "$venv_python" -m pip install -q -r "${cir_dir}/requirements.txt"
 
   echo "🌱 Seeding base raw profiles for demo..."
-  (cd "$cir_dir" && "$venv_python" scripts/init_sample_data.py)
+  (cd "$cir_dir" && "$venv_python" ../../customer360-seeding/dev-backend-seeding/init_sample_data.py)
 
   echo "🧬 Seeding fuzzy-match demo data (Address & Company variations)..."
-  (cd "$cir_dir" && "$venv_python" scripts/generate_fuzzy_match_demo.py)
+  (cd "$cir_dir" && "$venv_python" ../../customer360-seeding/dev-backend-seeding/generate_fuzzy_match_demo.py)
 
   echo "⚙️  Running Customer Identity Resolution for demo..."
-  (cd "$cir_dir" && "$venv_python" scripts/run_demo_resolution.py)
+  (cd "$cir_dir" && "$venv_python" scripts/test_resolution_task.py)
 
   echo "🌐 Seeding full POC/UAT demo data (including cdp_content_items)..."
-  (cd "$cir_dir" && "$venv_python" scripts/seed_full_demo_data.py)
+  (cd "$cir_dir" && "$venv_python" ../../customer360-seeding/dev-backend-seeding/seed_full_demo_data.py)
 
   echo "✅ POC/UAT demo data seeding complete."
 }

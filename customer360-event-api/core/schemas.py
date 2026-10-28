@@ -1,0 +1,131 @@
+"""Request and response schemas for tracking-log ingestion."""
+
+from datetime import datetime
+from typing import Any
+from uuid import UUID
+
+from pydantic import BaseModel, Field, field_validator
+
+
+IDENTIFIER_FIELDS = (
+    "session_id",
+    "anonymous_id",
+    "device_id",
+    "device_fingerprint",
+    "user_id",
+)
+EVENT_UUID_FIELDS = ("campaign_id", "experiment_variant_id")
+EVENT_UUID_ALIASES = {
+    "leocpid": "campaign_id",
+    "leoexvrid": "experiment_variant_id",
+}
+MAX_IDENTIFIER_LENGTH = 256
+TRUSTED_CONSENT_SOURCE = "verified_consent_callback"
+RESERVED_CONSENT_EVENTS = {"email-unsubscribed", "zalo-opt-out"}
+
+
+def normalize_identifier(value: Any, field_name: str) -> str | None:
+    """Normalize an opaque identity value before it reaches storage or Redis."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} must be a string")
+
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError(f"{field_name} must not be blank")
+    if len(normalized) > MAX_IDENTIFIER_LENGTH:
+        raise ValueError(
+            f"{field_name} must be at most {MAX_IDENTIFIER_LENGTH} characters"
+        )
+    if any(ord(character) < 32 or ord(character) == 127 for character in normalized):
+        raise ValueError(f"{field_name} contains control characters")
+    return normalized
+
+
+def normalize_event_uuid(value: Any, field_name: str) -> str | None:
+    """Validate optional campaign attribution IDs before durable storage."""
+    if value is None:
+        return None
+    try:
+        return str(UUID(str(value)))
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise ValueError(f"{field_name} must be a valid UUID") from exc
+
+
+class TrackingLogRequest(BaseModel):
+    data_source_id: UUID
+    session_id: str | None = Field(default=None, min_length=1, max_length=128)
+    anonymous_id: str | None = Field(default=None, min_length=1, max_length=256)
+    device_id: str | None = Field(default=None, min_length=1, max_length=256)
+    device_fingerprint: str | None = Field(default=None, min_length=1, max_length=256)
+    user_id: str | None = Field(default=None, min_length=1, max_length=256)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    events: list[dict[str, Any]] = Field(min_length=1)
+
+    @field_validator(*IDENTIFIER_FIELDS, mode="before")
+    @classmethod
+    def validate_identifier(cls, value: Any, info: Any) -> str | None:
+        return normalize_identifier(value, info.field_name)
+
+    @field_validator("events")
+    @classmethod
+    def validate_event_identifiers(cls, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        normalized_events = []
+        for event in events:
+            normalized_event = dict(event)
+            event_name = (
+                normalized_event.get("event_name")
+                or normalized_event.get("eventType")
+                or normalized_event.get("event")
+            )
+            if isinstance(event_name, str) and event_name.strip().lower() in RESERVED_CONSENT_EVENTS:
+                raise ValueError(
+                    "Consent revocation events must use their verified callback endpoint"
+                )
+            if normalized_event.get("source_system") == TRUSTED_CONSENT_SOURCE:
+                raise ValueError("source_system is reserved for verified consent callbacks")
+            if "consent_update" in normalized_event:
+                raise ValueError("consent_update is reserved for verified consent callbacks")
+            properties = normalized_event.get("properties")
+            if isinstance(properties, dict) and "consent_update" in properties:
+                raise ValueError(
+                    "properties.consent_update is reserved for verified consent callbacks"
+                )
+            for field_name in IDENTIFIER_FIELDS:
+                if field_name in normalized_event:
+                    normalized_event[field_name] = normalize_identifier(
+                        normalized_event[field_name], field_name
+                    )
+            for alias, field_name in EVENT_UUID_ALIASES.items():
+                if alias not in normalized_event:
+                    continue
+                alias_value = normalize_event_uuid(normalized_event.pop(alias), alias)
+                if field_name in normalized_event:
+                    canonical_value = normalize_event_uuid(
+                        normalized_event[field_name], field_name
+                    )
+                    if alias_value is not None and alias_value != canonical_value:
+                        raise ValueError(f"{alias} conflicts with {field_name}")
+                elif alias_value is not None:
+                    normalized_event[field_name] = alias_value
+            for field_name in EVENT_UUID_FIELDS:
+                if field_name in normalized_event:
+                    normalized_event[field_name] = normalize_event_uuid(
+                        normalized_event[field_name], field_name
+                    )
+            normalized_events.append(normalized_event)
+        return normalized_events
+
+
+class TrackingLogResponse(BaseModel):
+    data_source_id: UUID
+    accepted: bool = True
+    filtered: bool = False
+    filter_reason: str | None = None
+    bucket: str | None = None
+    object_key: str | None = None
+    event_count: int
+    received_at: datetime
+    cached_session_count: int = 0
+    queue_message_id: str | None = None

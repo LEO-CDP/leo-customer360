@@ -12,15 +12,15 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from core.database import get_db
-from core.models.crm import Lead
-from core.models.relations import RelationType
+from leo_customer360_dao.models.crm import Lead
+from leo_customer360_dao.models.relations import RelationType
 from core.routers._generic import build_crud_router
-from core.schemas.crm import LeadCreate, LeadRead, LeadUpdate
-from core.schemas.relations import RelationTypeCreate, RelationTypeRead, RelationTypeUpdate
+from leo_customer360_dao.schemas.crm import LeadCreate, LeadRead, LeadUpdate
+from leo_customer360_dao.schemas.relations import RelationTypeCreate, RelationTypeRead, RelationTypeUpdate
 
 
 class FakeCRUD:
-    """Stands in for core.crud.base.CRUDBase, recording the filters it was
+    """Stands in for leo_customer360_dao.crud.base.CRUDBase, recording the filters it was
     called with instead of touching a real database."""
 
     last_list_kwargs: dict = {}

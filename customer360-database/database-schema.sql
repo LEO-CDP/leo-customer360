@@ -1,0 +1,5835 @@
+-- SQLBook: Code
+-- Customer 360 Database Schema -- 
+
+-- =========================================================
+-- Extensions
+-- =========================================================
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+CREATE EXTENSION IF NOT EXISTS vector;
+-- Geo support for domain events that need location (real estate listings,
+-- retail store/POS locations, travel destinations, bank branches). Already
+-- present in the dev image (postgis/postgis:16-3.5, see dev-start-pgsql.sh).
+CREATE EXTENSION IF NOT EXISTS postgis;
+-- Required by identity_resolution/resolver.py's fuzzy_trgm (similarity())
+-- and fuzzy_dmetaphone (dmetaphone()) CIR matching_rule query builders.
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE EXTENSION IF NOT EXISTS fuzzystrmatch;
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+
+-- =========================================================
+-- Schema
+-- =========================================================
+CREATE SCHEMA IF NOT EXISTS customer360;
+
+---------------------------------------------------
+-- ENTITY TABLES
+---------------------------------------------------
+
+-- ==========================================================
+-- Tenant table
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS customer360.sys_tenant (
+    tenant_id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
+    tenant_code VARCHAR(50) UNIQUE NOT NULL,
+    tenant_name TEXT NOT NULL,
+    company_name TEXT NOT NULL,
+    business_type TEXT NOT NULL,
+    business_model TEXT NOT NULL DEFAULT 'B2C'
+        CONSTRAINT sys_tenant_business_model_check
+        CHECK (business_model IN ('B2B', 'B2C', 'B2B2C')),
+    status VARCHAR(20) DEFAULT 'ACTIVE' NOT NULL,
+    created_at TIMESTAMP DEFAULT now(),
+    updated_at TIMESTAMP DEFAULT now(),
+    metadata JSONB
+);
+
+-- Existing databases may already have sys_tenant without the business-model
+-- column; keep the canonical definition above while making bootstrap upgrades
+-- safe and defaulting legacy tenants to B2C.
+ALTER TABLE customer360.sys_tenant
+    ADD COLUMN IF NOT EXISTS business_model TEXT DEFAULT 'B2C';
+UPDATE customer360.sys_tenant
+SET business_model = 'B2C'
+WHERE business_model IS NULL;
+ALTER TABLE customer360.sys_tenant
+    ALTER COLUMN business_model SET DEFAULT 'B2C',
+    ALTER COLUMN business_model SET NOT NULL;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'customer360.sys_tenant'::regclass
+          AND conname = 'sys_tenant_business_model_check'
+    ) THEN
+        ALTER TABLE customer360.sys_tenant
+            ADD CONSTRAINT sys_tenant_business_model_check
+            CHECK (business_model IN ('B2B', 'B2C', 'B2B2C'));
+    END IF;
+END $$;
+
+COMMENT ON TABLE customer360.sys_tenant IS 'Top-level workspace/tenant record. Every tenant-scoped table in this schema carries a NOT NULL tenant_id FK to this table, enforced additionally via Row-Level Security (see the ROW LEVEL SECURITY section at the end of this file).';
+COMMENT ON COLUMN customer360.sys_tenant.business_type IS
+    'Industry or business domain (for example, retail); not the B2B/B2C/B2B2C go-to-market model.';
+COMMENT ON COLUMN customer360.sys_tenant.business_model IS
+    'Tenant go-to-market model: B2B, B2C, or B2B2C. Defaults to B2C.';
+
+-- ==========================================================
+-- Business Domain Master
+-- System-defined business domains
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS customer360.sys_domain (
+    domain_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    domain_code VARCHAR(50) NOT NULL UNIQUE,
+    domain_name VARCHAR(200) NOT NULL,
+
+    description TEXT,
+
+    icon VARCHAR(100),
+    color VARCHAR(20),
+
+    display_order SMALLINT DEFAULT 0 NOT NULL,
+
+    is_system BOOLEAN DEFAULT TRUE NOT NULL,
+    is_active BOOLEAN DEFAULT TRUE NOT NULL,
+
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP NOT NULL DEFAULT now(),
+
+    metadata JSONB DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_sys_domain_active
+    ON customer360.sys_domain(is_active);
+
+CREATE INDEX IF NOT EXISTS idx_sys_domain_display_order
+    ON customer360.sys_domain(display_order);
+
+CREATE INDEX IF NOT EXISTS idx_sys_domain_metadata
+    ON customer360.sys_domain
+    USING GIN(metadata);
+
+COMMENT ON TABLE customer360.sys_domain IS 'System-defined business domains plus _ for unclassified profiles (e.g., _, retail, banking, real_estate, travel, media, education).';
+
+-- ==========================================================
+-- Tenant Business Domains
+-- A tenant can support multiple industries/domains.
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS customer360.sys_tenant_domain (
+
+    tenant_id UUID NOT NULL,
+    domain_id UUID NOT NULL,
+
+    is_default BOOLEAN NOT NULL DEFAULT FALSE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+    metadata JSONB DEFAULT '{}'::jsonb,
+
+    PRIMARY KEY (tenant_id, domain_id),
+
+    CONSTRAINT fk_sys_tenant_domain_tenant
+        FOREIGN KEY (tenant_id)
+        REFERENCES customer360.sys_tenant(tenant_id)
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_sys_tenant_domain_domain
+        FOREIGN KEY (domain_id)
+        REFERENCES customer360.sys_domain(domain_id)
+        ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_sys_tenant_domain_tenant
+ON customer360.sys_tenant_domain(tenant_id);
+
+CREATE INDEX IF NOT EXISTS idx_sys_tenant_domain_domain
+ON customer360.sys_tenant_domain(domain_id);
+
+CREATE INDEX IF NOT EXISTS idx_sys_tenant_domain_default
+ON customer360.sys_tenant_domain(tenant_id, is_default);
+
+-- ==========================================================
+-- Organization table
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS customer360.sys_organization (
+    organization_id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant (tenant_id),
+    parent_organization_id UUID NULL REFERENCES customer360.sys_organization (organization_id),
+    organization_code VARCHAR(100) NOT NULL,
+    organization_name VARCHAR(255) NOT NULL,
+    organization_type VARCHAR(50), -- COMPANY, DIVISION, BRANCH, DEPARTMENT
+    description TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP NOT NULL DEFAULT now(),
+    metadata JSONB,
+    CONSTRAINT uq_org_code UNIQUE (tenant_id, organization_code)
+);
+
+COMMENT ON TABLE customer360.sys_organization IS 'Hierarchical business unit within a tenant (COMPANY/DIVISION/BRANCH/DEPARTMENT), self-referencing via parent_organization_id. Used to scope sys_user membership below the tenant level.';
+
+CREATE INDEX IF NOT EXISTS idx_org_tenant ON customer360.sys_organization (tenant_id);
+
+CREATE INDEX IF NOT EXISTS idx_org_parent ON customer360.sys_organization (parent_organization_id);
+
+-- ==========================================================
+-- Application User table
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS customer360.sys_user (
+    user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    
+    -- Added ON DELETE CASCADE/SET NULL to prevent orphan records if a tenant/org is deleted
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id) ON DELETE CASCADE,
+    organization_id UUID NULL REFERENCES customer360.sys_organization(organization_id) ON DELETE SET NULL,
+    
+    -- REMOVED: keycloak_user_id UUID UNIQUE 
+    -- Reason: Identity mapping is now correctly handled by the 1-to-Many sys_userinfo table.
+
+    username VARCHAR(150) NOT NULL,
+    email VARCHAR(255),
+    full_name VARCHAR(255),
+    phone VARCHAR(30),
+    job_title VARCHAR(100),
+    department VARCHAR(100),
+    language_code VARCHAR(10) DEFAULT 'en',
+    
+    -- Added default UTC to prevent null timezone logic errors in the application
+    timezone VARCHAR(50) DEFAULT 'UTC',
+    
+    -- Added NOT NULL constraint to status
+    status VARCHAR(20) DEFAULT 'ACTIVE' NOT NULL,
+    
+    -- Upgraded all timestamps to TIMESTAMPTZ (WITH TIME ZONE). 
+    -- Storing naked TIMESTAMPs in a multi-tenant CDP leads to data corruption across timezones.
+    last_login_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    
+    -- Added default empty JSON object to avoid dealing with NULL JSONB values in queries
+    metadata JSONB DEFAULT '{}'::jsonb,
+    
+    -- Added CHECK constraints to force lowercase emails and usernames. 
+    -- This prevents accidental duplicates like 'Admin' vs 'admin' or 'User@Email.com' bypassing the UNIQUE constraints.
+    CONSTRAINT chk_sys_user_username_lower CHECK (username = lower(username)),
+    CONSTRAINT chk_sys_user_email_lower CHECK (email IS NULL OR email = lower(email)),
+
+    -- Tenant-scoped uniqueness
+    CONSTRAINT uq_username UNIQUE (tenant_id, username),
+    CONSTRAINT uq_email UNIQUE (tenant_id, email)
+);
+
+COMMENT ON TABLE customer360.sys_user IS 'Internal application user/staff account. Decoupled from SSO identities (which live in sys_userinfo).';
+
+-- ----------------------------------------------------------------------------
+-- INDEXES
+-- ----------------------------------------------------------------------------
+-- The UNIQUE constraints above automatically create B-Tree indexes for (tenant_id, username) and (tenant_id, email).
+-- We only need to manually index foreign keys and frequent filter columns.
+
+CREATE INDEX IF NOT EXISTS idx_user_tenant ON customer360.sys_user(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_user_org ON customer360.sys_user(organization_id);
+
+-- Added index for status, as admin dashboards frequently filter by active/inactive users
+CREATE INDEX IF NOT EXISTS idx_user_status ON customer360.sys_user(tenant_id, status);
+
+-- ==========================================================
+-- User Login & SSO Identity Management (sys_userinfo)
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS customer360.sys_userinfo (
+    userinfo_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    
+    -- Multi-tenant and User mappings
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES customer360.sys_user(user_id) ON DELETE CASCADE,
+
+    -- Authentication Provider Details
+    -- Examples: 'LOCAL', 'KEYCLOAK', 'GOOGLE', 'MICROSOFT', 'APPLE'
+    auth_provider VARCHAR(50) NOT NULL,
+    
+    -- The unique external subject ID from the identity provider (e.g., JWT sub claim)
+    -- For 'LOCAL' auth_provider, this can act as the unique username or email for login.
+    provider_subject_id TEXT NOT NULL, 
+
+    -- Local Authentication
+    -- Stores the bcrypt/argon2 hash. Only populated when auth_provider = 'LOCAL'.
+    password_hash TEXT,
+
+    -- External SSO Token Caching (Optional)
+    access_token TEXT,
+    refresh_token TEXT,
+    token_expires_at TIMESTAMP WITH TIME ZONE,
+
+    -- Status & Tracking
+    status VARCHAR(20) DEFAULT 'ACTIVE' NOT NULL,
+    last_login_at TIMESTAMP WITH TIME ZONE,
+
+    -- Standard Audit & Extensibility Fields
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    metadata JSONB DEFAULT '{}'::jsonb,
+
+    -- Constraints
+    -- 1. Ensure external SSO IDs (or local usernames) are globally unique per tenant/provider
+    CONSTRAINT uq_sys_userinfo_provider_id UNIQUE (tenant_id, auth_provider, provider_subject_id),
+    
+    -- 2. Ensure a user only links one account per provider per tenant 
+    -- (e.g., a user can only have ONE Google account and ONE Local password linked)
+    CONSTRAINT uq_sys_userinfo_user_provider UNIQUE (tenant_id, user_id, auth_provider)
+);
+
+COMMENT ON TABLE customer360.sys_userinfo IS 'Handles multi-tenant SSO identities (Keycloak, Google, Microsoft) and local password credentials linked to a core sys_user account. Decouples login methods from the core user record to support 1-to-many authentication methods.';
+
+-- ----------------------------------------------------------------------------
+-- INDEXES
+-- ----------------------------------------------------------------------------
+-- Optimizes general tenant and user relationship queries
+CREATE INDEX IF NOT EXISTS idx_sys_userinfo_tenant ON customer360.sys_userinfo(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_sys_userinfo_user ON customer360.sys_userinfo(user_id);
+
+-- Highly optimized lookup index for the authentication pipeline 
+-- (Used immediately upon login to find the user by their SSO token or local username)
+CREATE INDEX IF NOT EXISTS idx_sys_userinfo_provider_lookup ON customer360.sys_userinfo(tenant_id, auth_provider, provider_subject_id);
+
+-- ==========================================================
+-- RBAC Role & Permission Tables
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS customer360.sys_role (
+    role_id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant (tenant_id),
+    role_code VARCHAR(100) NOT NULL,
+    role_name VARCHAR(255) NOT NULL,
+    description TEXT,
+    is_system_role BOOLEAN DEFAULT FALSE,
+    status VARCHAR(20) DEFAULT 'ACTIVE',
+    created_at TIMESTAMP DEFAULT now(),
+    updated_at TIMESTAMP DEFAULT now(),
+    metadata JSONB,
+    CONSTRAINT uq_role_code UNIQUE (tenant_id, role_code)
+);
+
+COMMENT ON TABLE customer360.sys_role IS 'RBAC role definition scoped to a tenant (e.g. Admin, Marketer, Analyst). Granted permissions via sys_role_permission and assigned to users via sys_user_role.';
+
+CREATE INDEX IF NOT EXISTS idx_role_tenant ON customer360.sys_role (tenant_id);
+
+CREATE TABLE IF NOT EXISTS customer360.sys_permission (
+    permission_id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
+    permission_code VARCHAR(150) UNIQUE NOT NULL,
+    resource VARCHAR(100) NOT NULL,
+    action VARCHAR(50) NOT NULL,
+    description TEXT,
+    created_at TIMESTAMP DEFAULT now(),
+    metadata JSONB
+);
+
+COMMENT ON TABLE customer360.sys_permission IS 'Global RBAC permission dictionary (resource + action pair, e.g. profile/read, campaign/write). Shared vocabulary across all tenants -- no tenant_id, same pattern as the other reference dictionaries in this schema.';
+
+CREATE TABLE IF NOT EXISTS customer360.sys_role_permission (
+    role_id UUID NOT NULL REFERENCES customer360.sys_role (role_id) ON DELETE CASCADE,
+    permission_id UUID NOT NULL REFERENCES customer360.sys_permission (permission_id) ON DELETE CASCADE,
+    created_at TIMESTAMP DEFAULT now(),
+    PRIMARY KEY (role_id, permission_id)
+);
+
+COMMENT ON TABLE customer360.sys_role_permission IS 'Join table granting permissions (sys_permission) to roles (sys_role) -- many-to-many.';
+
+CREATE TABLE IF NOT EXISTS customer360.sys_user_role (
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant (tenant_id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES customer360.sys_user (user_id) ON DELETE CASCADE,
+    role_id UUID NOT NULL REFERENCES customer360.sys_role (role_id) ON DELETE CASCADE,
+    assigned_at TIMESTAMP DEFAULT now(),
+    assigned_by UUID,
+    PRIMARY KEY (tenant_id, user_id, role_id)
+);
+
+COMMENT ON TABLE customer360.sys_user_role IS 'Join table assigning roles (sys_role) to users (sys_user) -- many-to-many.';
+
+-- ==========================================================
+-- Audit Log
+-- Enterprise Multi-Tenant CDP
+-- ==========================================================
+
+CREATE TABLE IF NOT EXISTS customer360.sys_audit_log (
+    audit_id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
+
+    -- Multi-tenant
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant (tenant_id),
+    organization_id UUID NULL,
+
+    -- User
+    user_id UUID NULL,
+    username VARCHAR(150),
+    session_id UUID NULL,
+
+    -- Authentication
+    auth_provider VARCHAR(50), -- Keycloak, AzureAD, Google, API_KEY
+    auth_subject TEXT, -- JWT sub
+
+    -- Action
+    action VARCHAR(50) NOT NULL, -- CREATE, UPDATE, DELETE, LOGIN, EXPORT...
+    resource_type VARCHAR(100) NOT NULL,
+    resource_id TEXT,
+
+    -- API
+    service_name VARCHAR(100), -- customer360-api
+    api_endpoint TEXT,
+    http_method VARCHAR(10),
+    http_status SMALLINT,
+
+    -- Network
+    ip_address INET,
+    user_agent TEXT,
+
+    -- Before / After
+    before_data JSONB,
+    after_data JSONB,
+
+    -- Optional changed fields only
+    changed_fields JSONB,
+
+    -- Result
+    success BOOLEAN DEFAULT TRUE,
+    error_code VARCHAR(100),
+    error_message TEXT,
+
+    -- Traceability
+    trace_id UUID,
+    request_id UUID,
+    correlation_id UUID,
+
+    -- Geo (optional)
+    country_code VARCHAR(5),
+    timezone VARCHAR(50),
+
+    -- Event time
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+
+    metadata JSONB
+);
+
+COMMENT ON TABLE customer360.sys_audit_log IS 'Compliance/audit trail: one row per user or API action (CREATE/UPDATE/DELETE/LOGIN/EXPORT/...) with before/after JSONB snapshots, auth provenance, request tracing IDs, and success/error outcome.';
+
+-- ==========================================================
+-- Campaign & Performance Schema
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS customer360.crm_campaign (
+    campaign_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    user_id UUID REFERENCES customer360.sys_user(user_id), -- data owner
+
+    -- Agentic email campaign planning and approval
+    segment_id UUID,
+    approval_status VARCHAR(50) NOT NULL DEFAULT 'Draft',
+    approved_by UUID,
+    approved_at TIMESTAMP WITH TIME ZONE,
+    strategy_summary TEXT,
+    planning_constraints TEXT,
+    ai_plan JSONB,
+    
+    -- Dashboard Dimensions
+    campaign_code VARCHAR(100),
+    name TEXT NOT NULL,
+    status VARCHAR(50) DEFAULT 'Draft',
+    channel VARCHAR(100),
+    platform VARCHAR(100),
+    objective VARCHAR(100),
+    journey_stage VARCHAR(30)
+        CONSTRAINT chk_crm_campaign_journey_stage
+        CHECK (journey_stage IS NULL OR journey_stage IN (
+            'awareness', 'acquisition', 'activation', 'engagement',
+            'conversion', 'retention', 'loyalty', 'churned'
+        )),
+    
+    -- Core details
+    description TEXT,
+    keywords TEXT[],
+    lang TEXT DEFAULT 'en',
+    embedding vector(1536),
+    start_date DATE,
+    end_date DATE,
+    
+    -- Financials
+    budget_amount NUMERIC(18, 2),
+    currency CHAR(3) DEFAULT 'VND',
+    
+    metadata JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    
+    CONSTRAINT uq_crm_campaign_code UNIQUE (tenant_id, campaign_code)
+);
+
+ALTER TABLE customer360.crm_campaign
+    ADD COLUMN IF NOT EXISTS journey_stage VARCHAR(30);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'customer360.crm_campaign'::regclass
+          AND conname = 'chk_crm_campaign_journey_stage'
+    ) THEN
+        ALTER TABLE customer360.crm_campaign
+            ADD CONSTRAINT chk_crm_campaign_journey_stage
+            CHECK (journey_stage IS NULL OR journey_stage IN (
+                'awareness', 'acquisition', 'activation', 'engagement',
+                'conversion', 'retention', 'loyalty', 'churned'
+            ));
+    END IF;
+END $$;
+
+COMMENT ON TABLE customer360.crm_campaign IS 'CRM journey-graph entity: a marketing initiative. Updated to support omnichannel dashboard dimensions (channel, platform, objective, status). Responders are tracked via crm_campaign_member.';
+COMMENT ON COLUMN customer360.crm_campaign.journey_stage IS
+    'Customer journey stage this campaign targets; derived from objective in the app. Lets the journey map show live campaigns per stage.';
+
+CREATE INDEX IF NOT EXISTS idx_crm_campaign_journey_stage
+    ON customer360.crm_campaign (tenant_id, journey_stage)
+    WHERE journey_stage IS NOT NULL;
+
+-- Campaign Performance Daily
+CREATE TABLE IF NOT EXISTS customer360.crm_campaign_performance_daily (
+    performance_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    campaign_id UUID NOT NULL REFERENCES customer360.crm_campaign(campaign_id) ON DELETE CASCADE,
+    experiment_variant_id UUID,
+    
+    -- Time dimension for daily trend aggregation
+    report_date DATE NOT NULL,
+    
+    -- Core funnel metrics tracking
+    spend NUMERIC(18, 2) DEFAULT 0.00,
+    impressions BIGINT DEFAULT 0,
+    clicks BIGINT DEFAULT 0,
+    conversions BIGINT DEFAULT 0,
+    revenue_estimated NUMERIC(18, 2) DEFAULT 0.00,
+    
+    -- System audit fields
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+
+ALTER TABLE customer360.crm_campaign_performance_daily
+    ADD COLUMN IF NOT EXISTS experiment_variant_id UUID;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_campaign_daily_performance_base
+    ON customer360.crm_campaign_performance_daily (tenant_id, campaign_id, report_date)
+    WHERE experiment_variant_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_campaign_daily_performance_variant
+    ON customer360.crm_campaign_performance_daily (tenant_id, campaign_id, report_date, experiment_variant_id)
+    WHERE experiment_variant_id IS NOT NULL;
+
+COMMENT ON TABLE customer360.crm_campaign_performance_daily IS 'Daily aggregated performance metrics for omnichannel campaigns. Tracks spend, impressions, clicks, conversions, and estimated revenue over time.';
+
+-- Campaign Performance Metrics View
+CREATE OR REPLACE VIEW customer360.vw_campaign_performance_metrics AS
+SELECT 
+    c.tenant_id,
+    c.campaign_id,
+    c.campaign_code,
+    c.name,
+    c.status,
+    c.channel,
+    c.platform,
+    c.objective,
+    
+    -- Base Aggregates
+    COALESCE(SUM(p.spend), 0) AS total_spend,
+    COALESCE(SUM(p.impressions), 0) AS total_impressions,
+    COALESCE(SUM(p.clicks), 0) AS total_clicks,
+    COALESCE(SUM(p.conversions), 0) AS total_conversions,
+    COALESCE(SUM(p.revenue_estimated), 0) AS total_revenue,
+    
+    -- Derived KPI: Click-Through Rate (CTR %)
+    CASE WHEN SUM(p.impressions) > 0 
+         THEN ROUND((SUM(p.clicks)::NUMERIC / SUM(p.impressions)) * 100, 2) 
+         ELSE 0.00 END AS ctr_percentage,
+         
+    -- Derived KPI: Conversion Rate (CVR %)
+    CASE WHEN SUM(p.clicks) > 0 
+         THEN ROUND((SUM(p.conversions)::NUMERIC / SUM(p.clicks)) * 100, 2) 
+         ELSE 0.00 END AS cvr_percentage,
+         
+    -- Derived KPI: Cost Per Acquisition (CPA)
+    CASE WHEN SUM(p.conversions) > 0 
+         THEN ROUND(SUM(p.spend) / SUM(p.conversions), 0) 
+         ELSE 0.00 END AS cpa,
+         
+    -- Derived KPI: Return on Ad Spend (ROAS)
+    CASE WHEN SUM(p.spend) > 0 
+         THEN ROUND(SUM(p.revenue_estimated) / SUM(p.spend), 2) 
+         ELSE 0.00 END AS roas
+         
+FROM customer360.crm_campaign c
+LEFT JOIN customer360.crm_campaign_performance_daily p 
+    ON c.campaign_id = p.campaign_id
+GROUP BY 
+    c.tenant_id, 
+    c.campaign_id, 
+    c.campaign_code, 
+    c.name, 
+    c.status, 
+    c.channel, 
+    c.platform, 
+    c.objective;
+
+-- ----------------------------------------------------------------------------
+-- INDEXES & ROW LEVEL SECURITY
+-- ----------------------------------------------------------------------------
+
+-- Indexes for crm_campaign
+CREATE INDEX IF NOT EXISTS idx_crm_campaign_tenant ON customer360.crm_campaign (tenant_id);
+
+-- Indexes for crm_campaign_performance_daily
+-- Optimizes time-series queries (e.g., loading the daily spend trend chart)
+CREATE INDEX IF NOT EXISTS idx_crm_campaign_perf_tenant_date 
+    ON customer360.crm_campaign_performance_daily(tenant_id, report_date DESC);
+    
+-- Optimizes joins when fetching aggregate totals for a specific campaign list
+CREATE INDEX IF NOT EXISTS idx_crm_campaign_perf_campaign 
+    ON customer360.crm_campaign_performance_daily(campaign_id);
+
+-- CampaignMember
+CREATE TABLE IF NOT EXISTS customer360.crm_campaign_member (
+    campaign_member_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    user_id UUID REFERENCES customer360.sys_user(user_id), -- data owner
+    campaign_id UUID REFERENCES customer360.crm_campaign(campaign_id),
+    contact_id UUID,
+    status TEXT,
+    description TEXT,
+    keywords TEXT[],
+    lang TEXT DEFAULT 'en',
+    embedding vector(1536),
+    joined_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    metadata JSONB
+);
+
+COMMENT ON TABLE customer360.crm_campaign_member IS 'A person who responded to / joined a crm_campaign, optionally already linked to a crm_contact.';
+
+-- Lead
+CREATE TABLE IF NOT EXISTS customer360.crm_lead (
+    lead_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    user_id UUID REFERENCES customer360.sys_user(user_id), -- data owner
+    lead_source_id UUID,
+    first_name TEXT,
+    last_name TEXT,
+    email TEXT,
+    phone TEXT,
+    description TEXT,
+    keywords TEXT[],
+    lang TEXT DEFAULT 'en',
+    embedding vector(1536),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    metadata JSONB
+);
+
+COMMENT ON TABLE customer360.crm_lead IS 'CRM journey-graph entity: a potential buyer not yet tied to a crm_opportunity, sourced via crm_lead_source.';
+
+-- Lead Source
+CREATE TABLE IF NOT EXISTS customer360.crm_lead_source (
+    lead_source_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    user_id UUID REFERENCES customer360.sys_user(user_id), -- data owner
+    name TEXT NOT NULL,
+    description TEXT,
+    keywords TEXT[],
+    lang TEXT DEFAULT 'en',
+    embedding vector(1536),
+    metadata JSONB
+);
+
+COMMENT ON TABLE customer360.crm_lead_source IS 'Dictionary of channels/origins that generate crm_lead rows (e.g. web form, trade show, referral).';
+
+-- Contact
+CREATE TABLE IF NOT EXISTS customer360.crm_contact (
+    contact_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    user_id UUID REFERENCES customer360.sys_user(user_id), -- data owner
+    first_name TEXT,
+    last_name TEXT,
+    email TEXT,
+    phone TEXT,
+    account_id UUID,
+    description TEXT,
+    keywords TEXT[],
+    lang TEXT DEFAULT 'en',
+    embedding vector(1536),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    metadata JSONB
+);
+
+COMMENT ON TABLE customer360.crm_contact IS 'CRM journey-graph entity: a crm_lead engaged seriously by sales, belonging to a crm_account.';
+
+-- Account
+CREATE TABLE IF NOT EXISTS customer360.crm_account (
+    account_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    user_id UUID REFERENCES customer360.sys_user(user_id), -- data owner
+    name TEXT NOT NULL,
+    industry_id UUID,
+    description TEXT,
+    keywords TEXT[],
+    lang TEXT DEFAULT 'en',
+    embedding vector(1536),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    metadata JSONB
+);
+
+COMMENT ON TABLE customer360.crm_account IS 'CRM journey-graph entity: an organization/company, classified by crm_industry, that crm_contact and crm_opportunity rows belong to.';
+
+-- Opportunity
+CREATE TABLE IF NOT EXISTS customer360.crm_opportunity (
+    opportunity_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    user_id UUID REFERENCES customer360.sys_user(user_id), -- data owner
+    account_id UUID REFERENCES customer360.crm_account(account_id),
+    name TEXT,
+    value NUMERIC,
+    stage TEXT,
+    close_date DATE,
+    description TEXT,
+    keywords TEXT[],
+    lang TEXT DEFAULT 'en',
+    embedding vector(1536),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    metadata JSONB
+);
+
+COMMENT ON TABLE customer360.crm_opportunity IS 'CRM journey-graph entity: a potential sales transaction tied to a crm_account, with monetary value/stage/close_date.';
+
+-- Industry
+CREATE TABLE IF NOT EXISTS customer360.crm_industry (
+    industry_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    user_id UUID REFERENCES customer360.sys_user(user_id), -- data owner
+    name TEXT NOT NULL,
+    description TEXT,
+    keywords TEXT[],
+    lang TEXT DEFAULT 'en',
+    embedding vector(1536),
+    metadata JSONB
+);
+
+COMMENT ON TABLE customer360.crm_industry IS 'Dictionary of industry classifications used to categorize crm_account rows.';
+
+-- tenant_id indexes for the CRM entity tables above, used both for lookup
+-- performance and by the tenant_id RLS policies (see ROW LEVEL SECURITY
+-- section at the end of this file).
+CREATE INDEX IF NOT EXISTS idx_crm_campaign_member_tenant ON customer360.crm_campaign_member (tenant_id);
+
+CREATE INDEX IF NOT EXISTS idx_crm_lead_tenant ON customer360.crm_lead (tenant_id);
+
+CREATE INDEX IF NOT EXISTS idx_crm_lead_source_tenant ON customer360.crm_lead_source (tenant_id);
+
+CREATE INDEX IF NOT EXISTS idx_crm_contact_tenant ON customer360.crm_contact (tenant_id);
+
+CREATE INDEX IF NOT EXISTS idx_crm_account_tenant ON customer360.crm_account (tenant_id);
+
+CREATE INDEX IF NOT EXISTS idx_crm_opportunity_tenant ON customer360.crm_opportunity (tenant_id);
+
+CREATE INDEX IF NOT EXISTS idx_crm_industry_tenant ON customer360.crm_industry (tenant_id);
+
+---------------------------------------------------
+-- MASTER PROFILES & IDENTITY RESOLUTION
+---------------------------------------------------
+
+-- ============================================================================
+-- LEO CDP MASTER PROFILE SCHEMA (PostgreSQL 16+)
+-- ============================================================================
+-- Description: Golden customer profile containing the consolidated ("resolved")
+-- identity across multiple data sources (Adjust, OneSignal, Web Tracking / GA4,
+-- POS, Core Banking, etc.) for both retail and banking domains.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS customer360.cdp_master_profiles (
+    -- ------------------------------------------------------------------------
+    -- SYSTEM & TENANT METADATA
+    -- ------------------------------------------------------------------------
+    master_profile_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    -- Multi-tenancy support. Ensures data isolation between different workspaces.
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    -- Data owner: internal sys_user who created/manages this profile (nullable -- most
+    -- profiles are created by ingestion pipelines, not an interactive admin user).
+    user_id UUID REFERENCES customer360.sys_user(user_id),
+    -- Business context of the profile to drive domain-specific UI and activation logic.
+    -- Validated against active customer360.sys_domain codes at the API layer
+    -- (core.utils.domains.validate_domain_value) rather than a hardcoded CHECK,
+    -- so new domains can be onboarded via sys_domain without a schema migration.
+    domain TEXT NOT NULL DEFAULT '_',
+
+    -- ------------------------------------------------------------------------
+    -- CORE IDENTITY (PII & DEMOGRAPHICS)
+    -- Standard demographic data used for personalization and primary matching.
+    -- ------------------------------------------------------------------------
+    full_name TEXT,
+    first_name TEXT,
+    last_name TEXT,
+    profile_picture_url TEXT,
+    -- True if full_name/email/phone_number and any domain-level PII identifier
+    -- (e.g. national_id stored in cdp_domain_profiles.domain_attributes) are
+    -- SHA-256 hashed for privacy
+    -- (e.g. hashed-match ingestion a la Meta/Google Customer Match). Whenever TRUE,
+    -- current_persona_id (below) MUST be populated -- see the CHECK constraint at the end of
+    -- this table -- since hashed PII can no longer be used as a human-readable label for
+    -- browsing/semantic search. current_persona_id is computed by application code (see
+    -- customer360-dao/src/leo_customer360_dao/agentic_engines/persona.py), never by the DB.
+    is_hashed BOOLEAN NOT NULL DEFAULT FALSE,
+
+    -- Primary contact info (used for primary identity stitching and marketing)
+    email TEXT,
+    phone_number TEXT,
+
+    -- Secondary contact info
+    -- Format: [{"email": "work@abc.com", "label": "work"}, {"email": "old@xyz.com", "label": "personal"}]
+    secondary_emails JSONB DEFAULT '[]'::JSONB,
+    -- Format: [{"phone": "+84901234567", "label": "home"}]
+    secondary_phones JSONB DEFAULT '[]'::JSONB,
+    
+    date_of_birth DATE,
+    gender TEXT CHECK (gender IN ('male','female','other')),
+    -- Flexible JSON document for complex address storage 
+    -- Format: {"street": "123 Le Loi", "city": "Ho Chi Minh", "country": "VN"}
+    address JSONB,
+    -- Company/employer name for B2B matching and corporate account association
+    company_name TEXT,
+
+    -- ------------------------------------------------------------------------
+    -- CROSS-CHANNEL IDENTITY GRAPH
+    -- Identifiers resolved and merged from cdp_raw_profiles_stage.
+    -- ------------------------------------------------------------------------
+    -- Maps a source_system to its own customer identifier (Deterministic matching).
+    -- e.g: adjust_id, google_ads_id, zalo_user_id, onesignal_id, firebase_id, etc.
+    external_ids JSONB DEFAULT '{}'::JSONB,
+    -- Hardware or app-specific identifiers for mobile attribution (IDFV, Android ID).
+    device_ids TEXT[] DEFAULT ARRAY[]::TEXT[],
+    -- Mobile advertising identifiers for retargeting campaigns (Adjust IDFA/GAID).
+    advertising_ids TEXT[] DEFAULT ARRAY[]::TEXT[],
+    -- Anonymous browser cookies for web tracking and session stitching.
+    cookie_ids TEXT[] DEFAULT ARRAY[]::TEXT[],
+    -- Stored tokens for push notification services (OneSignal, Firebase).
+    -- Format: {"fcm": "token_string", "apns": "token_string"}
+    push_tokens JSONB DEFAULT '{}'::JSONB,
+
+    -- NOTE: Domain-specific attributes are saved in cdp_domain_profiles.domain_attributes .
+
+    -- ------------------------------------------------------------------------
+    -- MARKETING & ENGAGEMENT
+    -- Attribution data and computed fields used for audience building.
+    -- ------------------------------------------------------------------------
+    -- current_persona_id tracks the current assignment while preserving the
+    -- full assignment history in cdp_customer_personas. Its FK is declared
+    -- after cdp_customer_personas because both tables reference each other.
+    current_persona_id UUID,
+    persona_name TEXT, -- keep to ADD a short label for the persona (e.g., "Gen Z Shopper", "High-Value Investor") for quick filtering and segmentation in dashboards and queries.
+    -- Longer, human-readable narrative summary of the customer (behavior,
+    -- preferences, notable traits) usually generated by an LLM or the
+    -- segmentation pipeline -- complements the short persona_name label above.
+    persona_summary TEXT,
+
+    -- First-touch channel attribution (e.g., 'organic_search', 'paid_social').
+    acquisition_source TEXT,
+    -- First-touch campaign attribution.
+    acquisition_campaign TEXT,
+    -- Computed labels for fast Audience Builder queries (e.g., 'gen_z', 'frequent_buyer').
+    segmentation_tags TEXT[],
+    -- Standardized IAB Audience Taxonomy 1.1 tag names (from customer360.cdp_audience_tags.tag_name)
+    -- mapped onto profiles when segments with selected audience_tags are built/recomputed.
+    audience_tags TEXT[],
+    -- Schemaless payload for flexible traits extracted dynamically.
+    -- Format: {"occupation": "engineer", "income_segment": "high", "preferred_category": "electronics"}
+    attributes JSONB DEFAULT '{}'::JSONB,
+    -- Stores explicit channel/provider consent evidence and derived eligibility.
+    -- Only literal JSON true grants consent; missing or malformed values fail closed.
+    -- Example source flags: email_opt_in, sms_opt_in, push_opt_in, zalo_opt_in,
+    -- whatsapp_opt_in, voice_opt_in, meta_ads_opt_in, google_ads_opt_in, and
+    -- tiktok_ads_opt_in.
+    -- eligibility_policy is a separate evaluated result and never replaces consent.
+    communication_preferences JSONB DEFAULT '{}'::JSONB,
+
+    -- Analytics-related data sources and metrics.
+    -- Example format: {"Data Source ID": {"page_views": 123, "click_through_rate": 0.05}}
+    data_source_analytics JSONB DEFAULT '{}'::JSONB,
+
+    -- ------------------------------------------------------------------------
+    -- LINEAGE & AUDIT
+    -- ------------------------------------------------------------------------
+    -- Array of all external systems that have contributed data to this profile.
+    source_systems TEXT[] DEFAULT ARRAY[]::TEXT[],
+    -- Lineage pointer back to the raw_profile_id that initiated this profile.
+    first_seen_raw_profile_id UUID,
+    -- Denormalized count of raw profiles (cdp_profile_links, status='ACTIVE')
+    -- merged into this golden record -- a CIR match-volume/confidence signal
+    -- distinct from source_systems (which only tracks distinct SYSTEMS, not
+    -- distinct raw touches).
+    linked_raw_profile_count INTEGER NOT NULL DEFAULT 0,
+    -- Timestamp Customer Identity Resolution (CIR) last (re)computed/updated
+    -- this profile's identity graph; distinct from updated_at (any row touch)
+    -- and scores_updated_at (ML scores only).
+    last_identity_resolved_at TIMESTAMP WITH TIME ZONE,
+
+    -- ------------------------------------------------------------------------
+    -- CUSTOMER LIFECYCLE & ENGAGEMENT TRACKING
+    -- The lead-to-customer journey can span months; these fields track where a
+    -- profile currently sits in that journey and how fresh/actionable it is.
+    -- ------------------------------------------------------------------------
+    -- Date the profile first converted from lead/prospect to paying customer.
+    customer_since DATE,
+    -- Timestamp of the profile's most recent activity across any channel.
+    -- Updated continuously by the streaming/event pipeline (not batch).
+    last_activity_at TIMESTAMP WITH TIME ZONE,
+    -- Channel the customer engages with most, used to drive recommendation/
+    -- next-best-action logic (e.g. 'Mobile App', 'Website', 'Internet Banking App').
+    preferred_channel TEXT,
+    -- Current stage in the prospect-to-customer journey, for lifecycle marketing
+    -- and reporting. Distinct from churn_risk_tier (a churn-model score) --
+    -- 'churn_risk' here is a lifecycle bucket, not a probability.
+    lifecycle_stage TEXT CHECK (
+        lifecycle_stage IN (
+            'prospect',
+            'lead',
+            'customer',
+            'vip',
+            'dormant',
+            'churn_risk'
+        )
+    ),
+
+
+    -- ------------------------------------------------------------------------
+    -- 🚀 ML & ANALYTICS SCORING MODELS
+    -- Computed asynchronously by data pipelines / ML models.
+    -- ------------------------------------------------------------------------
+
+    -- 1. Lead & Conversion Scoring
+    -- Propensity of the user to convert or purchase a new product (0.0000 to 1.0000)
+    lead_conversion_probability NUMERIC(5, 4),
+    -- Categorical grade (e.g., 'A', 'B', 'Hot', 'Cold') for quick segmentation
+    lead_grade TEXT,
+
+    -- 2. Churn Scoring
+    -- Probability that the user will stop using the service/bank (0.0000 to 1.0000)
+    churn_probability NUMERIC(5, 4),
+    -- Bucketized risk level for marketing automation
+    churn_risk_tier TEXT CHECK (
+        churn_risk_tier IN (
+            'low',
+            'medium',
+            'high',
+            'critical'
+        )
+    ),
+
+    -- 3. Customer Lifetime Value (CLV) Scoring
+    -- Actual realized revenue/profit to date
+    historical_clv NUMERIC(15, 2) DEFAULT 0.00,
+    -- ML-predicted future revenue generation
+    predictive_clv NUMERIC(15, 2),
+    -- Combined or segmented CLV tier
+    clv_segment TEXT,
+
+    -- 4. Customer Experience (CX) & Engagement Scoring
+    -- Overall interaction frequency/depth score (0 to 100)
+    engagement_score NUMERIC(5, 2),
+    -- Most recent Net Promoter Score (0 to 10)
+    latest_nps_score INTEGER CHECK (
+        latest_nps_score >= 0
+        AND latest_nps_score <= 10
+    ),
+    -- Average Customer Satisfaction Score across interactions
+    average_csat NUMERIC(3, 2),
+    -- NLP-derived sentiment from support tickets and social mentions (-1.0 to 1.0)
+    overall_sentiment_score NUMERIC(5, 4),
+
+    -- 5. Data Quality & Identity Resolution Scoring
+    -- Percentage of critical profile fields filled out (0 to 100)
+    profile_completeness_score NUMERIC(5, 2),
+    -- Confidence score of the identity stitching algorithm (0.0000 to 1.0000)
+    identity_confidence_score NUMERIC(5, 4),
+
+    -- Scoring Metadata
+    -- Tracks which ML model versions generated the current scores.
+    -- Format: {"churn_model": "v2.1", "clv_model": "v1.4"}
+    model_versions JSONB DEFAULT '{}'::JSONB,
+    -- Tracks the last time the batch or streaming pipelines updated these scores.
+    scores_updated_at TIMESTAMP WITH TIME ZONE,
+
+    -- =========================================================================
+    -- SYSTEM METADATA
+    -- =========================================================================
+    created_at TIMESTAMP DEFAULT now(),
+    updated_at TIMESTAMP DEFAULT now(),
+    status_code SMALLINT DEFAULT 1, -- 1: active, 0: inactive, -1: delete
+
+    -- Business rule: a profile with hashed PII is not human-readable/searchable without a
+    -- persona_name stand-in. Enforced at the DB layer in addition to application code.
+    CONSTRAINT chk_cdp_mp_hashed_requires_persona_name CHECK (is_hashed = FALSE OR persona_name IS NOT NULL),
+    CONSTRAINT chk_cdp_mp_probability_ranges CHECK (
+        (lead_conversion_probability IS NULL OR lead_conversion_probability BETWEEN 0 AND 1)
+        AND (churn_probability IS NULL OR churn_probability BETWEEN 0 AND 1)
+        AND (identity_confidence_score IS NULL OR identity_confidence_score BETWEEN 0 AND 1)
+    ),
+    CONSTRAINT chk_cdp_mp_score_ranges CHECK (
+        (engagement_score IS NULL OR engagement_score BETWEEN 0 AND 100)
+        AND (overall_sentiment_score IS NULL OR overall_sentiment_score BETWEEN -1 AND 1)
+        AND (profile_completeness_score IS NULL OR profile_completeness_score BETWEEN 0 AND 100)
+    )
+);
+
+COMMENT ON TABLE customer360.cdp_master_profiles IS 'The golden/resolved customer profile (identity-resolution output): consolidated demographics, cross-channel identity graph, retail/banking/real-estate/travel/media/education domain attributes, marketing/persona fields, lineage, lifecycle tracking, and the full ML scoring block (lead, churn, CLV, CX, data quality). One row per real person per tenant+domain, built by CustomerIdentityResolver from cdp_raw_profiles_stage.';
+
+
+-- ============================================================================
+-- CUSTOMER DOMAIN PROFILES
+-- ----------------------------------------------------------------------------
+-- One Master Customer Profile may have multiple Domain Profiles.
+--
+-- Examples
+-- --------
+-- Thomas
+--   ├── Retail Profile
+--   ├── Banking Profile
+--   ├── Travel Profile
+--   ├── Education Profile
+--   └── Media Profile
+--
+-- Each domain owns its own metadata, engagement score and AI persona.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS customer360.cdp_domain_profiles (
+
+    -- ========================================================================
+    -- PRIMARY KEYS
+    -- ========================================================================
+
+    domain_profile_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- Tenant
+    tenant_id UUID NOT NULL
+        REFERENCES customer360.sys_tenant(tenant_id),
+
+    -- Parent Customer 360 profile
+    master_profile_id UUID NOT NULL
+        REFERENCES customer360.cdp_master_profiles(master_profile_id)
+        ON DELETE CASCADE,
+
+    -- Business Domain
+    domain_id UUID NOT NULL
+        REFERENCES customer360.sys_domain(domain_id),
+
+    -- ========================================================================
+    -- DOMAIN PROFILE
+    -- ========================================================================
+
+    -- Human friendly display name inside this domain.
+    -- Example:
+    --   Retail : "VIP Shopper"
+    --   Banking: "Priority Customer"
+    profile_name TEXT,
+
+    -- Current lifecycle inside this business domain.
+    --
+    -- Example:
+    -- prospect
+    -- active
+    -- inactive
+    -- suspended
+    -- closed
+    lifecycle_stage TEXT,
+
+    -- ========================================================================
+    -- AI PROFILE
+    -- ========================================================================
+
+    -- AI generated customer persona for THIS domain only.
+    persona_name TEXT,
+
+    -- AI generated explanation.
+    persona_summary TEXT,
+
+    -- AI-computed engagement score (0-100).
+    --
+    -- Retail:
+    -- purchase frequency
+    -- store visits
+    --
+    -- Banking:
+    -- transaction activity
+    -- product usage
+    --
+    -- Travel:
+    -- bookings
+    -- trips
+    --
+    -- Media:
+    -- reading
+    -- watch time
+    --
+    -- Education:
+    -- lesson completion
+    -- study time
+    engagement_score NUMERIC(5,2),
+
+    -- ========================================================================
+    -- DOMAIN METADATA
+    -- ========================================================================
+
+    -- Flexible business metadata.
+    --
+    -- Retail
+    -- {
+    --   "loyalty_id":"VIP001",
+    --   "membership_tier":"Gold",
+    --   "preferred_store":"HCM001"
+    -- }
+    --
+    -- Banking
+    -- {
+    --   "cif_number":"1000001",
+    --   "kyc_status":"verified",
+    --   "risk_segment":"Low"
+    -- }
+    --
+    -- Travel
+    -- {
+    --   "loyalty_program":"SkyTeam",
+    --   "preferred_class":"Business"
+    -- }
+    --
+    -- Education
+    -- {
+    --   "student_id":"ST100",
+    --   "institution":"MIT"
+    -- }
+    --
+    -- Media
+    -- {
+    --   "subscription_id":"NETFLIX001",
+    --   "preferred_genres":["Technology","AI"]
+    -- }
+    -- Generic bag of domain-specific attributes.
+    -- Example keys (not exhaustive):
+    -- retail: loyalty_id, membership_tier, preferred_store_code
+    -- banking: national_id, cif_number, account_numbers, kyc_status, risk_segment
+    -- real_estate: property_types_of_interest, preferred_location_codes
+    -- travel: travel_loyalty_program_id, preferred_travel_class
+    -- media: media_subscription_id, preferred_content_genres
+    -- education: student_id, institution_name
+    domain_attributes JSONB NOT NULL DEFAULT '{}'::jsonb,
+
+    -- ========================================================================
+    -- DOMAIN ANALYTICS
+    -- ========================================================================
+
+    -- Flexible AI output
+    --
+    -- Examples
+    --
+    -- propensity scores
+    -- churn prediction
+    -- recommendation vectors
+    -- CLV
+    -- next best action
+    analytics JSONB DEFAULT '{}'::jsonb,
+
+    -- ========================================================================
+    -- ACTIVITY
+    -- ========================================================================
+
+    first_activity_at TIMESTAMP WITH TIME ZONE,
+
+    last_activity_at TIMESTAMP WITH TIME ZONE,
+
+    -- ========================================================================
+    -- AUDIT
+    -- ========================================================================
+
+    status_code SMALLINT NOT NULL DEFAULT 1,
+
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+
+    updated_at TIMESTAMP NOT NULL DEFAULT now(),
+
+    -- One profile per domain
+    CONSTRAINT uq_cdp_domain_profiles
+        UNIQUE(master_profile_id, domain_id),
+
+    CONSTRAINT chk_cdp_domain_profiles_domain_attributes_object
+        CHECK (jsonb_typeof(domain_attributes) = 'object'),
+
+    CONSTRAINT chk_cdp_domain_profiles_analytics_object
+        CHECK (analytics IS NULL OR jsonb_typeof(analytics) = 'object'),
+
+    CONSTRAINT chk_cdp_domain_profiles_engagement_range
+        CHECK (engagement_score IS NULL OR engagement_score BETWEEN 0 AND 100)
+
+);
+
+COMMENT ON TABLE customer360.cdp_domain_profiles IS
+'Business-domain-specific customer profile attached to a Customer 360 Master Profile. Stores AI persona, engagement score and flexible domain metadata.';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_domain_profiles_tenant_domain
+    ON customer360.cdp_domain_profiles (tenant_id, domain_id);
+
+CREATE INDEX IF NOT EXISTS idx_cdp_domain_profiles_tenant_master
+    ON customer360.cdp_domain_profiles (tenant_id, master_profile_id);
+
+CREATE INDEX IF NOT EXISTS idx_cdp_domain_profiles_attributes
+    ON customer360.cdp_domain_profiles
+    USING GIN(domain_attributes);
+
+CREATE INDEX IF NOT EXISTS idx_cdp_domain_profiles_analytics
+    ON customer360.cdp_domain_profiles
+    USING GIN(analytics);
+
+-- ============================================================================
+-- Auto-catalog trigger: every domain_attributes JSONB key gets registered
+-- into cdp_profile_attributes automatically.
+-- ============================================================================
+-- Deliberately NOT one btree expression index per domain_attributes key
+-- (((domain_attributes ->> 'some_key'))): in production a Customer 360 tenant
+-- can introduce arbitrarily many domain-specific keys over time (per
+-- tenant/domain), and one physical index per key does not scale -- every new
+-- key would require a manual ALTER/migration, bloats pg_class/autovacuum
+-- work, and most keys are never queried at all. Instead:
+--   1. The single existing GIN index above (idx_cdp_domain_profiles_attributes)
+--      already accelerates arbitrary-key containment/existence queries
+--      (`domain_attributes @> '{"key":"value"}'`, `domain_attributes ? 'key'`)
+--      for ANY key, present or future, with zero per-key maintenance.
+--   2. The segmentation JOIN (core/crud/segmentation.py::DOMAIN_ATTRIBUTES_JOIN_SQL)
+--      always starts FROM cdp_master_profiles and narrows to a single
+--      cdp_domain_profiles row via idx_cdp_domain_profiles_tenant_master
+--      (tenant_id, master_profile_id) BEFORE ever touching domain_attributes --
+--      the ->>'key' = 'value' filter is then evaluated in-memory on that one
+--      already-fetched row, not via an index scan on cdp_domain_profiles. So
+--      per-key indexes were never actually load-bearing for that query shape.
+--   3. If a SPECIFIC key becomes hot enough to need its own index (proven by
+--      real query plans, not speculation), promote it to a real scalar column
+--      instead of adding yet another expression index -- see the discussion
+--      in this session's notes on when to graduate a JSONB key to a column.
+CREATE OR REPLACE FUNCTION customer360.sync_domain_attribute_catalog()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_domain_code TEXT;
+    v_attribute_group TEXT;
+    v_key TEXT;
+    v_value JSONB;
+    v_data_type TEXT;
+BEGIN
+    IF NEW.domain_attributes IS NULL OR jsonb_typeof(NEW.domain_attributes) <> 'object' THEN
+        RETURN NEW;
+    END IF;
+
+    SELECT domain_code INTO v_domain_code
+    FROM customer360.sys_domain
+    WHERE domain_id = NEW.domain_id;
+
+    -- attribute_group has a fixed CHECK-constraint enum; fall back to
+    -- GENERAL for any domain_code that doesn't map onto it 1:1.
+    v_attribute_group := UPPER(COALESCE(v_domain_code, 'general'));
+    IF v_attribute_group NOT IN (
+        'SYSTEM', 'IDENTITY', 'IDENTITY_GRAPH', 'RETAIL', 'BANKING', 'REAL_ESTATE',
+        'TRAVEL', 'MEDIA', 'EDUCATION', 'MARKETING', 'LINEAGE', 'LIFECYCLE',
+        'LEAD_SCORING', 'CHURN_SCORING', 'CLV_SCORING', 'CX_SCORING', 'DATA_QUALITY', 'GENERAL'
+    ) THEN
+        v_attribute_group := 'GENERAL';
+    END IF;
+
+    FOR v_key, v_value IN SELECT * FROM jsonb_each(NEW.domain_attributes) LOOP
+        v_data_type := CASE jsonb_typeof(v_value)
+            WHEN 'array' THEN 'ARRAY'
+            WHEN 'object' THEN 'JSONB'
+            WHEN 'number' THEN 'NUMERIC'
+            WHEN 'boolean' THEN 'BOOLEAN'
+            ELSE 'TEXT'
+        END;
+
+        -- ON CONFLICT DO NOTHING is deliberate: this trigger only discovers
+        -- brand-new keys. Once a key exists in the catalog (whether seeded
+        -- or auto-discovered), a human curator may have since refined its
+        -- name/description/is_pii/is_identity_resolution/is_segmentable --
+        -- the trigger must never clobber that curation on a later write that
+        -- merely reuses the same key.
+        INSERT INTO customer360.cdp_profile_attributes (
+            attribute_internal_code, master_profile_column, name, description,
+            attribute_group, source_table, data_type, domain_scope,
+            is_pii, status, is_segmentable, is_ai_agent, value_type, display_order
+        ) VALUES (
+            v_key, NULL, initcap(replace(v_key, '_', ' ')),
+            'Auto-discovered from customer360.cdp_domain_profiles.domain_attributes by sync_domain_attribute_catalog().',
+            v_attribute_group, 'cdp_domain_profiles', v_data_type,
+            COALESCE(v_domain_code, 'all'),
+            FALSE, 'ACTIVE',
+            v_data_type NOT IN ('ARRAY', 'JSONB'), FALSE, 'metadata', 999
+        )
+        ON CONFLICT (attribute_internal_code) DO NOTHING;
+    END LOOP;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION customer360.sync_domain_attribute_catalog() IS
+'Auto-registers every JSONB key seen in cdp_domain_profiles.domain_attributes as a row in cdp_profile_attributes (source_table=cdp_domain_profiles), so the attribute catalog never silently drifts from what application code actually writes. Never overwrites an existing catalog row (ON CONFLICT DO NOTHING) -- curated metadata always wins over auto-discovery.';
+
+DROP TRIGGER IF EXISTS trg_sync_domain_attribute_catalog ON customer360.cdp_domain_profiles;
+
+CREATE TRIGGER trg_sync_domain_attribute_catalog
+    AFTER INSERT OR UPDATE OF domain_attributes ON customer360.cdp_domain_profiles
+    FOR EACH ROW
+    EXECUTE FUNCTION customer360.sync_domain_attribute_catalog();
+
+
+-- Raw profiles staging
+-- Landing zone for every inbound source: Adjust (mobile attribution/install
+-- events), OneSignal (engagement/push events), Web Tracking / GA4 (browser
+-- events), and domain-specific sources like POS or Core Banking, for both the
+-- unclassified (_), retail, banking, and other business domains.
+CREATE TABLE IF NOT EXISTS customer360.cdp_raw_profiles_stage (
+    raw_profile_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    -- Concrete inbound connector lineage. This remains separate from
+    -- source_system because several connectors can emit the same protocol.
+    data_source_id UUID,
+    
+    -- Analytics-related data sources and metrics.
+    -- Example format: {"Data Source ID": {"page_views": 123, "click_through_rate": 0.05}}
+    data_source_analytics JSONB DEFAULT '{}'::JSONB,
+
+    -- Data owner: internal sys_user who created/manages this row (nullable -- rows are
+    -- normally landed by ingestion pipelines, not an interactive admin user).
+    user_id UUID REFERENCES customer360.sys_user(user_id),
+    -- Validated against sys_domain at the API layer, see cdp_master_profiles.domain above.
+    domain TEXT NOT NULL DEFAULT '_',
+    source_system TEXT NOT NULL,        -- 'Adjust' | 'OneSignal' | 'WebTracking' | 'CoreBanking' | 'POS' | ...
+    channel TEXT,                       -- 'mobile_app' | 'web' | 'pos' | 'call_center' | ...
+
+    -- Core identity fields as reported by the source
+    profile_type TEXT CHECK (
+        profile_type IN (
+            'individual',
+            'business',
+            'organization'
+        )
+    ) DEFAULT 'individual',
+    external_customer_id TEXT, -- Adjust customer_user_id / OneSignal unique_id / core banking CIF / loyalty_id
+    full_name TEXT,
+    first_name TEXT,
+    last_name TEXT,
+    email TEXT,
+    phone_number TEXT,
+    national_id TEXT, -- banking KYC identifier (CMND/CCCD/passport)
+    date_of_birth DATE, -- for probabilistic/fuzzy matching
+
+    -- Physical address (structured for fuzzy matching on Address entity)
+    address_line1 TEXT,
+    address_line2 TEXT,
+    city TEXT,
+    state_province TEXT,
+    postal_code TEXT,
+    country TEXT,
+    company_name TEXT,
+
+    -- Device & marketing identity (Adjust / OneSignal / Web Tracking)
+    device_id TEXT, -- IDFV / Android ID / app instance id
+    advertising_id TEXT, -- IDFA / GAID
+    platform TEXT, -- ios | android | web
+    app_version TEXT,
+    push_token TEXT,
+    cookie_id TEXT, -- Web Tracking anonymous/browser cookie id
+    ga_client_id TEXT, -- Google Analytics client id
+    session_id TEXT,
+    anonymous_id TEXT, -- Web tracking anonymous identifier
+    device_fingerprint TEXT, -- Web tracking device fingerprint
+    ip_address INET,
+    user_agent TEXT,
+
+    -- Granular Adjust device/app identifiers and metadata (see
+    -- customer360-seeding/data-dictionary/adjust-metadata.md sections 3.2/3.4).
+    -- idfa/idfv/android_id/imei are the raw per-platform values that ingestion
+    -- maps onto device_id/advertising_id above for CIR matching; kept here too
+    -- for lineage/audit and as a fallback if the mapping needs to be redone.
+    idfa TEXT, -- iOS advertising id; all-zero when ATT is not authorized (see att below)
+    idfv TEXT, -- iOS vendor id
+    android_id TEXT,
+    imei TEXT, -- legacy Android device id, restricted on modern OS versions -- do not use as a matching key
+    att TEXT, -- iOS 14+ ATT status: not_determined | denied | authorized | restricted
+    device_type TEXT, -- phone | tablet | other
+    os_version TEXT,
+    sdk_version TEXT, -- Adjust SDK version
+    app_id TEXT,
+    app_name TEXT,
+    bundle_id TEXT,
+    operator TEXT, -- SIM MCCMNC carrier name
+    carrier TEXT, -- Android carrier name (getSimCarrierIdName)
+    network_type TEXT, -- e.g. wifi | cellular
+    wifi BOOLEAN,
+    language TEXT, -- device locale, e.g. vi-VN
+    gp_broadcast_referrer TEXT,
+
+    -- Marketing attribution (Adjust install/campaign touch + Web UTM).
+    -- See adjust-metadata.md section 3.1; sub_param_1..5 and other rarely
+    -- used custom link params are intentionally not broken out into columns
+    -- here -- they land in event_payload instead.
+    media_source TEXT,
+    campaign TEXT,
+    campaign_id TEXT, -- af_c_id
+    campaign_type TEXT, -- UA | Organic | Retargeting | Unknown
+    match_type TEXT, -- SRN | id_matching | probabilistic | deeplink | ...
+    conversion_type TEXT, -- install | reinstall | re-engagement | unknown
+    is_organic BOOLEAN,
+    is_retargeting BOOLEAN,
+    is_primary_attribution BOOLEAN,
+    attributed_touch_type TEXT, -- click | impression | pre-installed
+    attributed_touch_time TIMESTAMP WITH TIME ZONE,
+    click_time TIMESTAMP WITH TIME ZONE,
+    install_time TIMESTAMP WITH TIME ZONE,
+    reattributed_touch_time TIMESTAMP WITH TIME ZONE,
+    reattributed_touch_type TEXT,
+    media_channel TEXT, -- af_channel traffic sub-channel (e.g. YouTube, Instagram) -- distinct from the distribution `channel` column above
+    agency TEXT, -- af_prt
+    adset TEXT,
+    adset_id TEXT,
+    ad_name TEXT,
+    ad_id TEXT,
+    ad_type TEXT,
+    keywords TEXT,
+    site_id TEXT, -- af_siteid (publisher)
+    sub_site_id TEXT,
+    cost_model TEXT,
+    cost_value NUMERIC(12, 4),
+    cost_currency CHAR(3),
+    http_referrer TEXT,
+    fb_campaign_id TEXT,
+    fb_adset_id TEXT,
+    fb_adset_name TEXT,
+    fb_ad_id TEXT,
+    fb_ad_name TEXT,
+    utm_source TEXT,
+    utm_medium TEXT,
+    utm_campaign TEXT,
+
+    -- Protect360 fraud signals (see adjust-metadata.md section 3.8)
+    blocked_reason TEXT,
+    blocked_reason_value TEXT,
+
+    event_name TEXT,                    -- e.g. install, login, page_view, purchase
+    event_time TIMESTAMP WITH TIME ZONE,
+    event_payload JSONB,                -- full raw source payload / extracted attributes
+
+    status_code SMALLINT DEFAULT 1,  -- 3: processed, 2: in-progress, 1: new, 0: inactive, -1: delete
+    processed_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP DEFAULT now()
+);
+
+COMMENT ON TABLE customer360.cdp_raw_profiles_stage IS 'Landing zone for every inbound source (Adjust, OneSignal, Web Tracking/GA4, POS, Core Banking, ...) before Customer Identity Resolution (CIR). Carries per-source identity + marketing attribution (including granular Adjust device/attribution/Protect360 fields, see adjust-metadata.md) and a processing-queue status_code (1 new -> 2 in-progress -> 3 processed).';
+
+-- Links (raw → master)
+CREATE TABLE IF NOT EXISTS customer360.cdp_profile_links (
+    link_id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant (tenant_id),
+    user_id UUID REFERENCES customer360.sys_user (user_id), -- data owner (nullable, pipeline-created)
+    raw_profile_id UUID NOT NULL REFERENCES customer360.cdp_raw_profiles_stage (raw_profile_id),
+    master_profile_id UUID NOT NULL REFERENCES customer360.cdp_master_profiles (master_profile_id),
+    match_score NUMERIC(5, 4),
+    match_method TEXT,
+    -- Link lifecycle state, e.g. for unmerge/profile-split scenarios.
+    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'HISTORICAL', 'UNLINKED', 'SUPERSEDED')),
+    unlinked_at TIMESTAMP WITH TIME ZONE,
+    unlinked_reason TEXT,
+    unlinked_by UUID REFERENCES customer360.sys_user (user_id),
+    created_at TIMESTAMP DEFAULT now(),
+    UNIQUE (tenant_id, raw_profile_id)
+);
+
+COMMENT ON TABLE customer360.cdp_profile_links IS 'Join table recording every raw_profile_id -> master_profile_id link made by CIR, with match_score/match_method. Unique per (tenant_id, raw_profile_id). status/unlinked_* track unmerge/profile-split lifecycle.';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_profile_links_status ON customer360.cdp_profile_links (tenant_id, status)
+WHERE
+    status = 'ACTIVE';
+
+-- Backs GET /master-profiles/{id}/links (core/routers/identity_api.py) and the
+-- reporting duplicate-master queries (core/crud/identity.py), which both
+-- filter/group by master_profile_id -- without this, those lookups fall back
+-- to a full sequential scan of cdp_profile_links once the table reaches
+-- millions of rows (no automatic index is created for a bare FK column).
+CREATE INDEX IF NOT EXISTS idx_cdp_profile_links_master ON customer360.cdp_profile_links (tenant_id, master_profile_id);
+
+
+-- ============================================================================
+-- CUSTOMER PERSONA RESOLUTION ("from identity matching to identity
+-- understanding"): a genuine many-to-many relationship.
+--
+--   cdp_persona_archetypes  -- ONE shared, reusable persona definition per
+--                              (tenant_id, domain, persona_code), e.g.
+--                              'retail_gen_z_shopper'. Carries the LLM-
+--                              assisted persona_name/persona_summary, a
+--                              centroid persona_embedding + centroid
+--                              component scores (the "lookalike model" for
+--                              this archetype), and a denormalized
+--                              matched_profile_count.
+--   cdp_customer_personas   -- the versioned MATCH/assignment of ONE master
+--                              profile to ONE archetype (lookalike score +
+--                              that profile's own component scores). Every
+--                              (re)computation inserts a NEW row
+--                              (computed_version increments per tenant_id/
+--                              master_profile_id/persona_archetype_id)
+--                              rather than overwriting, so the full history
+--                              of how a person's persona evolved is
+--                              preserved; only the latest row per
+--                              master_profile_id has is_active = TRUE, and
+--                              cdp_master_profiles.current_persona_id always
+--                              points at it.
+--
+-- Net effect: 1 master profile -> many persona MATCHES over time (still
+-- true), AND 1 persona archetype -> many master profiles at once (lookalike
+-- audience) -- both directions are now real FK-backed relationships instead
+-- of the previous design, where every persona row was hard-tied to exactly
+-- one master profile and "shared" personas only coincided by string reuse.
+--
+-- cdp_persona_features / cdp_persona_score_details / cdp_persona_history are
+-- the supporting explainability tables (unchanged): the raw signals that fed
+-- one match's computation, its per-component score breakdown, and an audit
+-- trail of material persona changes over time, respectively -- all keyed off
+-- cdp_customer_personas.persona_id (the match row), not the archetype.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS customer360.cdp_persona_archetypes
+(
+    persona_archetype_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    tenant_id               UUID NOT NULL
+        REFERENCES customer360.sys_tenant(tenant_id),
+    domain                  TEXT NOT NULL,
+
+    -- Stable slug identifying this archetype, e.g. 'gen_z_shopper'.
+    persona_code            VARCHAR(50) NOT NULL,
+    persona_name            VARCHAR(255) NOT NULL,
+    persona_category        VARCHAR(100),
+    persona_summary         TEXT,
+
+    llm_provider            VARCHAR(50),
+    llm_model               VARCHAR(100),
+
+    -- Lookalike model: centroid embedding + centroid component scores across
+    -- every ACTIVE cdp_customer_personas match currently assigned to this
+    -- archetype -- used to find/rank "lookalike" master profiles (nearest
+    -- centroid via vector_cosine_ops) that aren't matched yet.
+    persona_embedding       VECTOR(768),
+    centroid_behavior_score     NUMERIC(6,2),
+    centroid_engagement_score  NUMERIC(6,2),
+    centroid_financial_score   NUMERIC(6,2),
+    centroid_loyalty_score     NUMERIC(6,2),
+    centroid_relationship_score NUMERIC(6,2),
+    centroid_risk_score        NUMERIC(6,2),
+
+    -- Denormalized COUNT(DISTINCT master_profile_id) across ACTIVE matches,
+    -- maintained by trg_sync_persona_archetype_match_count below. This is
+    -- the "Total Matched Profiles" figure the Persona Management admin UI
+    -- must display per archetype.
+    matched_profile_count   INTEGER NOT NULL DEFAULT 0,
+
+    is_active               BOOLEAN NOT NULL DEFAULT TRUE,
+
+    created_at              TIMESTAMPTZ DEFAULT NOW(),
+    updated_at              TIMESTAMPTZ DEFAULT NOW(),
+
+    UNIQUE(tenant_id, domain, persona_code)
+);
+
+COMMENT ON TABLE customer360.cdp_persona_archetypes IS 'Shared, reusable persona definition (one row per tenant+domain+persona_code) -- the LLM-assisted persona_name/persona_summary, a lookalike-model centroid persona_embedding + centroid component scores, and a denormalized matched_profile_count. Many cdp_master_profiles rows can share one archetype via cdp_customer_personas, and the Persona Management admin UI lists archetypes (not raw match rows) with their matched_profile_count.';
+
+CREATE TABLE IF NOT EXISTS customer360.cdp_customer_personas
+(
+    persona_id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+
+    tenant_id               UUID NOT NULL
+        REFERENCES customer360.sys_tenant(tenant_id),
+    domain                  TEXT NOT NULL,
+
+    master_profile_id        UUID NOT NULL
+        REFERENCES customer360.cdp_master_profiles(master_profile_id)
+        ON DELETE CASCADE,
+
+    -- The shared archetype this profile is currently matched/assigned to --
+    -- this FK (many match rows -> one archetype) is what makes the
+    -- relationship many-to-many instead of the previous 1-master-profile-
+    -- per-persona-row design.
+    persona_archetype_id    UUID NOT NULL
+        REFERENCES customer360.cdp_persona_archetypes(persona_archetype_id)
+        ON DELETE CASCADE,
+
+    -- Lookalike match quality: how well this profile fits persona_archetype_id's
+    -- centroid (e.g. cosine similarity of persona_embedding vs the profile's
+    -- own feature vector). Distinct from confidence_score (CIR identity
+    -- confidence) and persona_score (this profile's own composite score).
+    match_score             NUMERIC(5,4) DEFAULT 0,
+
+    persona_score           NUMERIC(8,2) DEFAULT 0,
+
+    confidence_score        NUMERIC(5,4) DEFAULT 0,
+
+    behavior_score          NUMERIC(6,2) DEFAULT 0,
+
+    engagement_score        NUMERIC(6,2) DEFAULT 0,
+
+    financial_score         NUMERIC(6,2) DEFAULT 0,
+
+    loyalty_score           NUMERIC(6,2) DEFAULT 0,
+
+    relationship_score      NUMERIC(6,2) DEFAULT 0,
+
+    risk_score              NUMERIC(6,2) DEFAULT 0,
+
+    lifecycle_stage         VARCHAR(50),
+
+    customer_value_tier     VARCHAR(50),
+
+    risk_level              VARCHAR(30),
+
+    next_best_action        TEXT,
+
+    computed_version        INTEGER DEFAULT 1,
+
+    is_active               BOOLEAN DEFAULT TRUE,
+
+    computed_at             TIMESTAMPTZ DEFAULT NOW(),
+
+    expires_at              TIMESTAMPTZ,
+
+    created_at              TIMESTAMPTZ DEFAULT NOW(),
+
+    updated_at              TIMESTAMPTZ DEFAULT NOW(),
+
+    UNIQUE(tenant_id,
+           master_profile_id,
+           persona_archetype_id,
+           computed_version)
+);
+
+COMMENT ON TABLE customer360.cdp_customer_personas IS 'Versioned match/assignment of ONE master profile to ONE cdp_persona_archetypes row, computed by customer360-backend/identity_resolution''s PersonaResolutionEngine: this profile''s own behavior/engagement/financial/loyalty/relationship/risk component scores, an overall persona_score, customer_value_tier/risk_level/next_best_action, and match_score (lookalike fit vs the archetype centroid). Each recomputation inserts a new row (computed_version); only the latest row per master_profile_id has is_active = TRUE. Many rows (across many master profiles) can reference the same persona_archetype_id -- that many-to-many fan-in is the whole point of this table.';
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'fk_cdp_master_profile_current_persona'
+          AND conrelid = 'customer360.cdp_master_profiles'::regclass
+    ) THEN
+        EXECUTE format(
+            'ALTER TABLE %I.%I ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES %I.%I(%I) ON DELETE SET NULL',
+            'customer360',
+            'cdp_master_profiles',
+            'fk_cdp_master_profile_current_persona',
+            'current_persona_id',
+            'customer360',
+            'cdp_customer_personas',
+            'persona_id'
+        );
+    END IF;
+END $$;
+
+-- Maintains cdp_persona_archetypes.matched_profile_count as a true
+-- COUNT(DISTINCT master_profile_id) over ACTIVE matches, so the Persona
+-- Management admin UI never has to compute it ad hoc client-side.
+CREATE OR REPLACE FUNCTION customer360.sync_persona_archetype_match_count()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_archetype_id UUID;
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        v_archetype_id := OLD.persona_archetype_id;
+    ELSE
+        v_archetype_id := NEW.persona_archetype_id;
+    END IF;
+
+    UPDATE customer360.cdp_persona_archetypes
+    SET matched_profile_count = (
+        SELECT COUNT(DISTINCT master_profile_id)
+        FROM customer360.cdp_customer_personas
+        WHERE persona_archetype_id = v_archetype_id AND is_active = TRUE
+    )
+    WHERE persona_archetype_id = v_archetype_id;
+
+    -- Recompute the OLD archetype too when a row is re-pointed at a
+    -- different archetype via UPDATE.
+    IF TG_OP = 'UPDATE' AND OLD.persona_archetype_id IS DISTINCT FROM NEW.persona_archetype_id THEN
+        UPDATE customer360.cdp_persona_archetypes
+        SET matched_profile_count = (
+            SELECT COUNT(DISTINCT master_profile_id)
+            FROM customer360.cdp_customer_personas
+            WHERE persona_archetype_id = OLD.persona_archetype_id AND is_active = TRUE
+        )
+        WHERE persona_archetype_id = OLD.persona_archetype_id;
+    END IF;
+
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_sync_persona_archetype_match_count ON customer360.cdp_customer_personas;
+
+CREATE TRIGGER trg_sync_persona_archetype_match_count
+    AFTER INSERT OR UPDATE OF persona_archetype_id, is_active OR DELETE ON customer360.cdp_customer_personas
+    FOR EACH ROW
+    EXECUTE FUNCTION customer360.sync_persona_archetype_match_count();
+
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_current_persona ON customer360.cdp_master_profiles (current_persona_id)
+WHERE
+    current_persona_id IS NOT NULL;
+
+-- Primary access pattern: "all persona versions for this master profile" /
+-- "the current persona for this master profile" (partial index, since most
+-- queries only care about the single is_active = TRUE row).
+CREATE INDEX IF NOT EXISTS idx_cdp_customer_personas_master ON customer360.cdp_customer_personas (tenant_id, master_profile_id, computed_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_cdp_customer_personas_active ON customer360.cdp_customer_personas (tenant_id, master_profile_id)
+WHERE
+    is_active = TRUE;
+
+-- Primary access pattern for the M:N fan-out: "every master profile
+-- currently matched to this archetype" (Persona Management drill-down).
+CREATE INDEX IF NOT EXISTS idx_cdp_customer_personas_archetype ON customer360.cdp_customer_personas (tenant_id, persona_archetype_id)
+WHERE
+    is_active = TRUE;
+
+CREATE INDEX IF NOT EXISTS idx_cdp_persona_archetypes_tenant_domain ON customer360.cdp_persona_archetypes (tenant_id, domain)
+WHERE
+    is_active = TRUE;
+
+-- Lookalike similarity search: nearest archetype centroid to a candidate
+-- profile's own embedding.
+CREATE INDEX IF NOT EXISTS idx_cdp_persona_archetypes_embedding_ivfflat ON customer360.cdp_persona_archetypes USING ivfflat (persona_embedding vector_cosine_ops)
+WITH (lists = 100);
+
+CREATE TABLE IF NOT EXISTS customer360.cdp_persona_features
+(
+    feature_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    persona_id          UUID NOT NULL
+        REFERENCES customer360.cdp_customer_personas(persona_id)
+        ON DELETE CASCADE,
+
+    feature_code        VARCHAR(100) NOT NULL,
+
+    feature_name        VARCHAR(255),
+
+    feature_type        VARCHAR(50),
+
+    numeric_value       NUMERIC,
+
+    text_value          TEXT,
+
+    boolean_value       BOOLEAN,
+
+    source_system       TEXT,
+
+    confidence_score    NUMERIC(5,4),
+
+    computed_at         TIMESTAMPTZ DEFAULT NOW()
+);
+
+COMMENT ON TABLE customer360.cdp_persona_features IS 'Raw/derived signals (tenure, channel breadth, CLV, churn probability, KYC status, ...) that fed one cdp_customer_personas computation -- the explainability input side of the persona engine.';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_persona_features_persona ON customer360.cdp_persona_features (persona_id);
+
+CREATE TABLE IF NOT EXISTS customer360.cdp_persona_score_details
+(
+    score_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    persona_id          UUID NOT NULL
+        REFERENCES customer360.cdp_customer_personas(persona_id)
+        ON DELETE CASCADE,
+
+    score_type          VARCHAR(100),
+
+    score_value         NUMERIC(8,2),
+
+    score_weight        NUMERIC(5,2),
+
+    score_formula       TEXT,
+
+    explanation         TEXT,
+
+    created_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+COMMENT ON TABLE customer360.cdp_persona_score_details IS 'Per-component score breakdown (behavior/engagement/financial/loyalty/relationship/risk) for one cdp_customer_personas row, with the weight/formula/explanation behind each -- the explainability output side of the persona engine.';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_persona_score_details_persona ON customer360.cdp_persona_score_details (persona_id);
+
+CREATE TABLE IF NOT EXISTS customer360.cdp_persona_history
+(
+    history_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    persona_id          UUID NOT NULL
+        REFERENCES customer360.cdp_customer_personas(persona_id)
+        ON DELETE CASCADE,
+
+    old_persona_name    TEXT,
+
+    new_persona_name    TEXT,
+
+    old_score           NUMERIC(8,2),
+
+    new_score           NUMERIC(8,2),
+
+    change_reason       TEXT,
+
+    model_version       VARCHAR(50),
+
+    changed_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+COMMENT ON TABLE customer360.cdp_persona_history IS 'Audit trail of material persona changes over time (persona_name and/or persona_score delta above PersonaResolutionEngine.HISTORY_SCORE_DELTA_THRESHOLD), one row per change, linked to the NEW cdp_customer_personas row that triggered it.';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_persona_history_persona ON customer360.cdp_persona_history (persona_id);
+
+-- ============================================================================
+-- cdp_persona_config: persona-engine scoring/config registry
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS customer360.cdp_persona_config
+(
+    config_key          VARCHAR(120) PRIMARY KEY,
+    config_value        TEXT NOT NULL,
+    data_type           VARCHAR(20) NOT NULL CHECK (data_type IN ('INTEGER', 'NUMERIC', 'BOOLEAN', 'VARCHAR', 'JSONB')),
+    config_description  TEXT,
+    is_active           BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_by          VARCHAR(100),
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE customer360.cdp_persona_config IS 'Typed runtime config registry for PersonaResolutionEngine constants (thresholds, weights, caps, bonuses, and history delta).';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_persona_config_active ON customer360.cdp_persona_config (is_active);
+
+INSERT INTO customer360.cdp_persona_config (config_key, config_value, data_type, config_description, is_active, updated_by)
+VALUES
+    ('RISK_LEVEL_CRITICAL_THRESHOLD', '80.0', 'NUMERIC', 'Risk level threshold: critical', TRUE, 'system_seed'),
+    ('RISK_LEVEL_HIGH_THRESHOLD', '60.0', 'NUMERIC', 'Risk level threshold: high', TRUE, 'system_seed'),
+    ('RISK_LEVEL_MEDIUM_THRESHOLD', '40.0', 'NUMERIC', 'Risk level threshold: medium', TRUE, 'system_seed'),
+
+    ('LIFECYCLE_BEHAVIOR_PROSPECT_BASE', '20.0', 'NUMERIC', 'Behavior base score for prospect', TRUE, 'system_seed'),
+    ('LIFECYCLE_BEHAVIOR_LEAD_BASE', '40.0', 'NUMERIC', 'Behavior base score for lead', TRUE, 'system_seed'),
+    ('LIFECYCLE_BEHAVIOR_CUSTOMER_BASE', '65.0', 'NUMERIC', 'Behavior base score for customer', TRUE, 'system_seed'),
+    ('LIFECYCLE_BEHAVIOR_VIP_BASE', '95.0', 'NUMERIC', 'Behavior base score for VIP', TRUE, 'system_seed'),
+    ('LIFECYCLE_BEHAVIOR_DORMANT_BASE', '30.0', 'NUMERIC', 'Behavior base score for dormant', TRUE, 'system_seed'),
+    ('LIFECYCLE_BEHAVIOR_CHURN_RISK_BASE', '35.0', 'NUMERIC', 'Behavior base score for churn_risk', TRUE, 'system_seed'),
+    ('LIFECYCLE_BEHAVIOR_DEFAULT_BASE', '30.0', 'NUMERIC', 'Behavior base score default fallback', TRUE, 'system_seed'),
+
+    ('ENGAGEMENT_RECENCY_UNKNOWN_SCORE', '30.0', 'NUMERIC', 'Engagement recency score when unknown', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_RECENT_7D_SCORE', '100.0', 'NUMERIC', 'Engagement recency score <= 7 days', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_RECENT_30D_SCORE', '80.0', 'NUMERIC', 'Engagement recency score <= 30 days', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_RECENT_90D_SCORE', '50.0', 'NUMERIC', 'Engagement recency score <= 90 days', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_RECENT_180D_SCORE', '25.0', 'NUMERIC', 'Engagement recency score <= 180 days', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_STALE_SCORE', '10.0', 'NUMERIC', 'Engagement recency score stale', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_THRESHOLD_7D', '7', 'INTEGER', 'Engagement recency threshold 7 days', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_THRESHOLD_30D', '30', 'INTEGER', 'Engagement recency threshold 30 days', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_THRESHOLD_90D', '90', 'INTEGER', 'Engagement recency threshold 90 days', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_THRESHOLD_180D', '180', 'INTEGER', 'Engagement recency threshold 180 days', TRUE, 'system_seed'),
+    ('ENGAGEMENT_CHANNEL_WEIGHT_PER_SYSTEM', '10.0', 'NUMERIC', 'Engagement bonus per source system', TRUE, 'system_seed'),
+    ('ENGAGEMENT_CHANNEL_BONUS_CAP', '30.0', 'NUMERIC', 'Engagement channel bonus cap', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_WEIGHT', '0.7', 'NUMERIC', 'Engagement recency blend weight', TRUE, 'system_seed'),
+
+    ('FINANCIAL_CLV_REFERENCE_DEFAULT', '5000.0', 'NUMERIC', 'Financial score CLV reference', TRUE, 'system_seed'),
+    ('FINANCIAL_SCORE_MULTIPLIER', '100.0', 'NUMERIC', 'Financial score multiplier', TRUE, 'system_seed'),
+
+    ('LOYALTY_TIER_PLATINUM_BASE', '100.0', 'NUMERIC', 'Loyalty tier base platinum', TRUE, 'system_seed'),
+    ('LOYALTY_TIER_GOLD_BASE', '80.0', 'NUMERIC', 'Loyalty tier base gold', TRUE, 'system_seed'),
+    ('LOYALTY_TIER_SILVER_BASE', '60.0', 'NUMERIC', 'Loyalty tier base silver', TRUE, 'system_seed'),
+    ('LOYALTY_TIER_BRONZE_BASE', '40.0', 'NUMERIC', 'Loyalty tier base bronze', TRUE, 'system_seed'),
+    ('LOYALTY_TIER_DEFAULT_BASE', '20.0', 'NUMERIC', 'Loyalty tier base default', TRUE, 'system_seed'),
+    ('LOYALTY_TENURE_WEIGHT', '0.8', 'NUMERIC', 'Loyalty tier blend weight', TRUE, 'system_seed'),
+    ('LOYALTY_TENURE_BONUS_PER_YEAR', '20.0', 'NUMERIC', 'Loyalty tenure bonus per year', TRUE, 'system_seed'),
+    ('LOYALTY_TENURE_BONUS_CAP', '20.0', 'NUMERIC', 'Loyalty tenure bonus cap', TRUE, 'system_seed'),
+    ('LOYALTY_TENURE_REFERENCE_DAYS', '365.0', 'NUMERIC', 'Loyalty tenure days reference', TRUE, 'system_seed'),
+
+    ('RELATIONSHIP_CHANNEL_WEIGHT_PER_SYSTEM', '20.0', 'NUMERIC', 'Relationship bonus per source system', TRUE, 'system_seed'),
+    ('RELATIONSHIP_CHANNEL_BONUS_CAP', '60.0', 'NUMERIC', 'Relationship channel bonus cap', TRUE, 'system_seed'),
+    ('RELATIONSHIP_CONTACT_WEIGHT_PER_CONTACT', '10.0', 'NUMERIC', 'Relationship bonus per contact', TRUE, 'system_seed'),
+    ('RELATIONSHIP_CONTACT_BONUS_CAP', '40.0', 'NUMERIC', 'Relationship contact bonus cap', TRUE, 'system_seed'),
+
+    ('RISK_SCORE_CHURN_MULTIPLIER', '100.0', 'NUMERIC', 'Risk scoring multiplier for churn probability', TRUE, 'system_seed'),
+    ('RISK_SCORE_DEFAULT_CHURN_BASE', '20.0', 'NUMERIC', 'Risk scoring default base if churn is missing', TRUE, 'system_seed'),
+    ('RISK_SEGMENT_BONUS_LOW', '0.0', 'NUMERIC', 'Risk segment bonus low', TRUE, 'system_seed'),
+    ('RISK_SEGMENT_BONUS_MEDIUM', '15.0', 'NUMERIC', 'Risk segment bonus medium', TRUE, 'system_seed'),
+    ('RISK_SEGMENT_BONUS_HIGH', '30.0', 'NUMERIC', 'Risk segment bonus high', TRUE, 'system_seed'),
+    ('RISK_SEGMENT_BONUS_CRITICAL', '45.0', 'NUMERIC', 'Risk segment bonus critical', TRUE, 'system_seed'),
+    ('KYC_STATUS_BONUS_VERIFIED', '0.0', 'NUMERIC', 'KYC status bonus verified', TRUE, 'system_seed'),
+    ('KYC_STATUS_BONUS_PENDING', '10.0', 'NUMERIC', 'KYC status bonus pending', TRUE, 'system_seed'),
+    ('KYC_STATUS_BONUS_UNVERIFIED', '20.0', 'NUMERIC', 'KYC status bonus unverified', TRUE, 'system_seed'),
+    ('KYC_STATUS_BONUS_REJECTED', '40.0', 'NUMERIC', 'KYC status bonus rejected', TRUE, 'system_seed'),
+
+    ('VALUE_TIER_CHAMPION_THRESHOLD', '80.0', 'NUMERIC', 'Customer value tier threshold champion', TRUE, 'system_seed'),
+    ('VALUE_TIER_HIGH_VALUE_THRESHOLD', '60.0', 'NUMERIC', 'Customer value tier threshold high_value', TRUE, 'system_seed'),
+    ('VALUE_TIER_GROWTH_POTENTIAL_THRESHOLD', '35.0', 'NUMERIC', 'Customer value tier threshold growth_potential', TRUE, 'system_seed'),
+
+    ('SCORE_WEIGHT_BEHAVIOR', '0.20', 'NUMERIC', 'Persona score weight behavior', TRUE, 'system_seed'),
+    ('SCORE_WEIGHT_ENGAGEMENT', '0.20', 'NUMERIC', 'Persona score weight engagement', TRUE, 'system_seed'),
+    ('SCORE_WEIGHT_FINANCIAL', '0.20', 'NUMERIC', 'Persona score weight financial', TRUE, 'system_seed'),
+    ('SCORE_WEIGHT_LOYALTY', '0.15', 'NUMERIC', 'Persona score weight loyalty', TRUE, 'system_seed'),
+    ('SCORE_WEIGHT_RELATIONSHIP', '0.10', 'NUMERIC', 'Persona score weight relationship', TRUE, 'system_seed'),
+    ('SCORE_WEIGHT_RISK', '0.15', 'NUMERIC', 'Persona score weight risk inverse component', TRUE, 'system_seed'),
+    ('SCORE_WEIGHTS_POSITIVE_SUM', '0.85', 'NUMERIC', 'Sanity helper for positive score weights', TRUE, 'system_seed'),
+
+    ('PERSONA_HISTORY_SCORE_DELTA_THRESHOLD', '5.0', 'NUMERIC', 'Minimum absolute score delta for history record', TRUE, 'system_seed')
+ON CONFLICT (config_key) DO NOTHING;
+
+---------------------------------------------------
+-- EVENT CATALOG (governed cross-domain event vocabulary)
+---------------------------------------------------
+CREATE TABLE IF NOT EXISTS customer360.cdp_event_catalog (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_name TEXT UNIQUE NOT NULL,
+    event_category TEXT NOT NULL CHECK (
+        event_category IN (
+            'GENERAL',
+            'EDUCATION',
+            'COMMERCE',
+            'FEEDBACK',
+            'FINANCE',
+            'STOCK_TRADING',
+            'TRAVEL',
+            'REAL_ESTATE',
+            'SERVICE_INDUSTRY'
+        )
+    ),
+    -- Validated against sys_domain ('all' + active domain codes) at the API
+    -- layer, see cdp_master_profiles.domain above.
+    domain_scope TEXT NOT NULL DEFAULT 'all',
+    description TEXT,
+    is_conversion_default BOOLEAN NOT NULL DEFAULT FALSE,
+    -- Conceptual name of the payload key that should be promoted to the
+    -- canonical S3 event envelope's event_value (documentation aid only).
+    value_field TEXT,
+    display_order INT NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'ACTIVE',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+
+COMMENT ON TABLE customer360.cdp_event_catalog IS 'Governed vocabulary of event_category/event_name pairs (seeded below) across general, commerce, service-industry, domain, assistant, and messaging journeys. The catalog is not FK-enforced by the S3 event lake, so ingestion is never blocked by a missing catalog row; it exists for discoverability/governance.';
+
+
+-- ============================================================================
+-- AI Agent Registry
+-- ============================================================================
+-- Unified registry for ML models, rule engines, and task-oriented AI agents.
+--
+-- cdp_ai_feature_catalog is the executable contract behind
+-- cdp_ai_agents.input_features. Expressions are documentation for the
+-- implementation layer: SQL uses the documented source aliases and pandas
+-- uses the documented DataFrame names. They must be reviewed as code and
+-- never executed as unchecked user input.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS customer360.cdp_ai_feature_catalog (
+    feature_key VARCHAR(100) PRIMARY KEY,
+    source_kind VARCHAR(20) NOT NULL CHECK (
+        source_kind IN (
+            'profile',
+            'event_log',
+            'transaction',
+            'contact',
+            'graph',
+            'aggregate',
+            'candidate',
+            'runtime'
+        )
+    ),
+    data_type VARCHAR(20) NOT NULL CHECK (
+        data_type IN ('boolean', 'integer', 'numeric', 'text', 'timestamp', 'jsonb')
+    ),
+    sql_expression TEXT NOT NULL,
+    pandas_expression TEXT NOT NULL,
+    description TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE customer360.cdp_ai_feature_catalog IS
+    'Allow-listed, reviewable derivation contract for cdp_ai_agents.input_features. SQL expressions use the documented source aliases; pandas expressions use the documented DataFrame names.';
+
+COMMENT ON COLUMN customer360.cdp_ai_feature_catalog.sql_expression IS
+    'Reviewed SQL expression or aggregate fragment. It is documentation for a feature builder and must never be interpolated from an untrusted request.';
+
+COMMENT ON COLUMN customer360.cdp_ai_feature_catalog.pandas_expression IS
+    'Reviewed pandas expression using profiles, events, transactions, contacts, edges, candidates, or context DataFrames.';
+
+-- agent_code:
+--   Stable identifier used by application/agent runtime.
+--
+-- model_name:
+--   Provider model ID, approved estimator class, or deployed artifact identifier.
+--   An estimator class is not a trained model. NULL means no engine selected.
+--
+-- system_instructions / required_variables:
+--   Current runtime instructions and input contract for task-oriented agents.
+--
+-- prompt_versions:
+--   Append-only JSONB history for the current instruction revisions. Keeping
+--   the history on the agent row makes cdp_ai_agents the single source of
+--   truth for both model configuration and prompt lifecycle.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS customer360.cdp_ai_agents (
+    -- Stable application-level agent identifier.
+    -- Examples:
+    --   lead_scoring
+    --   campaign_planner
+    --   notification_planner
+    agent_code VARCHAR(100) PRIMARY KEY,
+
+    -- Human-readable metadata
+    display_name VARCHAR(255) NOT NULL,
+    description TEXT,
+
+    -- Supported AI / ML / rules execution type
+    model_type VARCHAR(50) NOT NULL,
+
+    -- Keep this list in sync with the application ModelType literals.
+    CONSTRAINT chk_cdp_ai_agents_model_type
+        CHECK (model_type IN (
+            'classification',
+            'regression',
+            'clustering',
+            'ranking_recommendation',
+            'forecasting',
+            'anomaly_detection',
+            'uplift_modeling',
+            'optimization',
+            'rules_engine',
+            'generative_llm'
+        )),
+
+    -- Provider model ID, estimator class, or deployed artifact identifier.
+    -- Examples:
+    --   gpt-6-luna
+    --   xgboost.XGBClassifier
+    --   lightgbm.LGBMRegressor
+    model_name VARCHAR(255),
+
+    -- Runtime lifecycle
+    status VARCHAR(20) DEFAULT 'ACTIVE' CHECK (
+        status IN (
+            'ACTIVE',
+            'INACTIVE',
+            'TRAINING',
+            'DEPRECATED',
+            'FAILED'
+        )
+    ),
+
+    -- Scheduler definition for batch/scoring agents.
+    -- Example: '0 1 * * *'
+    schedule_definition VARCHAR(100),
+
+    -- Stable feature keys declared in cdp_ai_feature_catalog. The catalog
+    -- contains reviewed SQL and pandas derivation guidance for each key.
+    input_features TEXT[] DEFAULT ARRAY[]::TEXT[],
+
+    -- Model/runtime configuration.
+    -- Examples:
+    --   temperature
+    --   max_output_tokens
+    --   thresholds
+    --   provider-specific parameters
+    hyperparameters JSONB DEFAULT '{}'::JSONB,
+
+    -- ------------------------------------------------------------------------
+    -- Prompt identity and version history
+    -- ------------------------------------------------------------------------
+
+    -- Stable prompt address. It is separate from agent_code because callers
+    -- may already use a dotted prompt key while the runtime uses a short
+    -- agent code.
+    prompt_key TEXT,
+    prompt_engine VARCHAR(50) NOT NULL DEFAULT 'none',
+    -- Each entry is {version, body, required_vars, created_at, created_by, note}.
+    prompt_versions JSONB NOT NULL DEFAULT '[]'::JSONB,
+
+    -- ------------------------------------------------------------------------
+    -- Agent instruction fields
+    -- ------------------------------------------------------------------------
+
+    -- Current system instruction for task-oriented AI agents.
+    system_instructions TEXT,
+
+    -- Runtime context variables expected by the agent.
+    required_variables TEXT[] DEFAULT ARRAY[]::TEXT[],
+
+    -- Current instruction revision.
+    instruction_version INTEGER NOT NULL DEFAULT 1
+        CHECK (instruction_version > 0),
+
+    -- Provenance for current instruction.
+    instruction_updated_by VARCHAR(255) NOT NULL DEFAULT 'system',
+
+    -- Human-readable change note.
+    instruction_note TEXT NOT NULL DEFAULT '',
+
+    journey_stage VARCHAR(30)
+        CONSTRAINT chk_cdp_ai_agents_journey_stage
+        CHECK (journey_stage IS NULL OR journey_stage IN (
+            'awareness', 'acquisition', 'activation', 'engagement',
+            'conversion', 'retention', 'loyalty', 'churned'
+        )),
+
+    -- Audit fields
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+
+    CONSTRAINT chk_cdp_ai_agents_prompt_engine_not_blank
+        CHECK (btrim(prompt_engine) <> ''),
+    CONSTRAINT chk_cdp_ai_agents_prompt_key_not_blank
+        CHECK (prompt_key IS NULL OR btrim(prompt_key) <> ''),
+    CONSTRAINT chk_cdp_ai_agents_hyperparameters_object
+        CHECK (hyperparameters IS NULL OR jsonb_typeof(hyperparameters) = 'object'),
+    CONSTRAINT chk_cdp_ai_agents_prompt_state
+        CHECK (
+            prompt_key IS NULL
+            OR (
+                system_instructions IS NOT NULL
+                AND jsonb_array_length(prompt_versions) > 0
+            )
+        ),
+    CONSTRAINT chk_cdp_ai_agents_prompt_versions_array
+        CHECK (jsonb_typeof(prompt_versions) = 'array')
+);
+
+ALTER TABLE customer360.cdp_ai_agents
+    ADD COLUMN IF NOT EXISTS journey_stage VARCHAR(30);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'customer360.cdp_ai_agents'::regclass
+          AND conname = 'chk_cdp_ai_agents_journey_stage'
+    ) THEN
+        ALTER TABLE customer360.cdp_ai_agents
+            ADD CONSTRAINT chk_cdp_ai_agents_journey_stage
+            CHECK (journey_stage IS NULL OR journey_stage IN (
+                'awareness', 'acquisition', 'activation', 'engagement',
+                'conversion', 'retention', 'loyalty', 'churned'
+            ));
+    END IF;
+END $$;
+
+COMMENT ON TABLE customer360.cdp_ai_agents IS
+    'Unified registry for AI/ML models and task-oriented AI agents. Stores model configuration and current agent instructions.';
+
+COMMENT ON COLUMN customer360.cdp_ai_agents.agent_code IS
+    'Stable application/runtime identifier for the AI agent or model configuration.';
+
+COMMENT ON COLUMN customer360.cdp_ai_agents.model_name IS
+    'Provider model ID, approved estimator class, or deployed artifact identifier. Estimator classes do not imply trained artifacts; NULL means an engine has not been selected. Runtime dispatch must use an implementation allow-list.';
+
+COMMENT ON COLUMN customer360.cdp_ai_agents.prompt_key IS
+    'Stable address used by customer360-agent to load this row''s current prompt.';
+
+COMMENT ON COLUMN customer360.cdp_ai_agents.prompt_engine IS
+    'Prompt rendering engine. The current runtime supports none ($name substitution with literal JSON braces preserved).';
+
+COMMENT ON COLUMN customer360.cdp_ai_agents.prompt_versions IS
+    'Append-only JSONB prompt revision history. The active revision is instruction_version and the current body is system_instructions.';
+
+COMMENT ON COLUMN customer360.cdp_ai_agents.system_instructions IS
+    'Current system-level instructions for a task-oriented AI agent. Historical versions are managed outside this table.';
+
+COMMENT ON COLUMN customer360.cdp_ai_agents.required_variables IS
+    'Runtime context variables required to execute the agent instructions.';
+
+COMMENT ON COLUMN customer360.cdp_ai_agents.instruction_version IS
+    'Current published prompt/instruction revision.';
+
+COMMENT ON COLUMN customer360.cdp_ai_agents.journey_stage IS
+    'Customer journey stage this agent serves (awareness .. loyalty). NULL = cross-stage. Drives the AI Agents journey map.';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_ai_agents_status
+    ON customer360.cdp_ai_agents (status);
+
+CREATE INDEX IF NOT EXISTS idx_cdp_ai_agents_journey_stage
+    ON customer360.cdp_ai_agents (journey_stage)
+    WHERE journey_stage IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_cdp_ai_agents_model_name
+    ON customer360.cdp_ai_agents (model_name)
+    WHERE model_name IS NOT NULL;
+
+-- Fast lookup for prompt-backed agents.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_cdp_ai_agents_prompt_key
+    ON customer360.cdp_ai_agents (prompt_key);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_cdp_ai_agents_prompt_engine_not_blank'
+          AND conrelid = 'customer360.cdp_ai_agents'::regclass
+    ) THEN
+        ALTER TABLE customer360.cdp_ai_agents
+            ADD CONSTRAINT chk_cdp_ai_agents_prompt_engine_not_blank
+            CHECK (btrim(prompt_engine) <> '');
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_cdp_ai_agents_prompt_versions_array'
+          AND conrelid = 'customer360.cdp_ai_agents'::regclass
+    ) THEN
+        ALTER TABLE customer360.cdp_ai_agents
+            ADD CONSTRAINT chk_cdp_ai_agents_prompt_versions_array
+            CHECK (jsonb_typeof(prompt_versions) = 'array');
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_cdp_ai_agents_prompt_key_not_blank'
+          AND conrelid = 'customer360.cdp_ai_agents'::regclass
+    ) THEN
+        ALTER TABLE customer360.cdp_ai_agents
+            ADD CONSTRAINT chk_cdp_ai_agents_prompt_key_not_blank
+            CHECK (prompt_key IS NULL OR btrim(prompt_key) <> '');
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_cdp_ai_agents_hyperparameters_object'
+          AND conrelid = 'customer360.cdp_ai_agents'::regclass
+    ) THEN
+        ALTER TABLE customer360.cdp_ai_agents
+            ADD CONSTRAINT chk_cdp_ai_agents_hyperparameters_object
+            CHECK (hyperparameters IS NULL OR jsonb_typeof(hyperparameters) = 'object');
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_cdp_ai_agents_prompt_state'
+          AND conrelid = 'customer360.cdp_ai_agents'::regclass
+    ) THEN
+        ALTER TABLE customer360.cdp_ai_agents
+            ADD CONSTRAINT chk_cdp_ai_agents_prompt_state
+            CHECK (
+                prompt_key IS NULL
+                OR (
+                    system_instructions IS NOT NULL
+                    AND jsonb_array_length(prompt_versions) > 0
+                )
+            );
+    END IF;
+END $$;
+
+---------------------------------------------------
+-- PROFILE ATTRIBUTE METADATA REGISTRY
+---------------------------------------------------
+
+-- ============================================================================
+-- cdp_profile_attributes: full metadata of all attributes in cdp_master_profiles
+-- ============================================================================
+-- One row per attribute exposed anywhere on the CDP golden record: identity /
+-- demographic / retail / banking / marketing / lineage columns AND the
+-- ML scoring-model outputs (Lead, Churn, CLV, Customer Experience, Data
+-- Quality / Identity Resolution confidence). Also carries the
+-- cdp_raw_profiles_stage matching keys (device_id, advertising_id, cookie_id,
+-- external_customer_id) consumed dynamically by the Customer Identity
+-- Resolution (CIR) engine (core-customer360/customer360-backend/identity_resolution ->
+-- identity_resolution.resolver.CustomerIdentityResolver), which only reads
+-- attribute_internal_code / is_identity_resolution / status / matching_rule /
+-- matching_threshold, so the extra metadata columns below are additive and
+-- safe for that consumer.
+-- Uses CREATE TABLE IF NOT EXISTS so the schema is defined in one place.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS customer360.cdp_profile_attributes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- Attribute identity. Matches the cdp_raw_profiles_stage column name when
+    -- used as an identity-resolution matching key, otherwise matches the
+    -- cdp_master_profiles column name directly.
+    attribute_internal_code VARCHAR(100) UNIQUE NOT NULL,
+    -- The cdp_master_profiles column this attribute is stored in / consolidated
+    -- into, e.g. matching key 'device_id' consolidates into master 'device_ids'.
+    master_profile_column VARCHAR(100),
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+
+    -- Logical grouping for catalog browsing / admin UI.
+    attribute_group VARCHAR(50) NOT NULL DEFAULT 'GENERAL' CHECK (
+        attribute_group IN (
+            'SYSTEM',
+            'IDENTITY',
+            'IDENTITY_GRAPH',
+            'RETAIL',
+            'BANKING',
+            'REAL_ESTATE',
+            'TRAVEL',
+            'MEDIA',
+            'EDUCATION',
+            'MARKETING',
+            'LINEAGE',
+            'LIFECYCLE',
+            'LEAD_SCORING',
+            'CHURN_SCORING',
+            'CLV_SCORING',
+            'CX_SCORING',
+            'DATA_QUALITY',
+            'GENERAL'
+        )
+    ),
+    -- Physical table(s) this attribute lives on.
+    source_table VARCHAR(150) NOT NULL DEFAULT 'cdp_master_profiles',
+    -- Validated against sys_domain ('all' + active domain codes) at the API
+    -- layer, see cdp_master_profiles.domain above.
+    domain_scope VARCHAR(20) NOT NULL DEFAULT 'all',
+    is_pii BOOLEAN NOT NULL DEFAULT FALSE,
+    status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE',
+
+    -- ------------------------------------------------------------------
+    -- Customer Identity Resolution (CIR) matching-rule metadata, consumed
+    -- dynamically by identity_resolution.resolver.CustomerIdentityResolver.
+    -- ------------------------------------------------------------------
+    is_identity_resolution BOOLEAN NOT NULL DEFAULT FALSE,
+    matching_rule VARCHAR(50) CHECK (
+        matching_rule IN (
+            'exact',
+            'fuzzy_trgm',
+            'fuzzy_dmetaphone',
+            'none'
+        )
+    ),
+    matching_threshold NUMERIC(5, 4),
+    -- Merge precedence for conflicting values on the same master profile.
+    -- Supported strategies include most_recent, verified_first,
+    -- verified_then_most_recent, source_priority, non_null,
+    -- append_distinct, and overwrite.
+    consolidation_rule VARCHAR(50) CHECK (
+        consolidation_rule IS NULL OR consolidation_rule IN (
+            'most_recent',
+            'verified_first',
+            'verified_then_most_recent',
+            'source_priority',
+            'non_null',
+            'append_distinct',
+            'overwrite'
+        )
+    ),
+    -- Optional rule-specific parameters such as timestamp_field,
+    -- verified_field, verified_values, or source_priority.
+    consolidation_config JSONB NOT NULL DEFAULT '{}'::JSONB,
+
+    -- Rank hierarchy used during limit demotion (1 = highest priority, e.g. user_id).
+    priority_rank INTEGER NOT NULL DEFAULT 99,
+    -- Maximum allowed unique values on a single master profile for this identifier.
+    value_limit INTEGER NOT NULL DEFAULT 5,
+    -- Window for limit enforcement: 1_ever, 5_weekly, 5_monthly, 5_annually.
+    limit_timeframe VARCHAR(50) NOT NULL DEFAULT '5_annually',
+    -- Exact string values blocked from being promoted to external identifiers.
+    blocked_values JSONB NOT NULL DEFAULT '["null", "-1", "anonymous", "void", "abc123"]'::JSONB,
+    -- Regex patterns blocked from being promoted to external identifiers.
+    -- A typed array literal avoids nested-bracket highlighting in SQL editors.
+    blocked_patterns TEXT[] NOT NULL DEFAULT '{"^[0-]*$"}'::TEXT[],
+
+    -- segmentation metadata: whether this attribute can be used for audience segmentation, and its data type TEXT, NUMERIC, DATE, TIMESTAMP, BOOLEAN, JSONB.
+    is_segmentable BOOLEAN NOT NULL DEFAULT TRUE,
+    data_type VARCHAR(50) NOT NULL DEFAULT 'TEXT',
+
+    -- ------------------------------------------------------------------
+    -- AI-agent output metadata: Lead, Churn, CLV, Customer Experience (CX),
+    -- Data Quality, and Identity Resolution agent outputs.
+    -- ------------------------------------------------------------------
+    is_ai_agent BOOLEAN NOT NULL DEFAULT FALSE,
+    agent_code VARCHAR(100),
+    agent_version VARCHAR(20),
+    value_type VARCHAR(50) CHECK (value_type IS NULL OR value_type IN (
+        'probability', 'score', 'tier', 'currency', 'percentage', 'sentiment',
+        'count', 'label', 'metadata', 'identifier', 'timestamp'
+    )),
+    value_min NUMERIC,
+    value_max NUMERIC,
+    -- Update schedule: 'realtime' | 'hourly' | 'daily' | 'weekly' | 'batch' | 'event_driven'
+    refresh_frequency VARCHAR(50),
+
+    display_order INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+
+-- Defines rules for both standard columns and JSONB domain attributes
+-- Defines rules for both standard columns and JSONB domain attributes
+COMMENT ON TABLE customer360.cdp_profile_attributes IS 'CIR attribute catalog defining consolidation and matching rules for cdp_master_profiles columns and cdp_domain_profiles JSONB keys.';
+
+-- ==========================================================
+-- Unified AI agent catalog foreign key and legacy scoring migration
+-- ==========================================================
+-- Existing deployments used scoring-model names for this metadata. Rename the
+-- columns in place so the catalog now speaks the same agent vocabulary as
+-- cdp_ai_agents while preserving all existing values.
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'customer360'
+          AND table_name = 'cdp_profile_attributes'
+          AND column_name = 'is_scoring_model'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'customer360'
+          AND table_name = 'cdp_profile_attributes'
+          AND column_name = 'is_ai_agent'
+    ) THEN
+        ALTER TABLE customer360.cdp_profile_attributes
+            RENAME COLUMN is_scoring_model TO is_ai_agent;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'customer360'
+          AND table_name = 'cdp_profile_attributes'
+          AND column_name = 'scoring_model_name'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'customer360'
+          AND table_name = 'cdp_profile_attributes'
+          AND column_name = 'agent_code'
+    ) THEN
+        ALTER TABLE customer360.cdp_profile_attributes
+            RENAME COLUMN scoring_model_name TO agent_code;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'customer360'
+          AND table_name = 'cdp_profile_attributes'
+          AND column_name = 'scoring_model_version'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'customer360'
+          AND table_name = 'cdp_profile_attributes'
+          AND column_name = 'agent_version'
+    ) THEN
+        ALTER TABLE customer360.cdp_profile_attributes
+            RENAME COLUMN scoring_model_version TO agent_version;
+    END IF;
+END $$;
+
+ALTER TABLE customer360.cdp_profile_attributes
+    DROP CONSTRAINT IF EXISTS fk_cdp_pa_scoring_model;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'fk_cdp_profile_attributes_agent'
+          AND conrelid = 'customer360.cdp_profile_attributes'::regclass
+    ) THEN
+        ALTER TABLE customer360.cdp_profile_attributes
+            ADD CONSTRAINT fk_cdp_profile_attributes_agent
+            FOREIGN KEY (agent_code)
+            REFERENCES customer360.cdp_ai_agents(agent_code)
+            ON DELETE RESTRICT;
+    END IF;
+END $$;
+
+
+-- ============================================================================
+-- cdp_identity_index: flattened O(1) point-lookup index for identifiers
+-- ============================================================================
+-- Unified lookup table mapping (tenant_id, identifier_type, normalized value)
+-- master_profile_id, avoiding JSONB/array scans on cdp_master_profiles
+-- (external_ids/device_ids/cookie_ids/advertising_ids) during high-throughput
+-- streaming CIR match resolution.
+CREATE TABLE IF NOT EXISTS customer360.cdp_identity_index (
+    identity_index_id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant (tenant_id),
+    master_profile_id UUID NOT NULL REFERENCES customer360.cdp_master_profiles (master_profile_id) ON DELETE CASCADE,
+
+    -- Identifier classification, e.g. 'user_id', 'email', 'phone', 'device_id', 'cookie_id', 'advertising_id'.
+    identifier_type VARCHAR(100) NOT NULL,
+    identifier_value TEXT NOT NULL,
+    -- Normalized / lowercased value used for exact-match lookups.
+    identifier_value_normalized TEXT NOT NULL,
+
+    is_primary BOOLEAN NOT NULL DEFAULT FALSE,
+    is_blocked BOOLEAN NOT NULL DEFAULT FALSE,
+    first_seen_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    last_seen_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+
+    CONSTRAINT uq_cdp_identity_index UNIQUE (tenant_id, identifier_type, identifier_value_normalized)
+);
+
+COMMENT ON TABLE customer360.cdp_identity_index IS 'Flattened O(1) lookup table for cross-channel identifier matching during streaming ingestion, keyed by (tenant_id, identifier_type, identifier_value_normalized).';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_identity_lookup ON customer360.cdp_identity_index (tenant_id, identifier_type, identifier_value_normalized)
+WHERE
+    is_blocked = FALSE;
+
+CREATE INDEX IF NOT EXISTS idx_cdp_identity_master ON customer360.cdp_identity_index (master_profile_id);
+
+
+-- ==========================================================
+-- Data Source / Connectors Table
+-- ==========================================================
+-- This table stores metadata, access tokens, and configurations 
+-- for external data sources and ingestion connectors.
+CREATE TABLE IF NOT EXISTS customer360.sys_data_source (
+    data_source_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    
+    -- Multi-tenant isolation (mandatory for all sys/cdp tables)
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    
+    -- Core identification
+    name TEXT NOT NULL,
+    slug VARCHAR(255) NOT NULL,
+    
+    -- Configuration status and type identifiers
+    source_type SMALLINT NOT NULL DEFAULT 2, -- Maps to "type" (e.g., 2)
+    status SMALLINT NOT NULL DEFAULT 1,      -- 1: active, 0: inactive
+    
+    -- Endpoints and URLs
+    data_source_url TEXT,
+    thumbnail_url TEXT,
+    
+    -- Data collection flags
+    collect_directly BOOLEAN DEFAULT true,
+    first_party_data BOOLEAN DEFAULT true,
+    
+    -- Journey mapping configuration
+    journey_level SMALLINT DEFAULT 3,
+    journey_map_id VARCHAR(255),
+    touchpoint_hub_id VARCHAR(255),
+    
+    -- Security and volume metrics
+    security_code TEXT,
+    total_tracked_event BIGINT DEFAULT 0,
+    avg_daily_event BIGINT DEFAULT 0,
+    avg_events_per_profile NUMERIC(10, 2) DEFAULT 0.0,
+    
+    -- JSON and Array configurations
+    -- Stores dynamic mapping like "1hgb91dmV1BhyoW9YMEKnb": "1148041_..."
+    access_tokens JSONB DEFAULT '{}'::jsonb,
+    -- List of allowed hosts for the connector
+    data_source_hosts TEXT[] DEFAULT ARRAY[]::TEXT[],
+    -- Stored JS tags for web tracking integration
+    javascript_tags TEXT[] DEFAULT ARRAY[]::TEXT[],
+    -- Landing page and tracking URLs for offline-to-online bridging
+    qr_code_data JSONB DEFAULT '{}'::jsonb,
+    
+    -- Audit timestamps
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    
+    -- Ensure slugs are unique per workspace/tenant
+    CONSTRAINT uq_sys_data_source_slug UNIQUE (tenant_id, slug),
+
+    -- Allowed source types:
+    -- 1 Web JavaScript Code, 2 Data Connector API, 3 Data Webhook API,
+    -- 4 S3 File Connector, 5 Mobile SDK Code
+    CONSTRAINT ck_sys_data_source_source_type CHECK (source_type IN (1, 2, 3, 4, 5))
+);
+
+COMMENT ON TABLE customer360.sys_data_source IS 'Stores metadata and configuration for Data Sources/Connectors (e.g., access tokens, QR code data, webhook configs, journey routing) for data ingestion pipelines.';
+
+-- ----------------------------------------------------------------------------
+-- INDEXES & ROW LEVEL SECURITY
+-- ----------------------------------------------------------------------------
+
+-- Fast tenant-level lookup index
+CREATE INDEX IF NOT EXISTS idx_sys_data_source_tenant ON customer360.sys_data_source(tenant_id);
+
+-- Optimized index for filtering active data sources in the UI
+CREATE INDEX IF NOT EXISTS idx_sys_data_source_status ON customer360.sys_data_source(tenant_id, status);
+
+-- ============================================================================
+-- cdp_profile_merge_history: audit trail of master-to-master profile merges
+-- ============================================================================
+-- Records every time one cdp_master_profiles row is merged/tombstoned into
+-- another, storing full JSONB snapshots of both sides so a bad merge can be
+-- unmerged/rolled back later.
+CREATE TABLE IF NOT EXISTS customer360.cdp_profile_merge_history (
+    merge_id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant (tenant_id),
+
+    target_master_profile_id UUID NOT NULL REFERENCES customer360.cdp_master_profiles (master_profile_id), -- retained profile
+    source_master_profile_id UUID NOT NULL, -- merged/tombstoned profile id (no FK: row no longer exists after merge)
+
+    merge_reason TEXT NOT NULL, -- e.g. 'Deterministic email match', 'Manual admin merge'
+    matched_identifier_type VARCHAR(100),
+    matched_identifier_value TEXT,
+    match_score NUMERIC(5, 4),
+
+    source_profile_snapshot JSONB NOT NULL,
+    target_profile_snapshot JSONB NOT NULL,
+
+    merged_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    merged_by UUID REFERENCES customer360.sys_user (user_id) -- NULL if automated system process
+);
+
+COMMENT ON TABLE customer360.cdp_profile_merge_history IS 'Audit log of master-to-master profile merges storing JSONB profile snapshots to enable profile unmerging/splitting.';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_merge_history_target ON customer360.cdp_profile_merge_history (tenant_id, target_master_profile_id);
+
+CREATE INDEX IF NOT EXISTS idx_cdp_merge_history_source ON customer360.cdp_profile_merge_history (tenant_id, source_master_profile_id);
+
+---------------------------------------------------
+-- RELATIONS & EVENTS
+---------------------------------------------------
+
+-- Relation Types dictionary
+CREATE TABLE IF NOT EXISTS customer360.cdp_relation_types (
+    relation_type_id SERIAL PRIMARY KEY,
+    code TEXT UNIQUE NOT NULL, -- e.g., 'friend', 'colleague', 'family', 'customer-contact'
+    description TEXT
+);
+
+COMMENT ON TABLE customer360.cdp_relation_types IS 'Dictionary of relationship types (e.g. friend, colleague, family, customer-contact) usable between two cdp_master_profiles rows via cdp_relations.';
+
+-- Profile Relations
+CREATE TABLE IF NOT EXISTS customer360.cdp_relations (
+    relation_id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant (tenant_id),
+    user_id UUID REFERENCES customer360.sys_user (user_id), -- data owner
+    source_master_id UUID NOT NULL REFERENCES customer360.cdp_master_profiles (master_profile_id),
+    target_master_id UUID NOT NULL REFERENCES customer360.cdp_master_profiles (master_profile_id),
+    relation_type_id INT NOT NULL REFERENCES customer360.cdp_relation_types (relation_type_id),
+    created_at TIMESTAMP DEFAULT now(),
+    UNIQUE (
+        tenant_id,
+        source_master_id,
+        target_master_id,
+        relation_type_id
+    )
+);
+
+COMMENT ON TABLE customer360.cdp_relations IS 'Typed relationship edge between two resolved master profiles (e.g. "friend", "family", "customer-contact"), typed via cdp_relation_types.';
+
+-- Customer Contacts (interactions)
+CREATE TABLE IF NOT EXISTS customer360.crm_customer_contacts (
+    contact_id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant (tenant_id),
+    user_id UUID REFERENCES customer360.sys_user (user_id), -- data owner
+    master_profile_id UUID NOT NULL REFERENCES customer360.cdp_master_profiles (master_profile_id),
+    contact_type TEXT,
+    contact_channel TEXT,
+    contact_content TEXT,
+    contact_date TIMESTAMP DEFAULT now()
+);
+
+COMMENT ON TABLE customer360.crm_customer_contacts IS 'Interaction/contact log (type/channel/content/date) recorded against a resolved master profile.';
+
+-- Customer Transactions (financial, retail, travel, etc.)
+CREATE TABLE IF NOT EXISTS customer360.crm_transactions (
+    transaction_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+
+    -- Data owner: internal sys_user who created/manages this row (nullable -- almost
+    -- always NULL for pipeline-imported transactions).
+    user_id UUID REFERENCES customer360.sys_user (user_id),
+
+    -- Nullable + no hard NOT NULL, matching the asynchronous identity-linking
+    -- pattern used by the S3 event lake:
+    -- a transaction can be ingested from a source system before Customer Identity
+    -- Resolution (CIR) has linked it to a resolved profile.
+    master_profile_id UUID REFERENCES customer360.cdp_master_profiles(master_profile_id),
+
+    source_system VARCHAR(50),
+    source_transaction_id VARCHAR(255),
+
+    transaction_type VARCHAR(50),
+    transaction_status VARCHAR(30),
+
+    entity_type VARCHAR(50),
+    entity_id VARCHAR(255),
+    entity_name TEXT,
+
+    quantity NUMERIC(18,4),
+    amount NUMERIC(18,2),
+    currency CHAR(3),
+
+    channel VARCHAR(100),
+
+    merchant_id VARCHAR(255),
+    merchant_name TEXT,
+
+    location_id VARCHAR(255),
+    location_name TEXT,
+
+    campaign_id VARCHAR(255),
+    campaign_name TEXT,
+
+    staff_id VARCHAR(255),
+    staff_name TEXT,
+
+    transaction_time TIMESTAMP,
+
+    attributes JSONB DEFAULT '{}'::jsonb,
+
+    imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON TABLE customer360.crm_transactions IS 'Source-agnostic transaction fact (retail purchase, banking transfer, travel booking, ...). master_profile_id is nullable and backfilled asynchronously by CIR, matching the S3 event lake pattern, so ingestion is never blocked waiting for identity resolution.';
+
+-- ============================================================================
+-- cdp_content_items: personalized content library (news/video/product/article)
+-- ============================================================================
+-- Backs the Customer 360 profile dashboard's "Personalized Items" panel.
+-- Items are selected and ranked by the segment's configured ranking workflow,
+-- persisted per profile, and served by GET /api/v1/content-items/recommended.
+CREATE TABLE IF NOT EXISTS customer360.cdp_content_items (
+
+    content_item_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    tenant_id UUID NOT NULL
+        REFERENCES customer360.sys_tenant(tenant_id),
+
+    -- Validated against sys_domain ('all' + active domain codes) at the API
+    -- layer, see cdp_master_profiles.domain above.
+    domain TEXT NOT NULL DEFAULT 'all',
+
+    item_type TEXT NOT NULL CHECK (
+        item_type IN ('news', 'video', 'product', 'article')
+    ),
+
+    title TEXT NOT NULL,
+    summary TEXT,
+
+    image_url TEXT,
+    cta_label TEXT,
+    cta_url TEXT,
+
+    segment_tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+
+    -- Semantic embedding; the runner generates vectors lazily for selected items.
+    embedding_text TEXT,
+    embedding VECTOR,
+    embedding_model TEXT,
+    embedding_version VARCHAR(50),
+    embedding_updated_at TIMESTAMPTZ,
+
+    published_at TIMESTAMPTZ DEFAULT now(),
+    status_code SMALLINT DEFAULT 1,
+
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now(),
+
+    CONSTRAINT chk_cdp_content_items_embedding_dimensions
+        CHECK (embedding IS NULL OR vector_dims(embedding) IN (384, 768))
+);
+
+ALTER TABLE customer360.cdp_content_items
+    ADD COLUMN IF NOT EXISTS embedding_text TEXT,
+    ADD COLUMN IF NOT EXISTS embedding_version VARCHAR(50),
+    ADD COLUMN IF NOT EXISTS embedding_updated_at TIMESTAMPTZ;
+
+COMMENT ON TABLE customer360.cdp_content_items IS
+    'Tenant-scoped content candidates for segment ranking, recommendations, and personalization.';
+COMMENT ON COLUMN customer360.cdp_content_items.embedding_text IS
+    'Canonical text embedded for recommendation ranking; refreshed when source content changes.';
+COMMENT ON COLUMN customer360.cdp_content_items.embedding IS
+    '384- or 768-dimensional content embedding used for semantic and hybrid recommendation ranking.';
+COMMENT ON COLUMN customer360.cdp_content_items.embedding_model IS
+    'Provider and model key used to generate the current content embedding.';
+COMMENT ON COLUMN customer360.cdp_content_items.embedding_version IS
+    'Application embedding contract version used to generate the current vector.';
+COMMENT ON COLUMN customer360.cdp_content_items.embedding_updated_at IS
+    'Time the current content embedding was generated.';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_content_items_domain_type
+    ON customer360.cdp_content_items (tenant_id, domain, item_type);
+CREATE INDEX IF NOT EXISTS idx_cdp_content_items_tags
+    ON customer360.cdp_content_items USING GIN (segment_tags);
+CREATE INDEX IF NOT EXISTS idx_cdp_content_items_embedding_384_hnsw
+    ON customer360.cdp_content_items
+    USING hnsw ((embedding::VECTOR(384)) vector_cosine_ops)
+    WHERE vector_dims(embedding) = 384;
+CREATE INDEX IF NOT EXISTS idx_cdp_content_items_embedding_768_hnsw
+    ON customer360.cdp_content_items
+    USING hnsw ((embedding::VECTOR(768)) vector_cosine_ops)
+    WHERE vector_dims(embedding) = 768;
+
+CREATE OR REPLACE FUNCTION customer360.invalidate_content_item_embedding()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NEW.domain IS DISTINCT FROM OLD.domain
+       OR NEW.item_type IS DISTINCT FROM OLD.item_type
+       OR NEW.title IS DISTINCT FROM OLD.title
+       OR NEW.summary IS DISTINCT FROM OLD.summary
+       OR NEW.segment_tags IS DISTINCT FROM OLD.segment_tags THEN
+        NEW.embedding := NULL;
+        NEW.embedding_text := NULL;
+        NEW.embedding_model := NULL;
+        NEW.embedding_version := NULL;
+        NEW.embedding_updated_at := NULL;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_invalidate_content_item_embedding
+    ON customer360.cdp_content_items;
+CREATE TRIGGER trg_invalidate_content_item_embedding
+    BEFORE UPDATE OF domain, item_type, title, summary, segment_tags
+    ON customer360.cdp_content_items
+    FOR EACH ROW EXECUTE FUNCTION customer360.invalidate_content_item_embedding();
+
+-- ============================================================================
+-- cdp_product_items: tenant-scoped source product records and content linkage
+-- ============================================================================
+CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_content_items_tenant_id
+    ON customer360.cdp_content_items (tenant_id, content_item_id);
+
+CREATE TABLE IF NOT EXISTS customer360.cdp_product_items (
+
+    product_item_id TEXT PRIMARY KEY
+        DEFAULT (gen_random_uuid()::TEXT),
+
+    tenant_id UUID NOT NULL
+        REFERENCES customer360.sys_tenant(tenant_id)
+        ON DELETE CASCADE,
+
+    content_item_id UUID,
+
+    domain TEXT NOT NULL,
+    product_type TEXT NOT NULL,
+
+    source_id TEXT NOT NULL,
+    source_type TEXT NOT NULL DEFAULT '',
+
+    product_id_type TEXT NOT NULL
+        CHECK (btrim(product_id_type) <> ''),
+    product_id TEXT NOT NULL
+        CHECK (btrim(product_id) <> ''),
+
+    keywords TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+
+    ext_attributes JSONB NOT NULL DEFAULT '{}'::JSONB
+        CHECK (jsonb_typeof(ext_attributes) = 'object'),
+
+    original_price NUMERIC(18, 4)
+        CHECK (original_price IS NULL OR original_price >= 0),
+    sale_price NUMERIC(18, 4)
+        CHECK (sale_price IS NULL OR sale_price >= 0),
+
+    currency VARCHAR(3),
+
+    source_fields JSONB NOT NULL
+        CHECK (jsonb_typeof(source_fields) = 'object'),
+
+    -- Reserved for product similarity; current workflows rank linked content.
+    embedding_text TEXT,
+    embedding VECTOR,
+    embedding_model VARCHAR(255),
+    embedding_version VARCHAR(50),
+    embedding_updated_at TIMESTAMPTZ,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT uq_cdp_product_items_source_identity
+        UNIQUE (
+            tenant_id,
+            source_type,
+            source_id,
+            product_id_type,
+            product_id
+        ),
+
+    CONSTRAINT uq_cdp_product_items_tenant_content
+        UNIQUE (tenant_id, content_item_id),
+
+    CONSTRAINT fk_cdp_product_items_tenant_content
+        FOREIGN KEY (
+            tenant_id,
+            content_item_id
+        )
+        REFERENCES customer360.cdp_content_items (
+            tenant_id,
+            content_item_id
+        )
+        ON DELETE CASCADE
+        DEFERRABLE INITIALLY DEFERRED,
+
+    CONSTRAINT chk_cdp_product_items_embedding_dimensions
+        CHECK (embedding IS NULL OR vector_dims(embedding) IN (384, 768))
+);
+
+ALTER TABLE customer360.cdp_product_items
+    ADD COLUMN IF NOT EXISTS embedding_text TEXT,
+    ADD COLUMN IF NOT EXISTS embedding VECTOR,
+    ADD COLUMN IF NOT EXISTS embedding_model VARCHAR(255),
+    ADD COLUMN IF NOT EXISTS embedding_version VARCHAR(50),
+    ADD COLUMN IF NOT EXISTS embedding_updated_at TIMESTAMPTZ;
+
+COMMENT ON TABLE customer360.cdp_product_items IS
+    'Tenant-scoped source products imported from TSV; content_item_id is populated when LLM-generated cdp_content_items content is available. Re-imports upsert by tenant, source_type, source_id, and product identity.';
+COMMENT ON COLUMN customer360.cdp_product_items.source_fields IS
+    'Complete source TSV row as JSONB; all source fields are provided to the product-content LLM and retained for audit/re-generation.';
+COMMENT ON COLUMN customer360.cdp_product_items.ext_attributes IS
+    'Optional structured product metadata from the TSV ext_attributes JSON object.';
+COMMENT ON COLUMN customer360.cdp_product_items.embedding_text IS
+    'Canonical product text reserved for future product-vector generation.';
+COMMENT ON COLUMN customer360.cdp_product_items.embedding IS
+    '384- or 768-dimensional product embedding reserved for product similarity and recommendation.';
+COMMENT ON COLUMN customer360.cdp_product_items.embedding_model IS
+    'Provider and model key used to generate the current product embedding.';
+COMMENT ON COLUMN customer360.cdp_product_items.embedding_version IS
+    'Application embedding contract version used to generate the current product vector.';
+COMMENT ON COLUMN customer360.cdp_product_items.embedding_updated_at IS
+    'Time the current product embedding was generated.';
+CREATE INDEX IF NOT EXISTS idx_cdp_product_items_tenant_domain
+    ON customer360.cdp_product_items (tenant_id, domain);
+CREATE INDEX IF NOT EXISTS idx_cdp_product_items_content
+    ON customer360.cdp_product_items (tenant_id, content_item_id);
+CREATE INDEX IF NOT EXISTS idx_cdp_product_items_embedding_384_hnsw
+    ON customer360.cdp_product_items
+    USING hnsw ((embedding::VECTOR(384)) vector_cosine_ops)
+    WHERE vector_dims(embedding) = 384;
+CREATE INDEX IF NOT EXISTS idx_cdp_product_items_embedding_768_hnsw
+    ON customer360.cdp_product_items
+    USING hnsw ((embedding::VECTOR(768)) vector_cosine_ops)
+    WHERE vector_dims(embedding) = 768;
+
+CREATE OR REPLACE FUNCTION customer360.invalidate_product_item_embedding()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NEW.domain IS DISTINCT FROM OLD.domain
+       OR NEW.product_type IS DISTINCT FROM OLD.product_type
+       OR NEW.keywords IS DISTINCT FROM OLD.keywords
+       OR NEW.ext_attributes IS DISTINCT FROM OLD.ext_attributes
+       OR NEW.source_fields IS DISTINCT FROM OLD.source_fields THEN
+        NEW.embedding := NULL;
+        NEW.embedding_text := NULL;
+        NEW.embedding_model := NULL;
+        NEW.embedding_version := NULL;
+        NEW.embedding_updated_at := NULL;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_invalidate_product_item_embedding
+    ON customer360.cdp_product_items;
+CREATE TRIGGER trg_invalidate_product_item_embedding
+    BEFORE UPDATE OF
+        domain,
+        product_type,
+        keywords,
+        ext_attributes,
+        source_fields
+    ON customer360.cdp_product_items
+    FOR EACH ROW EXECUTE FUNCTION customer360.invalidate_product_item_embedding();
+
+-- ============================================================================
+-- cdp_audience_tags: IAB Audience Taxonomy 1.1 catalog
+-- ============================================================================
+-- Standardized contextual and audience segmentation taxonomy (IAB Audience
+-- Taxonomy 1.1) used for audience analytics, segment builder, personalization,
+-- and programmatic advertising. Keyed by tag_name (slugified tier path, e.g.
+-- 'demographic/age-range/18-20') so TSV uploads and API writes can upsert
+-- idempotently on tag_name.
+CREATE TABLE IF NOT EXISTS customer360.cdp_audience_tags (
+    tag_name TEXT PRIMARY KEY CHECK (btrim(tag_name) <> ''),
+    unique_id TEXT NOT NULL CHECK (btrim(unique_id) <> ''),
+    parent_id TEXT,
+    taxonomy_version TEXT NOT NULL DEFAULT '1.1' CHECK (btrim(taxonomy_version) <> ''),
+    condensed_name TEXT NOT NULL CHECK (btrim(condensed_name) <> ''),
+    tier_1 TEXT NOT NULL CHECK (btrim(tier_1) <> ''),
+    tier_2 TEXT,
+    tier_3 TEXT,
+    tier_4 TEXT,
+    tier_5 TEXT,
+    tier_6 TEXT,
+    extension_notes TEXT,
+    status_code SMALLINT NOT NULL DEFAULT 1, -- 1: active, 0: inactive, -1: delete
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT uq_cdp_audience_tags_version_unique_id
+        UNIQUE (taxonomy_version, unique_id)
+);
+
+COMMENT ON TABLE customer360.cdp_audience_tags IS
+    'IAB Audience Taxonomy 1.1 catalog keyed by tag_name (slugified tier path). Used to map first-party cdp_master_profiles and cdp_segments to standardized contextual and audience segmentation taxonomies for analytics, personalization, and programmatic advertising.';
+COMMENT ON COLUMN customer360.cdp_audience_tags.tag_name IS
+    'Primary key: deterministic slugified tier path (e.g. demographic/age-range/18-20) referenced by cdp_segments.audience_tags and cdp_master_profiles.audience_tags.';
+COMMENT ON COLUMN customer360.cdp_audience_tags.unique_id IS
+    'IAB Audience Taxonomy Unique ID from the official TSV specification.';
+COMMENT ON COLUMN customer360.cdp_audience_tags.parent_id IS
+    'Parent IAB Unique ID in the taxonomy hierarchy (NULL for Tier 1 root nodes).';
+COMMENT ON COLUMN customer360.cdp_audience_tags.condensed_name IS
+    'IAB Condensed Name (1st, 2nd, Last Tier) from the taxonomy TSV.';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_audience_tags_unique_id
+    ON customer360.cdp_audience_tags (unique_id);
+CREATE INDEX IF NOT EXISTS idx_cdp_audience_tags_parent_id
+    ON customer360.cdp_audience_tags (parent_id)
+    WHERE parent_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_cdp_audience_tags_tiers
+    ON customer360.cdp_audience_tags (tier_1, tier_2, tier_3);
+CREATE INDEX IF NOT EXISTS idx_cdp_audience_tags_status
+    ON customer360.cdp_audience_tags (status_code);
+
+-- CREATE TABLE IF NOT EXISTS does not update an existing master-profile table.
+ALTER TABLE customer360.cdp_master_profiles
+    ADD COLUMN IF NOT EXISTS audience_tags TEXT[];
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_audience_tags
+    ON customer360.cdp_master_profiles USING GIN (audience_tags);
+
+-- ============================================================================
+-- cdp_segments: segmentation tag metadata (Audience Builder)
+-- ============================================================================
+-- One row per named audience/segment tag (the same tag strings that end up in
+-- cdp_master_profiles.segmentation_tags). Stores the rule definition behind a
+-- segment in two complementary forms -- the raw jQuery QueryBuilder rule tree
+-- (json_rules) and its translated SQL WHERE-clause fragment (sql_rules) --
+-- plus final_generated_sql, the full SELECT statement (base cdp_master_profiles
+-- query + sql_rules) actually executed to (re)compute segment membership.
+-- processed_by records whether the rules were authored by a human via the
+-- jQuery QueryBuilder admin UI or generated by an AI agent.
+CREATE TABLE IF NOT EXISTS customer360.cdp_segments (
+    segment_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    -- Data owner: internal sys_user who created/manages this segment (nullable --
+    -- segments generated by an ai_agent may have no interactive owner).
+    user_id UUID REFERENCES customer360.sys_user(user_id),
+    -- Validated against sys_domain ('all' + active domain codes) at the API
+    -- layer, see cdp_master_profiles.domain above.
+    domain TEXT NOT NULL DEFAULT 'all',
+
+    -- Unique short tag written into cdp_master_profiles.segmentation_tags for
+    -- every profile that matches this segment (e.g. 'gen_z_shopper').
+    segment_tag TEXT NOT NULL,
+    -- Standardized IAB Audience Taxonomy tag names (customer360.cdp_audience_tags.tag_name)
+    -- selected for this segment and synced to cdp_master_profiles.audience_tags on recompute.
+    audience_tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+    segment_name TEXT NOT NULL,
+    description TEXT,
+
+    -- Raw jQuery QueryBuilder rule tree, e.g. {"condition":"AND","rules":[...]}.
+    json_rules JSONB NOT NULL DEFAULT '{}'::jsonb,
+    -- WHERE-clause fragment translated from json_rules (QueryBuilder.getSQL()
+    -- style output), e.g. "age >= 18 AND city = 'Ho Chi Minh'".
+    sql_rules TEXT,
+    -- Full SELECT statement (base query + sql_rules) actually executed to
+    -- (re)compute this segment's membership against cdp_master_profiles.
+    final_generated_sql TEXT,
+    -- Who produced sql_rules/json_rules: an interactive admin using the jQuery
+    -- QueryBuilder UI, or an AI agent (e.g. natural-language-to-segment).
+    processed_by TEXT NOT NULL DEFAULT 'human' CHECK (processed_by IN ('human', 'ai_agent')),
+
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    -- Last computed size of this segment; refreshed whenever final_generated_sql
+    -- is (re)run.
+    member_count INTEGER DEFAULT 0,
+    last_computed_at TIMESTAMP,
+
+    created_at TIMESTAMP DEFAULT now(),
+    updated_at TIMESTAMP DEFAULT now(),
+    status_code SMALLINT DEFAULT 1, -- 1: active, 0: inactive, -1: delete
+
+    CONSTRAINT uq_cdp_segments_tenant_tag UNIQUE (tenant_id, segment_tag)
+);
+
+-- CREATE TABLE IF NOT EXISTS does not update an existing segments table.
+ALTER TABLE customer360.cdp_segments
+    ADD COLUMN IF NOT EXISTS audience_tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
+
+COMMENT ON TABLE customer360.cdp_segments IS 'Segmentation/Audience Builder metadata: one row per named segment tag (mirrored into cdp_master_profiles.segmentation_tags and cdp_master_profiles.audience_tags), storing its jQuery QueryBuilder rule tree (json_rules), translated SQL fragment (sql_rules), the full executable query (final_generated_sql), and whether it was authored by a human or an ai_agent.';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_segments_tenant ON customer360.cdp_segments (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_cdp_segments_json_rules ON customer360.cdp_segments USING GIN (json_rules);
+CREATE INDEX IF NOT EXISTS idx_cdp_segments_audience_tags ON customer360.cdp_segments USING GIN (audience_tags);
+
+-- ============================================================================
+-- cdp_agent_workflow: ordered many-to-many segment/agent configuration
+-- ============================================================================
+CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_segments_tenant_id
+    ON customer360.cdp_segments (tenant_id, segment_id);
+
+CREATE TABLE IF NOT EXISTS customer360.cdp_agent_workflow (
+    agent_workflow_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    segment_id UUID NOT NULL,
+    agent_code VARCHAR(100) NOT NULL REFERENCES customer360.cdp_ai_agents(agent_code) ON DELETE RESTRICT,
+    execution_order INTEGER NOT NULL CHECK (execution_order > 0),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    schedule_definition VARCHAR(100),
+    candidate_content_item_ids UUID[] NOT NULL DEFAULT ARRAY[]::UUID[],
+    configuration JSONB NOT NULL DEFAULT '{}'::jsonb
+        CHECK (jsonb_typeof(configuration) = 'object'),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT fk_cdp_agent_workflow_tenant_segment
+        FOREIGN KEY (tenant_id, segment_id)
+        REFERENCES customer360.cdp_segments (tenant_id, segment_id) ON DELETE CASCADE,
+    CONSTRAINT uq_cdp_agent_workflow_segment_agent UNIQUE (tenant_id, segment_id, agent_code),
+    CONSTRAINT uq_cdp_agent_workflow_execution_order
+        UNIQUE (tenant_id, segment_id, execution_order) DEFERRABLE INITIALLY IMMEDIATE,
+    CONSTRAINT chk_cdp_agent_workflow_candidates_dimension
+        CHECK (cardinality(candidate_content_item_ids) = 0 OR array_ndims(candidate_content_item_ids) = 1)
+);
+
+ALTER TABLE customer360.cdp_agent_workflow
+    ADD COLUMN IF NOT EXISTS schedule_definition VARCHAR(100);
+
+COMMENT ON TABLE customer360.cdp_agent_workflow IS
+    'One configured AI-agent step per tenant/segment/agent. Defines a many-to-many relationship with the global agent registry; active steps execute sequentially in ascending execution_order. Different segments may execute concurrently.';
+COMMENT ON COLUMN customer360.cdp_agent_workflow.execution_order IS
+    'Positive queue position, lowest first. The workflow runner must await each step before starting the next; defer the unique constraint within a transaction when reordering steps.';
+COMMENT ON COLUMN customer360.cdp_agent_workflow.schedule_definition IS
+    'Optional five-field cron override for this segment-agent step. NULL means inherit the selected cdp_ai_agents.schedule_definition.';
+COMMENT ON COLUMN customer360.cdp_agent_workflow.candidate_content_item_ids IS
+    'Per-step content/product candidates from cdp_content_items. Active ranking_recommendation steps require at least one candidate; triggers enforce same-tenant references and restrict deletion or key changes while referenced.';
+COMMENT ON COLUMN customer360.cdp_agent_workflow.configuration IS
+    'Per-segment agent input/configuration overrides, such as ranking parameters. This is configuration, not workflow execution state.';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_agent_workflow_agent
+    ON customer360.cdp_agent_workflow (agent_code, tenant_id, segment_id);
+CREATE INDEX IF NOT EXISTS idx_cdp_agent_workflow_active_queue
+    ON customer360.cdp_agent_workflow (tenant_id, segment_id, execution_order)
+    WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_cdp_agent_workflow_candidates
+    ON customer360.cdp_agent_workflow USING GIN (candidate_content_item_ids);
+
+-- An array keeps candidate lists in the requested single relation table.
+-- Lock referenced rows to serialize validation against deletion/key changes.
+CREATE OR REPLACE FUNCTION customer360.validate_agent_workflow_candidates()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    candidate_id UUID;
+BEGIN
+    IF current_setting('transaction_isolation') = 'repeatable read' THEN
+        RAISE EXCEPTION 'Workflow candidate writes require READ COMMITTED or SERIALIZABLE isolation'
+            USING ERRCODE = '0A000';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM unnest(NEW.candidate_content_item_ids) AS candidate(item_id)
+        GROUP BY item_id
+        HAVING item_id IS NULL OR count(*) > 1
+    ) THEN
+        RAISE EXCEPTION 'Workflow candidates must be distinct, non-null content item IDs'
+            USING ERRCODE = '23514';
+    END IF;
+
+    FOR candidate_id IN
+        SELECT item_id
+        FROM unnest(NEW.candidate_content_item_ids) AS candidate(item_id)
+        ORDER BY item_id
+    LOOP
+        PERFORM 1
+        FROM customer360.cdp_content_items
+        WHERE tenant_id = NEW.tenant_id AND content_item_id = candidate_id
+        FOR SHARE;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'Workflow candidate % does not exist in tenant %', candidate_id, NEW.tenant_id
+                USING ERRCODE = '23503';
+        END IF;
+    END LOOP;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_validate_agent_workflow_candidates ON customer360.cdp_agent_workflow;
+CREATE TRIGGER trg_validate_agent_workflow_candidates
+    BEFORE INSERT OR UPDATE OF tenant_id, candidate_content_item_ids
+    ON customer360.cdp_agent_workflow
+    FOR EACH ROW EXECUTE FUNCTION customer360.validate_agent_workflow_candidates();
+
+CREATE OR REPLACE FUNCTION customer360.restrict_workflow_candidate_changes()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF TG_OP = 'UPDATE' THEN
+        IF NEW.tenant_id = OLD.tenant_id AND NEW.content_item_id = OLD.content_item_id THEN
+            RETURN NEW;
+        END IF;
+    END IF;
+
+    IF current_setting('transaction_isolation') = 'repeatable read' THEN
+        RAISE EXCEPTION 'Content candidate deletion/key changes require READ COMMITTED or SERIALIZABLE isolation'
+            USING ERRCODE = '0A000';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM customer360.cdp_agent_workflow
+        WHERE tenant_id = OLD.tenant_id
+          AND candidate_content_item_ids @> ARRAY[OLD.content_item_id]
+    ) THEN
+        RAISE EXCEPTION 'Content item % is referenced by an agent workflow', OLD.content_item_id
+            USING ERRCODE = '23503';
+    END IF;
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_restrict_workflow_candidate_changes ON customer360.cdp_content_items;
+CREATE TRIGGER trg_restrict_workflow_candidate_changes
+    BEFORE DELETE OR UPDATE OF tenant_id, content_item_id
+    ON customer360.cdp_content_items
+    FOR EACH ROW EXECUTE FUNCTION customer360.restrict_workflow_candidate_changes();
+
+-- ============================================================================
+-- AI Campaign Draft Review (specs/002-ai-campaign-draft-creation)
+-- ============================================================================
+-- Records reviewer approve/reject decisions on a campaign draft. The
+-- crm_campaign segment/approval_status columns and the
+-- crm_campaign_content_items relation table are defined later in this file
+-- (Agentic CRM Messaging Schema section).
+CREATE TABLE IF NOT EXISTS customer360.crm_campaign_reviews (
+    review_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    campaign_id UUID NOT NULL REFERENCES customer360.crm_campaign(campaign_id) ON DELETE CASCADE,
+    reviewer_id UUID NOT NULL REFERENCES customer360.sys_user(user_id),
+    decision VARCHAR(10) NOT NULL CHECK (decision IN ('approve', 'reject')),
+    reason TEXT,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+COMMENT ON TABLE customer360.crm_campaign_reviews IS 'One row per reviewer approve/reject decision on a campaign draft -- approval_status may only ever change via a row inserted here or the automatic edit-after-approval/-rejection reversion in campaign_draft_repository (FR-010).';
+
+CREATE INDEX IF NOT EXISTS idx_crm_campaign_reviews_campaign ON customer360.crm_campaign_reviews (campaign_id);
+
+---------------------------------------------------
+-- GRAPH EDGES (Partitioned by Relation)
+---------------------------------------------------
+
+-- Parent
+CREATE TABLE IF NOT EXISTS customer360.graph_edges (
+    edge_id UUID NOT NULL DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    from_id UUID NOT NULL,
+    to_id UUID NOT NULL,
+    from_type TEXT NOT NULL,
+    to_type TEXT NOT NULL,
+    relation TEXT NOT NULL,
+    description TEXT,
+    keywords TEXT[],
+    lang TEXT DEFAULT 'en',
+    embedding vector(1536),
+    metadata JSONB,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (edge_id, relation)
+) PARTITION BY LIST (relation);
+
+COMMENT ON TABLE customer360.graph_edges IS 'General-purpose graph edge table (from_id/to_id + from_type/to_type), list-partitioned by relation (belongs_to, converted, follows, has_role, ...). Carries its own embedding vector(1536) for relationship-aware semantic search.';
+
+-- Partitions for known relations
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_belongs_to PARTITION OF customer360.graph_edges FOR
+VALUES
+    IN ('belongs_to');
+
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_comes_from PARTITION OF customer360.graph_edges FOR
+VALUES
+    IN ('comes_from');
+
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_converted PARTITION OF customer360.graph_edges FOR
+VALUES
+    IN ('converted');
+
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_follows PARTITION OF customer360.graph_edges FOR
+VALUES
+    IN ('follows');
+
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_is_part_of PARTITION OF customer360.graph_edges FOR
+VALUES
+    IN ('is_part_of');
+
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_is_active_as PARTITION OF customer360.graph_edges FOR
+VALUES
+    IN ('is_active_as');
+
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_is_connected_to PARTITION OF customer360.graph_edges FOR
+VALUES
+    IN ('is_connected_to');
+
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_is_from PARTITION OF customer360.graph_edges FOR
+VALUES
+    IN ('is_from');
+
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_created_by PARTITION OF customer360.graph_edges FOR
+VALUES
+    IN ('created_by');
+
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_is_driven_by PARTITION OF customer360.graph_edges FOR
+VALUES
+    IN ('is_driven_by');
+
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_has_role PARTITION OF customer360.graph_edges FOR
+VALUES
+    IN ('has_role');
+
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_has PARTITION OF customer360.graph_edges FOR
+VALUES
+    IN ('has');
+
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_is_for_the PARTITION OF customer360.graph_edges FOR
+VALUES
+    IN ('is_for_the');
+
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_belongs_to_industry PARTITION OF customer360.graph_edges FOR
+VALUES
+    IN ('belongs_to_industry');
+
+-- Catch-all
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_other PARTITION OF customer360.graph_edges DEFAULT;
+
+---------------------------------------------------
+-- INDEXES
+---------------------------------------------------
+
+-- =========================================================================
+-- RECOMMENDED INDICES FOR LEO CDP MASTER PROFILES
+-- =========================================================================
+
+-- -------------------------------------------------------------------------
+-- 1. ENTITY & IDENTITY INDEXES (B-TREE)
+-- Upgraded to UNIQUE per tenant_id to guarantee that master profiles
+-- remain true "golden records" without duplicates in a single workspace.
+-- -------------------------------------------------------------------------
+
+-- Email is unique per workspace. Ignored if NULL (e.g., mobile-only users).
+CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_mp_tenant_email ON customer360.cdp_master_profiles (tenant_id, email)
+WHERE
+    email IS NOT NULL;
+
+-- Phone is unique per workspace. Ignored if NULL (e.g., web-only users).
+CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_mp_tenant_phone ON customer360.cdp_master_profiles (tenant_id, phone_number)
+WHERE
+    phone_number IS NOT NULL;
+
+-- Core banking/retail identifiers are now domain-scoped in
+-- cdp_domain_profiles.domain_attributes and should be indexed/looked up via
+-- cdp_identity_index for normalized, cross-source matching.
+
+-- -------------------------------------------------------------------------
+-- 2. ML, SCORING & SEGMENTATION INDEXES (B-TREE)
+-- Improved by leading with tenant_id. Since segmentation queries always
+-- happen within a specific tenant, this massively speeds up campaign lookups.
+-- -------------------------------------------------------------------------
+
+-- Fast retrieval for churn prevention campaigns (Partial index saves space)
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_churn_tier ON customer360.cdp_master_profiles (tenant_id, churn_risk_tier)
+WHERE
+    churn_risk_tier IN ('high', 'critical');
+
+-- Fast retrieval for high-value customer targeting (Whales)
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_pred_clv ON customer360.cdp_master_profiles (
+    tenant_id,
+    predictive_clv DESC NULLS LAST
+);
+
+-- Fast routing of high-probability leads to sales/CRM
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_lead_prob ON customer360.cdp_master_profiles (
+    tenant_id,
+    lead_conversion_probability DESC NULLS LAST
+);
+
+-- Analytics lookup for profiles needing data enrichment
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_data_quality ON customer360.cdp_master_profiles (
+    tenant_id,
+    profile_completeness_score,
+    identity_confidence_score
+);
+
+-- -------------------------------------------------------------------------
+-- 3. CROSS-CHANNEL IDENTITY GRAPH INDEXES (GIN)
+-- Used for fast querying inside JSON objects and TEXT arrays.
+-- Deduplicated external_ids and standardized names.
+--
+-- Note: If you frequently query these alongside tenant_id, consider enabling
+-- the 'btree_gin' PostgreSQL extension to allow (tenant_id, json_column)
+-- composite GIN indexes in the future.
+-- -------------------------------------------------------------------------
+
+-- Deterministic external IDs (e.g., {"adjust_id": "...", "ga_client_id": "..."})
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_external_ids ON customer360.cdp_master_profiles USING GIN (external_ids);
+
+-- Secondary contacts
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_sec_emails ON customer360.cdp_master_profiles USING GIN (secondary_emails);
+
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_sec_phones ON customer360.cdp_master_profiles USING GIN (secondary_phones);
+
+-- Device & Ad Graph (Arrays)
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_device_ids ON customer360.cdp_master_profiles USING GIN (device_ids);
+
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_advertising_ids ON customer360.cdp_master_profiles USING GIN (advertising_ids);
+
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_cookie_ids ON customer360.cdp_master_profiles USING GIN (cookie_ids);
+
+-- Trigram index backing the fuzzy_trgm matching_rule's similarity(full_name, ...)
+-- lookup in resolver.py -- without it, enabling fuzzy_trgm on full_name would
+-- force a sequential scan (computing similarity() per row) at any real scale.
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_full_name_trgm ON customer360.cdp_master_profiles USING GIN (full_name gin_trgm_ops);
+
+-- Raw staging indexes: identity fields used for matching, plus the
+
+-- Supports the profile list's default last-activity/last-update ordering.
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_tenant_activity_sort ON customer360.cdp_master_profiles (
+    tenant_id,
+    last_activity_at DESC NULLS LAST,
+    updated_at DESC NULLS LAST,
+    created_at DESC,
+    master_profile_id ASC
+);
+
+-- Date-range filters can match either the last activity or last update.
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_tenant_last_activity ON customer360.cdp_master_profiles (
+    tenant_id,
+    last_activity_at DESC,
+    master_profile_id ASC
+)
+WHERE
+    last_activity_at IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_tenant_updated_at ON customer360.cdp_master_profiles (
+    tenant_id,
+    updated_at DESC,
+    master_profile_id ASC
+)
+WHERE
+    updated_at IS NOT NULL;
+-- processing-queue lookup (tenant_id, status_code).
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_tenant_status ON customer360.cdp_raw_profiles_stage (tenant_id, status_code);
+
+-- Feature extraction index for tenant-scoped event windows. S3 remains the
+-- preferred source for replayable event features; this supports SQL fallback
+-- over the normalized raw-profile landing table.
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_tenant_event_time
+    ON customer360.cdp_raw_profiles_stage (tenant_id, event_time DESC, event_name)
+    WHERE event_time IS NOT NULL;
+
+
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_email ON customer360.cdp_raw_profiles_stage (email)
+WHERE
+    email IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_phone ON customer360.cdp_raw_profiles_stage (phone_number)
+WHERE
+    phone_number IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_external_customer_id ON customer360.cdp_raw_profiles_stage (external_customer_id)
+WHERE
+    external_customer_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_device_id ON customer360.cdp_raw_profiles_stage (device_id)
+WHERE
+    device_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_advertising_id ON customer360.cdp_raw_profiles_stage (advertising_id)
+WHERE
+    advertising_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_cookie_id ON customer360.cdp_raw_profiles_stage (cookie_id)
+WHERE
+    cookie_id IS NOT NULL;
+
+-- 
+ALTER TABLE customer360.cdp_raw_profiles_stage
+    ADD COLUMN IF NOT EXISTS anonymous_id TEXT,
+    ADD COLUMN IF NOT EXISTS device_fingerprint TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_tenant_anonymous_id ON customer360.cdp_raw_profiles_stage (
+    tenant_id,
+    anonymous_id
+)
+WHERE
+    anonymous_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_tenant_device_fingerprint ON customer360.cdp_raw_profiles_stage (
+    tenant_id,
+    device_fingerprint
+)
+WHERE
+    device_fingerprint IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_national_id ON customer360.cdp_raw_profiles_stage (national_id)
+WHERE
+    national_id IS NOT NULL;
+
+-- Granular Adjust device identifiers (fallback lookups / lineage; not
+-- active CIR matching keys -- see device_id/advertising_id above for those).
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_idfa ON customer360.cdp_raw_profiles_stage (idfa)
+WHERE
+    idfa IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_idfv ON customer360.cdp_raw_profiles_stage (idfv)
+WHERE
+    idfv IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_android_id ON customer360.cdp_raw_profiles_stage (android_id)
+WHERE
+    android_id IS NOT NULL;
+
+-- Attribution reporting: rollups of installs/events by campaign.
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_campaign_id ON customer360.cdp_raw_profiles_stage (tenant_id, media_source, campaign_id)
+WHERE
+    campaign_id IS NOT NULL;
+
+-- Trigram indexes for fuzzy matching on name/company/address during CIR
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_first_name_trgm ON customer360.cdp_raw_profiles_stage USING GIN (first_name gin_trgm_ops)
+WHERE
+    first_name IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_last_name_trgm ON customer360.cdp_raw_profiles_stage USING GIN (last_name gin_trgm_ops)
+WHERE
+    last_name IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_company_name_trgm ON customer360.cdp_raw_profiles_stage USING GIN (company_name gin_trgm_ops)
+WHERE
+    company_name IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_address_trgm ON customer360.cdp_raw_profiles_stage USING GIN (address_line1 gin_trgm_ops)
+WHERE
+    address_line1 IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_city ON customer360.cdp_raw_profiles_stage (city)
+WHERE
+    city IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_contacts_date ON customer360.crm_customer_contacts (contact_date);
+
+CREATE INDEX IF NOT EXISTS idx_contacts_tenant_master_date ON customer360.crm_customer_contacts (
+    tenant_id,
+    master_profile_id,
+    contact_date DESC
+)
+WHERE
+    master_profile_id IS NOT NULL
+    AND contact_date IS NOT NULL;
+
+-- crm_transactions indexes: tenant timeline, resolved-profile timeline, generic
+-- entity lookups, and idempotent re-ingestion protection.
+CREATE INDEX IF NOT EXISTS idx_crm_transactions_tenant_time ON customer360.crm_transactions (
+    tenant_id,
+    transaction_time DESC
+);
+
+CREATE INDEX IF NOT EXISTS idx_crm_transactions_master_profile ON customer360.crm_transactions (
+    master_profile_id,
+    transaction_time DESC
+)
+WHERE
+    master_profile_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_transactions_tenant_master_time ON customer360.crm_transactions (
+    tenant_id,
+    master_profile_id,
+    transaction_time DESC
+)
+WHERE
+    master_profile_id IS NOT NULL
+    AND transaction_time IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_crm_transactions_entity ON customer360.crm_transactions (entity_type, entity_id)
+WHERE
+    entity_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_crm_transactions_tenant_source ON customer360.crm_transactions (
+    tenant_id,
+    source_system,
+    source_transaction_id
+)
+WHERE
+    source_transaction_id IS NOT NULL;
+
+-- Profile attribute metadata registry: catalog browsing by group, fast
+-- lookup of active CIR matching rules, and lookup of attributes by scoring model.
+CREATE INDEX IF NOT EXISTS idx_cdp_pa_group ON customer360.cdp_profile_attributes (attribute_group);
+
+CREATE INDEX IF NOT EXISTS idx_cdp_pa_identity_resolution ON customer360.cdp_profile_attributes (attribute_internal_code)
+WHERE
+    is_identity_resolution = TRUE
+    AND status = 'ACTIVE';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_pa_agent ON customer360.cdp_profile_attributes (agent_code)
+WHERE
+    is_ai_agent = TRUE;
+
+CREATE INDEX IF NOT EXISTS idx_graph_edges_belongs_to_industry_created_at ON customer360.graph_edges_belongs_to_industry (created_at);
+
+-- ==========================================================
+-- Agentic Email Marketing Schema
+-- ==========================================================
+-- Relational structure behind the outbound workflow flow
+-- (segment -> workflow draft -> human approval -> profile actions). Placed
+-- after all referenced tables (sys_user,
+-- crm_campaign, crm_lead, crm_lead_source, cdp_segments, cdp_content_items)
+-- so foreign keys resolve. See docs/action-plans/AGENTIC-EMAIL-MARKETING-FLOW.md.
+
+-- Reusable message template library for email, SMS, and WhatsApp, authored by
+-- people or AI agents and gated by human review.
+CREATE TABLE IF NOT EXISTS customer360.crm_message_templates (
+    template_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    name TEXT NOT NULL,
+    -- Platform key, intentionally open-ended for future messaging channels
+    -- (e.g. email, web_chat, zalo_oa, whatsapp, telegram).
+    message_type TEXT NOT NULL DEFAULT 'EMAIL',
+    -- Shared persona archetype used by an AI agent when generating or revising
+    -- this template. Hand-authored templates may leave it unset.
+    persona_id UUID REFERENCES customer360.cdp_persona_archetypes(persona_archetype_id) ON DELETE SET NULL,
+    -- Structured generation context, such as product, offer, tone, or locale.
+    context JSONB NOT NULL DEFAULT '{}'::jsonb,
+    -- Channel-neutral body used by SMS/WhatsApp and as the plain-text email body.
+    message_body TEXT,
+    subject TEXT,
+    html_body TEXT,
+    -- Retained for compatibility with existing email rendering integrations.
+    text_body TEXT,
+    -- Declared placeholders/merge variables (e.g. unsubscribe_url, first_name).
+    variables JSONB NOT NULL DEFAULT '{}'::jsonb,
+    -- Draft -> InReview -> Approved / Rejected review lifecycle.
+    status VARCHAR(50) NOT NULL DEFAULT 'Draft',
+    created_by UUID REFERENCES customer360.sys_user(user_id),
+    approved_by UUID REFERENCES customer360.sys_user(user_id),
+    approved_at TIMESTAMP WITH TIME ZONE,
+    metadata JSONB,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    CONSTRAINT chk_crm_message_templates_message_type_not_blank
+        CHECK (btrim(message_type) <> ''),
+    CONSTRAINT chk_crm_message_templates_context_object
+        CHECK (jsonb_typeof(context) = 'object'),
+    CONSTRAINT chk_crm_message_templates_variables_object
+        CHECK (jsonb_typeof(variables) = 'object'),
+    CONSTRAINT chk_crm_message_templates_status
+        CHECK (status IN ('Draft', 'InReview', 'Approved', 'Rejected'))
+);
+
+COMMENT ON TABLE customer360.crm_message_templates IS 'Reusable CRM message templates for EMAIL, SMS, and WHATSAPP. Stores an optional AI persona reference, structured generation context, merge variables, channel-neutral content, and email-specific subject/HTML content through the Draft -> InReview -> Approved/Rejected lifecycle.';
+
+CREATE INDEX IF NOT EXISTS idx_crm_message_templates_tenant ON customer360.crm_message_templates (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_crm_message_templates_tenant_status ON customer360.crm_message_templates (tenant_id, status);
+CREATE INDEX IF NOT EXISTS idx_crm_message_templates_tenant_type ON customer360.crm_message_templates (tenant_id, message_type);
+CREATE INDEX IF NOT EXISTS idx_crm_message_templates_persona ON customer360.crm_message_templates (persona_id)
+    WHERE persona_id IS NOT NULL;
+
+-- Campaign A/B experiments. This block intentionally follows both
+-- cdp_segments and crm_message_templates so fresh schema initialization can
+-- resolve the foreign keys in one pass.
+CREATE TABLE IF NOT EXISTS customer360.crm_campaign_experiments (
+    experiment_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    campaign_id UUID NOT NULL REFERENCES customer360.crm_campaign(campaign_id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'Draft',
+    primary_metric VARCHAR(50) NOT NULL DEFAULT 'conversions',
+    start_date DATE,
+    end_date DATE,
+    winning_variant_id UUID,
+    metadata JSONB,
+    created_by UUID REFERENCES customer360.sys_user(user_id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    CONSTRAINT chk_campaign_experiment_status CHECK (status IN ('Draft', 'Running', 'Paused', 'Completed', 'Cancelled')),
+    CONSTRAINT chk_campaign_experiment_metric CHECK (primary_metric IN ('conversions', 'revenue', 'roas', 'cvr')),
+    CONSTRAINT chk_campaign_experiment_dates CHECK (end_date IS NULL OR start_date IS NULL OR end_date >= start_date)
+);
+
+CREATE TABLE IF NOT EXISTS customer360.crm_campaign_experiment_variants (
+    variant_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    experiment_id UUID NOT NULL REFERENCES customer360.crm_campaign_experiments(experiment_id) ON DELETE CASCADE,
+    variant_key VARCHAR(50) NOT NULL,
+    name TEXT NOT NULL,
+    segment_id UUID NOT NULL REFERENCES customer360.cdp_segments(segment_id),
+    template_id UUID REFERENCES customer360.crm_message_templates(template_id) ON DELETE SET NULL,
+    allocation_percentage NUMERIC(5, 2) NOT NULL CHECK (allocation_percentage >= 0 AND allocation_percentage <= 100),
+    is_control BOOLEAN NOT NULL DEFAULT FALSE,
+    status VARCHAR(20) NOT NULL DEFAULT 'Draft',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    CONSTRAINT uq_campaign_experiment_variant_key UNIQUE (experiment_id, variant_key),
+    CONSTRAINT chk_campaign_experiment_variant_status CHECK (status IN ('Draft', 'Running', 'Paused', 'Completed', 'Cancelled'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_campaign_experiment_tenant_id
+    ON customer360.crm_campaign_experiments (tenant_id, experiment_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_campaign_experiment_variant_tenant_id
+    ON customer360.crm_campaign_experiment_variants (tenant_id, experiment_id, variant_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_campaign_experiment_variant_tenant_variant
+    ON customer360.crm_campaign_experiment_variants (tenant_id, variant_id);
+CREATE INDEX IF NOT EXISTS idx_campaign_experiments_tenant_campaign
+    ON customer360.crm_campaign_experiments (tenant_id, campaign_id);
+CREATE INDEX IF NOT EXISTS idx_campaign_experiment_variants_experiment
+    ON customer360.crm_campaign_experiment_variants (tenant_id, experiment_id);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'fk_campaign_experiment_winner'
+          AND conrelid = 'customer360.crm_campaign_experiments'::regclass
+    ) THEN
+        ALTER TABLE customer360.crm_campaign_experiments
+            ADD CONSTRAINT fk_campaign_experiment_winner
+            FOREIGN KEY (tenant_id, experiment_id, winning_variant_id)
+            REFERENCES customer360.crm_campaign_experiment_variants(tenant_id, experiment_id, variant_id)
+            DEFERRABLE INITIALLY DEFERRED;
+    END IF;
+END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_campaign_daily_performance_base
+    ON customer360.crm_campaign_performance_daily (tenant_id, campaign_id, report_date)
+    WHERE experiment_variant_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_campaign_daily_performance_variant
+    ON customer360.crm_campaign_performance_daily (tenant_id, campaign_id, report_date, experiment_variant_id)
+    WHERE experiment_variant_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_campaign_performance_variant
+    ON customer360.crm_campaign_performance_daily (tenant_id, experiment_variant_id, report_date DESC);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_crm_campaign_segment' AND conrelid = 'customer360.crm_campaign'::regclass) THEN
+        EXECUTE format(
+            'ALTER TABLE %I.%I ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES %I.%I(%I) ON DELETE SET NULL',
+            'customer360', 'crm_campaign', 'fk_crm_campaign_segment',
+            'segment_id', 'customer360', 'cdp_segments', 'segment_id'
+        );
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_crm_campaign_approved_by' AND conrelid = 'customer360.crm_campaign'::regclass) THEN
+        EXECUTE format(
+            'ALTER TABLE %I.%I ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES %I.%I(%I)',
+            'customer360', 'crm_campaign', 'fk_crm_campaign_approved_by',
+            'approved_by', 'customer360', 'sys_user', 'user_id'
+        );
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_crm_campaign_approval_status' AND conrelid = 'customer360.crm_campaign'::regclass) THEN
+        EXECUTE format(
+            'ALTER TABLE %I.%I ADD CONSTRAINT %I CHECK (approval_status IN (''Draft'', ''InReview'', ''Approved'', ''Rejected''))',
+            'customer360', 'crm_campaign', 'chk_crm_campaign_approval_status'
+        );
+    END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_crm_campaign_segment ON customer360.crm_campaign (segment_id);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_crm_lead_lead_source' AND conrelid = 'customer360.crm_lead'::regclass) THEN
+        EXECUTE format(
+            'ALTER TABLE %I.%I ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES %I.%I(%I) ON DELETE SET NULL',
+            'customer360', 'crm_lead', 'fk_crm_lead_lead_source',
+            'lead_source_id', 'customer360', 'crm_lead_source', 'lead_source_id'
+        );
+    END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_crm_lead_lead_source ON customer360.crm_lead (lead_source_id);
+
+-- Campaign <-> content-item relation: which cdp_content_items a campaign uses,
+-- in what order (position) and role (e.g. hero, body, footer).
+CREATE TABLE IF NOT EXISTS customer360.crm_campaign_content_items (
+    campaign_content_item_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    campaign_id UUID NOT NULL REFERENCES customer360.crm_campaign(campaign_id) ON DELETE CASCADE,
+    content_item_id UUID NOT NULL REFERENCES customer360.cdp_content_items(content_item_id) ON DELETE CASCADE,
+    position INTEGER NOT NULL DEFAULT 0,
+    role VARCHAR(50),
+    metadata JSONB,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    -- A content item appears at most once per campaign (idempotent linking).
+    CONSTRAINT uq_crm_campaign_content UNIQUE (campaign_id, content_item_id)
+);
+
+COMMENT ON TABLE customer360.crm_campaign_content_items IS 'Relation table linking a crm_campaign to the cdp_content_items it uses, with ordering (position) and role; unique per (campaign_id, content_item_id) so re-planning a campaign cannot duplicate content links.';
+
+CREATE INDEX IF NOT EXISTS idx_crm_campaign_content_tenant ON customer360.crm_campaign_content_items (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_crm_campaign_content_campaign ON customer360.crm_campaign_content_items (campaign_id);
+CREATE INDEX IF NOT EXISTS idx_crm_campaign_content_item ON customer360.crm_campaign_content_items (content_item_id);
+
+-- Audit trail: one row per segment-sync execution with per-routing-bucket
+-- counts (customer / lead / contact), for idempotency evidence and dashboards.
+CREATE TABLE IF NOT EXISTS customer360.crm_segment_sync_runs (
+    sync_run_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    segment_id UUID NOT NULL REFERENCES customer360.cdp_segments(segment_id) ON DELETE CASCADE,
+    triggered_by UUID REFERENCES customer360.sys_user(user_id),
+    status VARCHAR(50) NOT NULL DEFAULT 'Pending',
+    -- dry_run = true means counts were computed but no crm_* rows were written.
+    dry_run BOOLEAN NOT NULL DEFAULT FALSE,
+    -- Frozen membership size for this run, then per routing bucket.
+    matched_count INTEGER NOT NULL DEFAULT 0,
+    customer_count INTEGER NOT NULL DEFAULT 0,
+    lead_count INTEGER NOT NULL DEFAULT 0,
+    contact_count INTEGER NOT NULL DEFAULT 0,
+    skipped_count INTEGER NOT NULL DEFAULT 0,
+    error_count INTEGER NOT NULL DEFAULT 0,
+    error_message TEXT,
+    started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    finished_at TIMESTAMP WITH TIME ZONE,
+    metadata JSONB,
+    CONSTRAINT chk_crm_segment_sync_runs_status
+        CHECK (status IN ('Pending', 'Running', 'Completed', 'Failed'))
+);
+
+COMMENT ON TABLE customer360.crm_segment_sync_runs IS 'Audit record for each segment -> CRM sync execution: routing-bucket counts (customer/lead/contact), skipped/error counts, dry-run flag, and timing, produced by the sync engine.';
+
+CREATE INDEX IF NOT EXISTS idx_crm_segment_sync_runs_tenant ON customer360.crm_segment_sync_runs (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_crm_segment_sync_runs_segment ON customer360.crm_segment_sync_runs (segment_id);
+CREATE INDEX IF NOT EXISTS idx_crm_segment_sync_runs_tenant_started ON customer360.crm_segment_sync_runs (tenant_id, started_at DESC);
+
+-- --- External ad-platform audience synchronization ----------------
+CREATE TABLE IF NOT EXISTS customer360.crm_ad_sync_runs (
+    sync_run_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id) ON DELETE CASCADE,
+    campaign_id UUID NOT NULL REFERENCES customer360.crm_campaign(campaign_id) ON DELETE CASCADE,
+    segment_id UUID NOT NULL REFERENCES customer360.cdp_segments(segment_id) ON DELETE CASCADE,
+    platform VARCHAR(50) NOT NULL,
+    audience_name VARCHAR(255) NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    external_audience_id TEXT,
+    provider_request_id TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'Pending',
+    dry_run BOOLEAN NOT NULL DEFAULT FALSE,
+    attempt_count INTEGER NOT NULL DEFAULT 1,
+    matched_count INTEGER NOT NULL DEFAULT 0,
+    eligible_count INTEGER NOT NULL DEFAULT 0,
+    uploaded_count INTEGER NOT NULL DEFAULT 0,
+    error_message TEXT,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    finished_at TIMESTAMP WITH TIME ZONE,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    CONSTRAINT uq_crm_ad_sync_runs_key UNIQUE (tenant_id, idempotency_key),
+    CONSTRAINT chk_crm_ad_sync_runs_platform CHECK (
+        platform IN ('meta_ads', 'google_ads', 'tiktok_ads')
+    ),
+    CONSTRAINT chk_crm_ad_sync_runs_status CHECK (
+        status IN ('Pending', 'Running', 'Completed', 'Failed')
+    ),
+    CONSTRAINT chk_crm_ad_sync_runs_counts CHECK (
+        attempt_count > 0
+        AND matched_count >= 0
+        AND eligible_count >= 0
+        AND uploaded_count >= 0
+    )
+);
+
+COMMENT ON TABLE customer360.crm_ad_sync_runs IS 'Tenant-scoped, idempotent audit state for campaign segment uploads to Meta, Google Ads, and TikTok custom audiences. Raw profile identifiers are never stored.';
+
+CREATE INDEX IF NOT EXISTS idx_crm_ad_sync_runs_tenant_started
+    ON customer360.crm_ad_sync_runs (tenant_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_crm_ad_sync_runs_campaign
+    ON customer360.crm_ad_sync_runs (tenant_id, campaign_id, platform);
+
+-- --- Per-profile workflow action ledger -------------------------
+ALTER TABLE customer360.crm_campaign
+    ADD COLUMN IF NOT EXISTS workflow_execution_id UUID;
+
+CREATE TABLE IF NOT EXISTS customer360.crm_campaign_workflow_action_runs (
+    action_run_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id) ON DELETE CASCADE,
+    campaign_id UUID NOT NULL REFERENCES customer360.crm_campaign(campaign_id) ON DELETE CASCADE,
+    execution_id UUID NOT NULL,
+    master_profile_id UUID NOT NULL REFERENCES customer360.cdp_master_profiles(master_profile_id) ON DELETE CASCADE,
+    node_id TEXT NOT NULL,
+    action_type VARCHAR(40) NOT NULL,
+    channel VARCHAR(20),
+    status VARCHAR(20) NOT NULL DEFAULT 'Running',
+    provider VARCHAR(100),
+    provider_message_id TEXT,
+    error_message TEXT,
+    attempt_count INTEGER NOT NULL DEFAULT 1,
+    run_id TEXT,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    CONSTRAINT uq_crm_campaign_workflow_action_execution
+        UNIQUE (campaign_id, master_profile_id, node_id, execution_id),
+    CONSTRAINT chk_crm_campaign_workflow_action_status
+        CHECK (status IN ('Running', 'Sent', 'Applied', 'Skipped', 'Failed')),
+    CONSTRAINT chk_crm_campaign_workflow_action_type
+        CHECK (action_type IN ('email', 'notification', 'push', 'update_profile')),
+    CONSTRAINT chk_crm_campaign_workflow_action_attempts
+        CHECK (attempt_count > 0)
+);
+
+-- Backfill existing action history into one legacy execution per campaign before
+-- replacing the old campaign-wide idempotency key.
+ALTER TABLE customer360.crm_campaign_workflow_action_runs
+    ADD COLUMN IF NOT EXISTS execution_id UUID;
+
+UPDATE customer360.crm_campaign c
+SET workflow_execution_id = gen_random_uuid()
+WHERE c.workflow_execution_id IS NULL
+  AND EXISTS (
+      SELECT 1 FROM customer360.crm_campaign_workflow_action_runs r
+      WHERE r.tenant_id = c.tenant_id AND r.campaign_id = c.campaign_id
+  );
+
+UPDATE customer360.crm_campaign_workflow_action_runs r
+SET execution_id = c.workflow_execution_id
+FROM customer360.crm_campaign c
+WHERE r.tenant_id = c.tenant_id
+  AND r.campaign_id = c.campaign_id
+  AND r.execution_id IS NULL;
+
+ALTER TABLE customer360.crm_campaign_workflow_action_runs
+    ALTER COLUMN execution_id SET NOT NULL;
+ALTER TABLE customer360.crm_campaign_workflow_action_runs
+    DROP CONSTRAINT IF EXISTS uq_crm_campaign_workflow_action;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'uq_crm_campaign_workflow_action_execution'
+          AND conrelid = 'customer360.crm_campaign_workflow_action_runs'::regclass
+    ) THEN
+        ALTER TABLE customer360.crm_campaign_workflow_action_runs
+            ADD CONSTRAINT uq_crm_campaign_workflow_action_execution
+            UNIQUE (campaign_id, master_profile_id, node_id, execution_id);
+    END IF;
+END $$;
+
+COMMENT ON TABLE customer360.crm_campaign_workflow_action_runs IS 'Idempotent per-execution/profile/node ledger for actions executed by the persisted customer journey workflow.';
+
+CREATE INDEX IF NOT EXISTS idx_crm_campaign_workflow_action_tenant
+    ON customer360.crm_campaign_workflow_action_runs (tenant_id, campaign_id, status);
+CREATE INDEX IF NOT EXISTS idx_crm_campaign_workflow_action_profile
+    ON customer360.crm_campaign_workflow_action_runs (tenant_id, master_profile_id);
+
+-- --- Per-recipient email send ledger --------------------------
+CREATE TABLE IF NOT EXISTS customer360.cdp_campaign_dispatch_logs (
+    dispatch_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    campaign_id UUID NOT NULL REFERENCES customer360.crm_campaign(campaign_id) ON DELETE CASCADE,
+    master_profile_id UUID NOT NULL REFERENCES customer360.cdp_master_profiles(master_profile_id) ON DELETE CASCADE,
+    template_id UUID REFERENCES customer360.crm_message_templates(template_id) ON DELETE SET NULL,
+    recipient_email TEXT,
+    status VARCHAR(50) NOT NULL DEFAULT 'Pending',
+    provider VARCHAR(100),
+    provider_message_id TEXT,
+    rendered_subject TEXT,
+    error_message TEXT,
+    run_id TEXT,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    dispatched_at TIMESTAMP WITH TIME ZONE,
+    metadata JSONB,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    CONSTRAINT chk_cdp_campaign_dispatch_status
+        CHECK (status IN ('Pending', 'Sent', 'Failed', 'Skipped', 'Suppressed')),
+    CONSTRAINT uq_cdp_campaign_dispatch_recipient UNIQUE (campaign_id, master_profile_id)
+);
+
+COMMENT ON TABLE customer360.cdp_campaign_dispatch_logs IS 'Per-recipient email send ledger written by the email_engine Dagster job: one row per (campaign_id, master_profile_id) with send status, provider message id, and rendered subject. UNIQUE(campaign_id, master_profile_id) makes re-runs idempotent (ON CONFLICT DO UPDATE).';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_campaign_dispatch_tenant ON customer360.cdp_campaign_dispatch_logs (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_cdp_campaign_dispatch_campaign ON customer360.cdp_campaign_dispatch_logs (campaign_id);
+CREATE INDEX IF NOT EXISTS idx_cdp_campaign_dispatch_campaign_status ON customer360.cdp_campaign_dispatch_logs (campaign_id, status);
+CREATE INDEX IF NOT EXISTS idx_cdp_campaign_dispatch_profile ON customer360.cdp_campaign_dispatch_logs (master_profile_id);
+
+-- --- Generic outbound activation connector config -----------------
+CREATE TABLE IF NOT EXISTS customer360.crm_connector_config (
+    connector_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id) ON DELETE CASCADE,
+    user_id UUID REFERENCES customer360.sys_user(user_id) ON DELETE SET NULL,
+    name TEXT NOT NULL DEFAULT 'default',
+    connector_type VARCHAR(50) NOT NULL,
+    provider VARCHAR(100) NOT NULL,
+    direction VARCHAR(20) NOT NULL DEFAULT 'OUTBOUND',
+    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+    endpoint_url TEXT,
+    region VARCHAR(100),
+    auth_type VARCHAR(50),
+    credentials_ref TEXT,
+    credentials JSONB NOT NULL DEFAULT '{}'::jsonb,
+    config JSONB NOT NULL DEFAULT '{}'::jsonb,
+    capabilities JSONB DEFAULT '{}'::jsonb,
+    last_tested_at TIMESTAMP WITH TIME ZONE,
+    last_test_status VARCHAR(20),
+    last_error TEXT,
+    is_default BOOLEAN NOT NULL DEFAULT FALSE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    metadata JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    CONSTRAINT uq_crm_connector_name UNIQUE (tenant_id, name),
+    CONSTRAINT chk_crm_connector_type CHECK (connector_type IN ('EMAIL', 'SMS', 'PUSH', 'CHAT', 'ADS', 'WEBHOOK')),
+    CONSTRAINT chk_crm_connector_direction CHECK (direction IN ('INBOUND', 'OUTBOUND', 'BIDIRECTIONAL')),
+    CONSTRAINT chk_crm_connector_status CHECK (status IN ('ACTIVE', 'INACTIVE', 'ERROR', 'TESTING')),
+    CONSTRAINT chk_crm_connector_last_test_status CHECK (
+        last_test_status IS NULL OR last_test_status IN ('SUCCESS', 'FAILED')
+    ),
+    CONSTRAINT chk_crm_connector_credentials_object CHECK (jsonb_typeof(credentials) = 'object'),
+    CONSTRAINT chk_crm_connector_config_object CHECK (jsonb_typeof(config) = 'object'),
+    CONSTRAINT chk_crm_connector_capabilities_object CHECK (
+        capabilities IS NULL OR jsonb_typeof(capabilities) = 'object'
+    )
+);
+
+COMMENT ON TABLE customer360.crm_connector_config IS 'Outbound CRM connector configuration for activation and communication channels such as email, SMS, push, chat, ads and webhooks. Inbound data collection remains modeled by sys_data_source.';
+COMMENT ON COLUMN customer360.crm_connector_config.credentials IS 'Secret connector material. For CHAT/ZALO this contains app_id, app_secret, oa_id, access_token, refresh_token, token_expires_at, and webhook_signing_secret.';
+COMMENT ON COLUMN customer360.crm_connector_config.config IS 'Non-secret connector settings. For CHAT/ZALO this contains oa_api_base_url, oauth_authorize_url, oa_token_url, oauth_redirect_uri, token_refresh_cron, dispatch_adapter, zns_api_base_url, batch_size, optout_projection_cron, and optout_lookback_hours.';
+
+CREATE INDEX IF NOT EXISTS idx_crm_connector_tenant ON customer360.crm_connector_config (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_crm_connector_channel ON customer360.crm_connector_config (tenant_id, connector_type);
+CREATE INDEX IF NOT EXISTS idx_crm_connector_status ON customer360.crm_connector_config (tenant_id, status);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_crm_connector_default
+    ON customer360.crm_connector_config (tenant_id, connector_type)
+    WHERE is_default = TRUE AND is_active = TRUE;
+
+-- --- Omnichannel CRM suppression list --------------------------
+CREATE TABLE IF NOT EXISTS customer360.crm_suppression_list (
+    suppression_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id) ON DELETE CASCADE,
+    master_profile_id UUID REFERENCES customer360.cdp_master_profiles(master_profile_id) ON DELETE SET NULL,
+    channel VARCHAR(30) NOT NULL,
+    identifier_type VARCHAR(30) NOT NULL,
+    identifier TEXT NOT NULL,
+    reason VARCHAR(50) NOT NULL,
+    scope VARCHAR(20) NOT NULL DEFAULT 'GLOBAL',
+    campaign_id UUID REFERENCES customer360.crm_campaign(campaign_id) ON DELETE CASCADE,
+    source VARCHAR(100),
+    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+    expires_at TIMESTAMP WITH TIME ZONE,
+    removed_at TIMESTAMP WITH TIME ZONE,
+    removed_by UUID REFERENCES customer360.sys_user(user_id) ON DELETE SET NULL,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    CONSTRAINT chk_crm_suppression_list_channel CHECK (
+        channel IN ('EMAIL', 'SMS', 'PUSH', 'WHATSAPP', 'ZALO', 'VOICE', 'GLOBAL')
+    ),
+    CONSTRAINT chk_crm_suppression_list_identifier_type CHECK (
+        identifier_type IN ('EMAIL', 'PHONE', 'PUSH_TOKEN', 'DEVICE_ID', 'PROFILE_ID')
+    ),
+    CONSTRAINT chk_crm_suppression_list_reason CHECK (
+        reason IN (
+            'HARD_BOUNCE', 'SOFT_BOUNCE', 'COMPLAINT', 'UNSUBSCRIBE', 'MANUAL',
+            'INVALID_DESTINATION', 'POLICY', 'LEGAL'
+        )
+    ),
+    CONSTRAINT chk_crm_suppression_list_scope CHECK (scope IN ('GLOBAL', 'CAMPAIGN')),
+    CONSTRAINT chk_crm_suppression_list_status CHECK (status IN ('ACTIVE', 'REMOVED')),
+    CONSTRAINT chk_crm_suppression_list_campaign_scope CHECK (
+        (scope = 'GLOBAL' AND campaign_id IS NULL)
+        OR (scope = 'CAMPAIGN' AND campaign_id IS NOT NULL)
+    ),
+    CONSTRAINT chk_crm_suppression_list_removed CHECK (
+        (status = 'ACTIVE' AND removed_at IS NULL)
+        OR (status = 'REMOVED' AND removed_at IS NOT NULL)
+    ),
+    CONSTRAINT chk_crm_suppression_list_identifier_not_blank CHECK (btrim(identifier) <> ''),
+    CONSTRAINT chk_crm_suppression_list_email_lower CHECK (
+        identifier_type <> 'EMAIL' OR identifier = lower(identifier)
+    ),
+    CONSTRAINT chk_crm_suppression_list_profile_identifier CHECK (
+        (identifier_type = 'PROFILE_ID' AND channel = 'GLOBAL')
+        OR (identifier_type <> 'PROFILE_ID' AND channel <> 'GLOBAL')
+    ),
+    CONSTRAINT chk_crm_suppression_list_metadata CHECK (jsonb_typeof(metadata) = 'object')
+);
+
+COMMENT ON TABLE customer360.crm_suppression_list IS 'Omnichannel CRM suppression registry used by activation services before message dispatch. Supports global and campaign-scoped suppression across Email, SMS, Push, WhatsApp, Zalo, Voice and profile-level suppression.';
+COMMENT ON COLUMN customer360.crm_suppression_list.identifier IS 'Canonical normalized destination identifier. Email must be lowercase; phone numbers should use E.164; provider/device identifiers must use the canonical representation defined by the connector.';
+COMMENT ON COLUMN customer360.crm_suppression_list.scope IS 'GLOBAL blocks activation across campaigns; CAMPAIGN blocks activation only for campaign_id.';
+
+CREATE INDEX IF NOT EXISTS idx_crm_suppression_tenant_status
+    ON customer360.crm_suppression_list (tenant_id, status);
+CREATE INDEX IF NOT EXISTS idx_crm_suppression_lookup
+    ON customer360.crm_suppression_list (
+        tenant_id, channel, identifier_type, identifier, status, expires_at
+    );
+CREATE INDEX IF NOT EXISTS idx_crm_suppression_profile
+    ON customer360.crm_suppression_list (tenant_id, master_profile_id)
+    WHERE master_profile_id IS NOT NULL;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint c
+        JOIN pg_class r ON r.oid = c.conrelid
+        JOIN pg_namespace n ON n.oid = r.relnamespace
+        WHERE n.nspname = 'customer360'
+          AND r.relname = 'crm_suppression_list'
+          AND c.conname = 'ex_crm_suppression_global_window'
+    ) THEN
+        ALTER TABLE customer360.crm_suppression_list
+            ADD CONSTRAINT ex_crm_suppression_global_window
+            EXCLUDE USING gist (
+                tenant_id WITH =,
+                channel WITH =,
+                identifier_type WITH =,
+                identifier WITH =,
+                tstzrange(
+                    created_at,
+                    COALESCE(expires_at, 'infinity'::timestamptz),
+                    '[)'
+                ) WITH &&
+            )
+            WHERE (status = 'ACTIVE' AND scope = 'GLOBAL');
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint c
+        JOIN pg_class r ON r.oid = c.conrelid
+        JOIN pg_namespace n ON n.oid = r.relnamespace
+        WHERE n.nspname = 'customer360'
+          AND r.relname = 'crm_suppression_list'
+          AND c.conname = 'ex_crm_suppression_campaign_window'
+    ) THEN
+        ALTER TABLE customer360.crm_suppression_list
+            ADD CONSTRAINT ex_crm_suppression_campaign_window
+            EXCLUDE USING gist (
+                tenant_id WITH =,
+                channel WITH =,
+                identifier_type WITH =,
+                identifier WITH =,
+                campaign_id WITH =,
+                tstzrange(
+                    created_at,
+                    COALESCE(expires_at, 'infinity'::timestamptz),
+                    '[)'
+                ) WITH &&
+            )
+            WHERE (status = 'ACTIVE' AND scope = 'CAMPAIGN');
+    END IF;
+END;
+$$;
+
+-- ==========================================================
+-- Tenant-consistent foreign keys
+-- ==========================================================
+-- Every relationship between tenant-owned tables must carry the child tenant
+-- alongside the referenced ID. The single-column FKs above remain for
+-- compatibility with existing clients; these composite FKs are the boundary
+-- that prevents a row from tenant A referencing an object owned by tenant B.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_sys_organization_tenant_id
+    ON customer360.sys_organization (tenant_id, organization_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_sys_user_tenant_id
+    ON customer360.sys_user (tenant_id, user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_sys_role_tenant_id
+    ON customer360.sys_role (tenant_id, role_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_crm_campaign_tenant_id
+    ON customer360.crm_campaign (tenant_id, campaign_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_crm_lead_source_tenant_id
+    ON customer360.crm_lead_source (tenant_id, lead_source_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_crm_contact_tenant_id
+    ON customer360.crm_contact (tenant_id, contact_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_crm_account_tenant_id
+    ON customer360.crm_account (tenant_id, account_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_crm_industry_tenant_id
+    ON customer360.crm_industry (tenant_id, industry_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_master_profiles_tenant_id
+    ON customer360.cdp_master_profiles (tenant_id, master_profile_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_raw_profiles_stage_tenant_id
+    ON customer360.cdp_raw_profiles_stage (tenant_id, raw_profile_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_persona_archetypes_tenant_id
+    ON customer360.cdp_persona_archetypes (tenant_id, persona_archetype_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_customer_personas_tenant_id
+    ON customer360.cdp_customer_personas (tenant_id, persona_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_segments_tenant_id
+    ON customer360.cdp_segments (tenant_id, segment_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_content_items_tenant_id
+    ON customer360.cdp_content_items (tenant_id, content_item_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_crm_message_templates_tenant_id
+    ON customer360.crm_message_templates (tenant_id, template_id);
+
+CREATE TABLE IF NOT EXISTS customer360.crm_campaign_agent (
+    campaign_agent_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id) ON DELETE CASCADE,
+    campaign_id UUID NOT NULL,
+    agent_code VARCHAR(100) NOT NULL
+        REFERENCES customer360.cdp_ai_agents(agent_code) ON DELETE RESTRICT,
+    role VARCHAR(20) NOT NULL CHECK (role IN ('plan', 'decide', 'optimize')),
+    autonomy VARCHAR(20) NOT NULL DEFAULT 'approve'
+        CHECK (autonomy IN ('suggest', 'approve')),
+    pinned_instruction_version INTEGER
+        CHECK (pinned_instruction_version > 0),
+    guardrails JSONB NOT NULL DEFAULT '{}'::jsonb
+        CHECK (jsonb_typeof(guardrails) = 'object'),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT fk_crm_campaign_agent_tenant_campaign
+        FOREIGN KEY (tenant_id, campaign_id)
+        REFERENCES customer360.crm_campaign (tenant_id, campaign_id) ON DELETE CASCADE,
+    CONSTRAINT uq_crm_campaign_agent UNIQUE (campaign_id, agent_code, role)
+);
+
+COMMENT ON TABLE customer360.crm_campaign_agent IS
+    'Agents assigned to a campaign with a role (plan/decide/optimize), autonomy level, guardrails and pinned prompt revision. Answers "campaigns using this agent" and "agents on this campaign".';
+
+CREATE INDEX IF NOT EXISTS idx_crm_campaign_agent_agent
+    ON customer360.crm_campaign_agent (agent_code, tenant_id)
+    WHERE is_active;
+
+-- =========================================================================
+-- CUSTOMER JOURNEY REPORTING
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS customer360.cdp_journey_metric (
+    metric_code VARCHAR(60) PRIMARY KEY,
+    journey_stage VARCHAR(30) CHECK (journey_stage IS NULL OR journey_stage IN (
+        'awareness', 'acquisition', 'activation', 'engagement',
+        'conversion', 'retention', 'loyalty', 'churned')),
+    label TEXT NOT NULL,
+    unit VARCHAR(20) NOT NULL DEFAULT 'count'
+        CHECK (unit IN ('count', 'percent', 'ratio', 'currency')),
+    source VARCHAR(20) NOT NULL
+        CHECK (source IN ('event_lake', 'profile', 'transaction', 'campaign')),
+    applicable_business_models TEXT[] NOT NULL
+        DEFAULT ARRAY['B2B', 'B2C', 'B2B2C']::TEXT[]
+        CONSTRAINT cdp_journey_metric_business_models_check CHECK (
+            cardinality(applicable_business_models) > 0
+            AND applicable_business_models <@ ARRAY['B2B', 'B2C', 'B2B2C']::TEXT[]
+        ),
+    is_primary BOOLEAN NOT NULL DEFAULT FALSE,
+    higher_is_better BOOLEAN NOT NULL DEFAULT TRUE,
+    rule JSONB NOT NULL DEFAULT '{}'::jsonb
+        CHECK (jsonb_typeof(rule) = 'object'),
+    display_order SMALLINT NOT NULL DEFAULT 0,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'customer360.cdp_journey_metric'::regclass
+          AND conname = 'cdp_journey_metric_journey_stage_check'
+          AND pg_get_constraintdef(oid) LIKE '%churned%'
+    ) THEN
+        ALTER TABLE customer360.cdp_journey_metric
+            DROP CONSTRAINT IF EXISTS cdp_journey_metric_journey_stage_check;
+        ALTER TABLE customer360.cdp_journey_metric
+            ADD CONSTRAINT cdp_journey_metric_journey_stage_check
+            CHECK (journey_stage IS NULL OR journey_stage IN (
+                'awareness', 'acquisition', 'activation', 'engagement',
+                'conversion', 'retention', 'loyalty', 'churned'));
+    END IF;
+END $$;
+
+COMMENT ON TABLE customer360.cdp_journey_metric IS
+    'KPI definitions shown on each journey stage report. source tells which job computes it; rule holds its parameters.';
+COMMENT ON COLUMN customer360.cdp_journey_metric.applicable_business_models IS
+    'Business models for which this KPI is valid (B2B, B2C, B2B2C).';
+
+INSERT INTO customer360.cdp_journey_metric
+    (metric_code, journey_stage, label, unit, source, is_primary, higher_is_better, rule, display_order)
+VALUES
+    ('visitors',               'awareness',   'Visitors',              'count',   'event_lake',  TRUE,  TRUE,  '{"event_names": [], "distinct": "profile"}', 10),
+    ('awareness_conversion',   'awareness',   'Conversion to next',    'percent', 'event_lake',  FALSE, TRUE,  '{}', 20),
+    ('new_leads',              'acquisition', 'New leads',             'count',   'event_lake',  TRUE,  TRUE,  '{"event_names": [], "distinct": "profile"}', 10),
+    ('acquisition_conversion', 'acquisition', 'Conversion to next',    'percent', 'event_lake',  FALSE, TRUE,  '{}', 20),
+    ('activated_users',        'activation',  'Activated users',       'count',   'event_lake',  TRUE,  TRUE,  '{"event_names": [], "distinct": "profile"}', 10),
+    ('activation_conversion',  'activation',  'Conversion to next',    'percent', 'event_lake',  FALSE, TRUE,  '{}', 20),
+    ('active_customers',       'engagement',  'Active customers',      'count',   'transaction', TRUE,  TRUE,  '{}', 10),
+    ('purchase_frequency',     'engagement',  'Purchase frequency',    'ratio',   'transaction', FALSE, TRUE,  '{}', 20),
+    ('orders',                 'conversion',  'Orders',                'count',   'transaction', TRUE,  TRUE,  '{"exclude_status": ["cancelled", "failed", "refunded"]}', 10),
+    ('conversion_rate',        'conversion',  'Conversion rate',       'percent', 'event_lake',  FALSE, TRUE,  '{}', 20),
+    ('retention_rate',         'retention',   'Retention rate',        'percent', 'transaction', TRUE,  TRUE,  '{}', 10),
+    ('churn_risk_rate',        'retention',   'Churn risk',            'percent', 'profile',     FALSE, FALSE, '{"min_probability": 0.7}', 20),
+    ('repeat_purchase_rate',   'loyalty',     'Repeat purchase',       'percent', 'transaction', TRUE,  TRUE,  '{}', 10),
+    ('referral_rate',          'loyalty',     'Referral rate',         'percent', 'event_lake',  FALSE, TRUE,  '{"event_names": []}', 20),
+    ('churn_rate',             'churned',     'Churn rate',            'percent', 'transaction', TRUE,  FALSE, '{}', 10),
+    ('winback_rate',           'churned',     'Win-back rate',         'percent', 'event_lake',  FALSE, TRUE,  '{"event_names": []}', 20),
+    ('campaign_spend',         NULL,          'Campaign spend',        'currency','campaign',    FALSE, FALSE, '{}', 90),
+    ('campaign_conversions',   NULL,          'Campaign conversions',  'count',   'campaign',    FALSE, TRUE,  '{}', 91),
+    ('campaign_revenue',       NULL,          'Campaign revenue',      'currency','campaign',    FALSE, TRUE,  '{}', 92)
+ON CONFLICT (metric_code) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS customer360.cdp_journey_metric_domain (
+    metric_code VARCHAR(60) NOT NULL
+        REFERENCES customer360.cdp_journey_metric(metric_code) ON DELETE CASCADE,
+    domain_code VARCHAR(50)
+        REFERENCES customer360.sys_domain(domain_code) ON DELETE RESTRICT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_cdp_journey_metric_domain
+        UNIQUE NULLS NOT DISTINCT (metric_code, domain_code)
+);
+
+COMMENT ON TABLE customer360.cdp_journey_metric_domain IS
+    'Explicit scope for each journey KPI: NULL domain_code means general; a sys_domain code means a domain-specific definition. Seed only supported scopes.';
+
+INSERT INTO customer360.cdp_journey_metric_domain (metric_code, domain_code)
+SELECT metric_code, NULL
+  FROM customer360.cdp_journey_metric
+ON CONFLICT (metric_code, domain_code) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS customer360.cdp_journey_metric_daily (
+    snapshot_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id) ON DELETE CASCADE,
+    report_date DATE NOT NULL,
+    window_days SMALLINT NOT NULL CHECK (window_days IN (1, 7, 30, 90)),
+    business_model TEXT NOT NULL DEFAULT 'B2C'
+        CONSTRAINT cdp_journey_metric_daily_business_model_check
+        CHECK (business_model IN ('B2B', 'B2C', 'B2B2C')),
+    domain_code VARCHAR(50)
+        REFERENCES customer360.sys_domain(domain_code) ON DELETE RESTRICT,
+    journey_stage VARCHAR(30) NOT NULL CHECK (journey_stage IN (
+        'awareness', 'acquisition', 'activation', 'engagement',
+        'conversion', 'retention', 'loyalty', 'churned')),
+    metric_code VARCHAR(60) NOT NULL
+        REFERENCES customer360.cdp_journey_metric(metric_code) ON DELETE RESTRICT,
+    dim_type VARCHAR(20) NOT NULL DEFAULT 'all'
+        CHECK (dim_type IN ('all', 'channel', 'campaign', 'segment', 'agent')),
+    dim_value TEXT NOT NULL DEFAULT '',
+    numerator NUMERIC(18, 4),
+    denominator NUMERIC(18, 4),
+    value NUMERIC(18, 4) NOT NULL,
+    currency TEXT NOT NULL DEFAULT ''
+        CONSTRAINT cdp_journey_metric_daily_currency_check
+        CHECK (currency = '' OR currency ~ '^[A-Z]{3}$'),
+    computed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_cdp_journey_metric_daily_scope
+        UNIQUE NULLS NOT DISTINCT (
+            tenant_id, report_date, window_days, business_model, domain_code,
+            journey_stage, metric_code, dim_type, dim_value, currency
+        )
+);
+
+COMMENT ON TABLE customer360.cdp_journey_metric_daily IS
+    'Snapshot of journey-stage KPIs. Percent values are stored 0-100. currency separates campaign-derived metrics by ISO 4217 currency (UNK means unset); currencies are never combined.';
+COMMENT ON COLUMN customer360.cdp_journey_metric_daily.currency IS
+    'ISO 4217 currency for campaign-derived metrics; empty for non-campaign metrics and UNK when campaign currency is unset. No cross-currency totals are combined.';
+
+CREATE INDEX IF NOT EXISTS idx_journey_metric_daily_latest
+    ON customer360.cdp_journey_metric_daily
+        (tenant_id, journey_stage, window_days, report_date DESC);
+
+ALTER TABLE customer360.cdp_journey_metric_daily ENABLE ROW LEVEL SECURITY;
+ALTER TABLE customer360.cdp_journey_metric_daily FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_policy ON customer360.cdp_journey_metric_daily;
+CREATE POLICY tenant_policy ON customer360.cdp_journey_metric_daily
+    USING (tenant_id = NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid)
+    WITH CHECK (tenant_id = NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid);
+
+CREATE OR REPLACE FUNCTION customer360.refresh_journey_metrics_pg(
+    p_tenant UUID,
+    p_date DATE DEFAULT (CURRENT_DATE - 1)
+) RETURNS INTEGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    w INTEGER;
+    n INTEGER := 0;
+    k INTEGER;
+    v_business_model TEXT;
+    v_excl TEXT[];
+    v_thr NUMERIC;
+    v_from TIMESTAMP;
+    v_prev_from TIMESTAMP;
+    v_to TIMESTAMP := (p_date + 1)::timestamp;
+    v_orders BIGINT;
+    v_buyers BIGINT;
+    v_buyer_orders BIGINT;
+    v_repeat BIGINT;
+    v_prev_buyers BIGINT;
+    v_retained BIGINT;
+    v_hi BIGINT;
+    v_scored BIGINT;
+BEGIN
+    IF p_tenant IS NULL THEN
+        RAISE EXCEPTION 'p_tenant must not be NULL';
+    END IF;
+    IF p_date IS NULL THEN
+        RAISE EXCEPTION 'p_date must not be NULL';
+    END IF;
+    IF NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid
+       IS DISTINCT FROM p_tenant THEN
+        RAISE EXCEPTION 'app.tenant_id must match p_tenant';
+    END IF;
+
+    SELECT COALESCE(business_model, 'B2C')
+      INTO v_business_model
+      FROM customer360.sys_tenant
+     WHERE tenant_id = p_tenant;
+    v_business_model := COALESCE(v_business_model, 'B2C');
+
+    SELECT COALESCE(
+               ARRAY(
+                   SELECT lower(x)
+                   FROM jsonb_array_elements_text(m.rule -> 'exclude_status') AS x
+               ),
+               ARRAY[]::TEXT[]
+           )
+      INTO v_excl
+      FROM customer360.cdp_journey_metric m
+     WHERE m.metric_code = 'orders';
+    v_excl := COALESCE(v_excl, ARRAY[]::TEXT[]);
+
+    DELETE FROM customer360.cdp_journey_metric_daily
+     WHERE tenant_id = p_tenant
+       AND report_date = p_date
+       AND business_model = v_business_model
+       AND (
+           metric_code IN (
+               'orders', 'active_customers', 'purchase_frequency',
+               'retention_rate', 'repeat_purchase_rate', 'churn_rate',
+               'campaign_spend', 'campaign_conversions', 'campaign_revenue'
+           )
+           OR (metric_code = 'churn_risk_rate' AND window_days = 1)
+           OR (
+               domain_code IS NOT NULL
+               AND metric_code IN (
+                   'orders', 'active_customers', 'purchase_frequency',
+                   'retention_rate', 'repeat_purchase_rate', 'churn_rate', 'churn_risk_rate'
+               )
+           )
+       );
+
+    FOREACH w IN ARRAY ARRAY[1, 7, 30, 90] LOOP
+        v_from := (p_date - (w - 1))::timestamp;
+        v_prev_from := (p_date - (2 * w - 1))::timestamp;
+        v_to := (p_date + 1)::timestamp;
+
+        SELECT count(*) INTO v_orders
+          FROM customer360.crm_transactions t
+         WHERE t.tenant_id = p_tenant
+           AND t.transaction_time >= v_from AND t.transaction_time < v_to
+           AND COALESCE(lower(t.transaction_status), '') <> ALL (v_excl);
+
+        WITH cur AS (
+            SELECT t.master_profile_id, count(*) AS orders
+              FROM customer360.crm_transactions t
+             WHERE t.tenant_id = p_tenant AND t.master_profile_id IS NOT NULL
+               AND t.transaction_time >= v_from AND t.transaction_time < v_to
+               AND COALESCE(lower(t.transaction_status), '') <> ALL (v_excl)
+             GROUP BY t.master_profile_id
+        )
+        SELECT count(*), COALESCE(sum(orders), 0),
+               count(*) FILTER (WHERE orders >= 2)
+          INTO v_buyers, v_buyer_orders, v_repeat
+          FROM cur;
+
+        WITH prev AS (
+            SELECT DISTINCT t.master_profile_id
+              FROM customer360.crm_transactions t
+             WHERE t.tenant_id = p_tenant AND t.master_profile_id IS NOT NULL
+               AND t.transaction_time >= v_prev_from AND t.transaction_time < v_from
+               AND COALESCE(lower(t.transaction_status), '') <> ALL (v_excl)
+        ), cur AS (
+            SELECT DISTINCT t.master_profile_id
+              FROM customer360.crm_transactions t
+             WHERE t.tenant_id = p_tenant AND t.master_profile_id IS NOT NULL
+               AND t.transaction_time >= v_from AND t.transaction_time < v_to
+               AND COALESCE(lower(t.transaction_status), '') <> ALL (v_excl)
+        )
+        SELECT count(*),
+               count(*) FILTER (
+                   WHERE prev.master_profile_id IN (SELECT master_profile_id FROM cur)
+               )
+          INTO v_prev_buyers, v_retained
+          FROM prev;
+
+        INSERT INTO customer360.cdp_journey_metric_daily
+            (tenant_id, report_date, window_days, business_model, domain_code,
+             journey_stage, metric_code, dim_type, dim_value, numerator, denominator, value)
+        SELECT p_tenant, p_date, w, v_business_model, NULL,
+               s.stage, s.code, 'all', '',
+               s.num, s.den, s.val
+          FROM (VALUES
+              ('conversion', 'orders',               v_orders::numeric,       NULL::numeric,         v_orders::numeric),
+              ('engagement', 'active_customers',     v_buyers::numeric,       NULL::numeric,         v_buyers::numeric),
+              ('engagement', 'purchase_frequency',   v_buyer_orders::numeric, v_buyers::numeric,     ROUND(v_buyer_orders::numeric / NULLIF(v_buyers, 0), 4)),
+              ('retention',  'retention_rate',       v_retained::numeric,     v_prev_buyers::numeric, ROUND(100.0 * v_retained / NULLIF(v_prev_buyers, 0), 4)),
+              ('loyalty',    'repeat_purchase_rate', v_repeat::numeric,       v_buyers::numeric,     ROUND(100.0 * v_repeat / NULLIF(v_buyers, 0), 4)),
+              ('churned',    'churn_rate',           (v_prev_buyers - v_retained)::numeric, v_prev_buyers::numeric, ROUND(100.0 * (v_prev_buyers - v_retained) / NULLIF(v_prev_buyers, 0), 4))
+          ) AS s(stage, code, num, den, val)
+          JOIN customer360.cdp_journey_metric m
+            ON m.metric_code = s.code
+           AND m.is_active
+           AND v_business_model = ANY(m.applicable_business_models)
+          JOIN customer360.cdp_journey_metric_domain md
+            ON md.metric_code = m.metric_code AND md.domain_code IS NULL
+         WHERE s.val IS NOT NULL
+           AND (s.code NOT IN ('retention_rate', 'churn_rate') OR w >= 7)
+           AND (s.code <> 'repeat_purchase_rate' OR w >= 30)
+        ON CONFLICT (tenant_id, report_date, window_days, business_model, domain_code,
+                     journey_stage, metric_code, dim_type, dim_value, currency)
+        DO UPDATE SET numerator = EXCLUDED.numerator, denominator = EXCLUDED.denominator,
+                      value = EXCLUDED.value, computed_at = now();
+        GET DIAGNOSTICS k = ROW_COUNT;
+        n := n + k;
+
+        WITH current_orders AS (
+            SELECT p.domain AS domain_code, t.master_profile_id, count(*) AS order_count
+              FROM customer360.crm_transactions t
+              JOIN customer360.cdp_master_profiles p
+                ON p.tenant_id = t.tenant_id
+               AND p.master_profile_id = t.master_profile_id
+              JOIN customer360.sys_domain d ON d.domain_code = p.domain AND d.is_active
+             WHERE t.tenant_id = p_tenant
+               AND p.domain <> '_'
+               AND t.transaction_time >= v_from AND t.transaction_time < v_to
+               AND COALESCE(lower(t.transaction_status), '') <> ALL (v_excl)
+             GROUP BY p.domain, t.master_profile_id
+        ),
+        previous_buyers AS (
+            SELECT DISTINCT p.domain AS domain_code, t.master_profile_id
+              FROM customer360.crm_transactions t
+              JOIN customer360.cdp_master_profiles p
+                ON p.tenant_id = t.tenant_id
+               AND p.master_profile_id = t.master_profile_id
+              JOIN customer360.sys_domain d ON d.domain_code = p.domain AND d.is_active
+             WHERE t.tenant_id = p_tenant
+               AND p.domain <> '_'
+               AND t.transaction_time >= v_prev_from AND t.transaction_time < v_from
+               AND COALESCE(lower(t.transaction_status), '') <> ALL (v_excl)
+        ),
+        previous_counts AS (
+            SELECT domain_code, count(*) AS previous_buyers
+              FROM previous_buyers
+             GROUP BY domain_code
+        ),
+        current_counts AS (
+            SELECT domain_code,
+                   sum(order_count) AS orders,
+                   count(*) AS buyers,
+                   count(*) FILTER (WHERE order_count >= 2) AS repeat_buyers
+              FROM current_orders
+             GROUP BY domain_code
+        ),
+        retained_counts AS (
+            SELECT p.domain_code, count(*) AS retained_buyers
+              FROM previous_buyers p
+              JOIN current_orders c
+                ON c.domain_code = p.domain_code
+               AND c.master_profile_id = p.master_profile_id
+             GROUP BY p.domain_code
+        ),
+        domain_stats AS (
+            SELECT d.domain_code,
+                   COALESCE(c.orders, 0) AS orders,
+                   COALESCE(c.buyers, 0) AS buyers,
+                   COALESCE(c.orders, 0) AS buyer_orders,
+                   COALESCE(c.repeat_buyers, 0) AS repeat_buyers,
+                   COALESCE(p.previous_buyers, 0) AS previous_buyers,
+                   COALESCE(r.retained_buyers, 0) AS retained_buyers
+              FROM (
+                  SELECT domain_code FROM current_counts
+                  UNION
+                  SELECT domain_code FROM previous_counts
+              ) d
+              LEFT JOIN current_counts c USING (domain_code)
+              LEFT JOIN previous_counts p USING (domain_code)
+              LEFT JOIN retained_counts r USING (domain_code)
+        )
+        INSERT INTO customer360.cdp_journey_metric_daily
+            (tenant_id, report_date, window_days, business_model, domain_code,
+             journey_stage, metric_code, dim_type, dim_value,
+             numerator, denominator, value)
+        SELECT p_tenant, p_date, w, v_business_model, g.domain_code,
+               s.stage, s.code, 'all', '', s.num, s.den, s.val
+          FROM domain_stats g
+          CROSS JOIN LATERAL (VALUES
+              ('conversion', 'orders', g.orders::numeric, NULL::numeric, g.orders::numeric),
+              ('engagement', 'active_customers', g.buyers::numeric, NULL::numeric, g.buyers::numeric),
+              ('engagement', 'purchase_frequency', g.buyer_orders::numeric, g.buyers::numeric,
+                  ROUND(g.buyer_orders::numeric / NULLIF(g.buyers, 0), 4)),
+              ('retention', 'retention_rate', g.retained_buyers::numeric, g.previous_buyers::numeric,
+                  ROUND(100.0 * g.retained_buyers / NULLIF(g.previous_buyers, 0), 4)),
+              ('loyalty', 'repeat_purchase_rate', g.repeat_buyers::numeric, g.buyers::numeric,
+                  ROUND(100.0 * g.repeat_buyers / NULLIF(g.buyers, 0), 4)),
+              ('churned', 'churn_rate', (g.previous_buyers - g.retained_buyers)::numeric, g.previous_buyers::numeric,
+                  ROUND(100.0 * (g.previous_buyers - g.retained_buyers) / NULLIF(g.previous_buyers, 0), 4))
+          ) AS s(stage, code, num, den, val)
+          JOIN customer360.cdp_journey_metric m
+            ON m.metric_code = s.code
+           AND m.is_active
+           AND v_business_model = ANY(m.applicable_business_models)
+          JOIN customer360.cdp_journey_metric_domain md
+            ON md.metric_code = m.metric_code AND md.domain_code = g.domain_code
+         WHERE s.val IS NOT NULL
+           AND (s.code NOT IN ('retention_rate', 'churn_rate') OR w >= 7)
+           AND (s.code <> 'repeat_purchase_rate' OR w >= 30)
+        ON CONFLICT (tenant_id, report_date, window_days, business_model, domain_code,
+                     journey_stage, metric_code, dim_type, dim_value, currency)
+        DO UPDATE SET numerator = EXCLUDED.numerator, denominator = EXCLUDED.denominator,
+                      value = EXCLUDED.value, computed_at = now();
+        GET DIAGNOSTICS k = ROW_COUNT;
+        n := n + k;
+
+        INSERT INTO customer360.cdp_journey_metric_daily
+            (tenant_id, report_date, window_days, business_model, domain_code,
+             journey_stage, metric_code, dim_type, dim_value, value, currency)
+        WITH campaign_totals AS (
+            SELECT c.campaign_id,
+                   c.journey_stage,
+                   COALESCE(
+                       upper(NULLIF(btrim(c.currency::text), '')),
+                       'UNK'
+                   ) AS currency,
+                   COALESCE(sum(pd.spend), 0) AS spend,
+                   COALESCE(sum(pd.conversions), 0) AS conv,
+                   COALESCE(sum(pd.revenue_estimated), 0) AS rev
+              FROM customer360.crm_campaign_performance_daily pd
+              JOIN customer360.crm_campaign c
+                ON c.tenant_id = pd.tenant_id AND c.campaign_id = pd.campaign_id
+             WHERE pd.tenant_id = p_tenant
+               AND c.journey_stage IS NOT NULL
+               AND pd.report_date BETWEEN (p_date - (w - 1)) AND p_date
+             GROUP BY c.campaign_id, c.journey_stage,
+                      COALESCE(
+                          upper(NULLIF(btrim(c.currency::text), '')),
+                          'UNK'
+                      )
+        ),
+        metric_dims AS (
+            SELECT g.journey_stage,
+                   g.currency,
+                   'all'::VARCHAR(20) AS dim_type,
+                   ''::TEXT AS dim_value,
+                   sum(g.spend) AS spend,
+                   sum(g.conv) AS conv,
+                   sum(g.rev) AS rev
+              FROM campaign_totals g
+             GROUP BY g.journey_stage, g.currency
+            UNION ALL
+            SELECT g.journey_stage,
+                   g.currency,
+                   'campaign'::VARCHAR(20) AS dim_type,
+                   g.campaign_id::text AS dim_value,
+                   g.spend, g.conv, g.rev
+              FROM campaign_totals g
+            UNION ALL
+            -- Full campaign metrics are attributed to each active agent; agent totals
+            -- are not additive when a campaign has multiple assigned agents.
+            SELECT g.journey_stage,
+                   g.currency,
+                   'agent'::VARCHAR(20) AS dim_type,
+                   a.agent_code AS dim_value,
+                   sum(g.spend) AS spend,
+                   sum(g.conv) AS conv,
+                   sum(g.rev) AS rev
+              FROM campaign_totals g
+              JOIN (
+                  SELECT DISTINCT tenant_id, campaign_id, agent_code
+                    FROM customer360.crm_campaign_agent
+                   WHERE tenant_id = p_tenant AND is_active
+              ) a ON a.tenant_id = p_tenant AND a.campaign_id = g.campaign_id
+             GROUP BY g.journey_stage, g.currency, a.agent_code
+        )
+        SELECT p_tenant, p_date, w, v_business_model, NULL,
+               g.journey_stage, v.code, g.dim_type,
+               g.dim_value, v.val, g.currency
+          FROM metric_dims g
+         CROSS JOIN LATERAL (VALUES
+              ('campaign_spend', g.spend),
+              ('campaign_conversions', g.conv::numeric),
+              ('campaign_revenue', g.rev)
+          ) AS v(code, val)
+         JOIN customer360.cdp_journey_metric m
+           ON m.metric_code = v.code
+          AND m.is_active
+          AND v_business_model = ANY(m.applicable_business_models)
+         JOIN customer360.cdp_journey_metric_domain md
+           ON md.metric_code = m.metric_code AND md.domain_code IS NULL
+        ON CONFLICT (tenant_id, report_date, window_days, business_model, domain_code,
+                     journey_stage, metric_code, dim_type, dim_value, currency)
+        DO UPDATE SET value = EXCLUDED.value, computed_at = now();
+        GET DIAGNOSTICS k = ROW_COUNT;
+        n := n + k;
+    END LOOP;
+
+    SELECT COALESCE((m.rule ->> 'min_probability')::numeric, 0.7)
+      INTO v_thr
+      FROM customer360.cdp_journey_metric m
+     WHERE m.metric_code = 'churn_risk_rate';
+    v_thr := COALESCE(v_thr, 0.7);
+
+    SELECT count(*) FILTER (WHERE churn_probability >= v_thr), count(*)
+      INTO v_hi, v_scored
+      FROM customer360.cdp_master_profiles
+     WHERE tenant_id = p_tenant AND status_code = 1 AND churn_probability IS NOT NULL;
+
+    IF v_scored > 0 THEN
+        IF EXISTS (
+            SELECT 1
+              FROM customer360.cdp_journey_metric m
+              JOIN customer360.cdp_journey_metric_domain md
+                ON md.metric_code = m.metric_code AND md.domain_code IS NULL
+             WHERE m.metric_code = 'churn_risk_rate'
+               AND m.is_active
+               AND v_business_model = ANY(m.applicable_business_models)
+        ) THEN
+        INSERT INTO customer360.cdp_journey_metric_daily
+            (tenant_id, report_date, window_days, business_model, domain_code,
+             journey_stage, metric_code, dim_type, dim_value, numerator, denominator, value)
+        VALUES (p_tenant, p_date, 1, v_business_model, NULL,
+                'retention', 'churn_risk_rate', 'all', '',
+                v_hi, v_scored, ROUND(100.0 * v_hi / v_scored, 4))
+        ON CONFLICT (tenant_id, report_date, window_days, business_model, domain_code,
+                     journey_stage, metric_code, dim_type, dim_value, currency)
+        DO UPDATE SET numerator = EXCLUDED.numerator, denominator = EXCLUDED.denominator,
+                      value = EXCLUDED.value, computed_at = now();
+        GET DIAGNOSTICS k = ROW_COUNT;
+        n := n + k;
+        END IF;
+    END IF;
+
+    INSERT INTO customer360.cdp_journey_metric_daily
+        (tenant_id, report_date, window_days, business_model, domain_code,
+         journey_stage, metric_code, dim_type, dim_value, numerator, denominator, value)
+    SELECT p_tenant, p_date, 1, v_business_model, p.domain,
+           'retention', 'churn_risk_rate', 'all', '',
+           count(*) FILTER (WHERE p.churn_probability >= v_thr),
+           count(*),
+           ROUND(100.0 * count(*) FILTER (WHERE p.churn_probability >= v_thr) / NULLIF(count(*), 0), 4)
+      FROM customer360.cdp_master_profiles p
+      JOIN customer360.sys_domain d ON d.domain_code = p.domain AND d.is_active
+      JOIN customer360.cdp_journey_metric m
+        ON m.metric_code = 'churn_risk_rate'
+       AND m.is_active
+       AND v_business_model = ANY(m.applicable_business_models)
+      JOIN customer360.cdp_journey_metric_domain md
+        ON md.metric_code = m.metric_code AND md.domain_code = p.domain
+     WHERE p.tenant_id = p_tenant
+       AND p.status_code = 1
+       AND p.domain <> '_'
+       AND p.churn_probability IS NOT NULL
+     GROUP BY p.domain
+    ON CONFLICT (tenant_id, report_date, window_days, business_model, domain_code,
+                 journey_stage, metric_code, dim_type, dim_value, currency)
+    DO UPDATE SET numerator = EXCLUDED.numerator, denominator = EXCLUDED.denominator,
+                  value = EXCLUDED.value, computed_at = now();
+    GET DIAGNOSTICS k = ROW_COUNT;
+    n := n + k;
+
+    RETURN n;
+END;
+$$;
+
+COMMENT ON FUNCTION customer360.refresh_journey_metrics_pg(UUID, DATE) IS
+    'Upserts Postgres-sourced journey metrics for windows 1/7/30/90 days ending p_date. Requires app.tenant_id to match p_tenant. Returns rows written.';
+
+CREATE OR REPLACE VIEW customer360.vw_journey_stage_report
+WITH (security_invoker = true) AS
+SELECT cur.tenant_id,
+       cur.report_date,
+       cur.window_days,
+       cur.journey_stage,
+       cur.metric_code,
+       m.label,
+       m.unit,
+       m.is_primary,
+       m.higher_is_better,
+       m.display_order,
+       cur.dim_type,
+       cur.dim_value,
+       cur.value,
+       prev.value AS previous_value,
+       CASE
+           WHEN prev.value IS NULL THEN NULL
+           WHEN m.unit = 'percent' THEN ROUND(cur.value - prev.value, 2)
+           WHEN prev.value = 0 THEN NULL
+           ELSE ROUND(100.0 * (cur.value - prev.value) / prev.value, 2)
+       END AS change,
+       CASE WHEN m.unit = 'percent' THEN 'points' ELSE 'percent' END AS change_kind,
+       cur.currency,
+       cur.business_model,
+       cur.domain_code
+  FROM customer360.cdp_journey_metric_daily cur
+  JOIN customer360.cdp_journey_metric m
+    ON m.metric_code = cur.metric_code
+   AND m.is_active
+   AND cur.business_model = ANY(m.applicable_business_models)
+  JOIN customer360.cdp_journey_metric_domain md
+    ON md.metric_code = m.metric_code
+   AND md.domain_code IS NOT DISTINCT FROM cur.domain_code
+  LEFT JOIN customer360.cdp_journey_metric_daily prev
+    ON prev.tenant_id = cur.tenant_id
+   AND prev.window_days = cur.window_days
+   AND prev.journey_stage = cur.journey_stage
+   AND prev.metric_code = cur.metric_code
+   AND prev.dim_type = cur.dim_type
+   AND prev.dim_value = cur.dim_value
+   AND prev.business_model = cur.business_model
+   AND prev.domain_code IS NOT DISTINCT FROM cur.domain_code
+   AND prev.currency = cur.currency
+   AND prev.report_date = cur.report_date - cur.window_days::int;
+
+-- =========================================================================
+-- CUSTOMER VALUE / CLV VALUATION SNAPSHOTS
+-- =========================================================================
+-- One reproducible valuation snapshot per tenant, profile, business domain,
+-- as-of date, and model version. Shared fields cover common lifecycle and
+-- economics features; JSONB fields hold domain-specific features and outputs.
+CREATE TABLE IF NOT EXISTS customer360.cdp_customer_valuation (
+    valuation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    tenant_id UUID NOT NULL
+        REFERENCES customer360.sys_tenant (tenant_id) ON DELETE CASCADE,
+    master_profile_id UUID NOT NULL,
+    domain_code VARCHAR(50) NOT NULL
+        REFERENCES customer360.sys_domain (domain_code)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+
+    CONSTRAINT fk_cdp_customer_valuation_tenant_profile
+        FOREIGN KEY (tenant_id, master_profile_id)
+        REFERENCES customer360.cdp_master_profiles (tenant_id, master_profile_id)
+        ON DELETE CASCADE,
+
+    as_of_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    currency CHAR(3) NOT NULL,
+    model_name VARCHAR(100) NOT NULL DEFAULT 'discounted_contribution_clv',
+    model_version VARCHAR(50) NOT NULL DEFAULT '1.0.0',
+    feature_version VARCHAR(50) NOT NULL DEFAULT '1.0.0',
+
+    -- Shared lifecycle and transaction/engagement features.
+    customer_tenure_days INTEGER
+        CHECK (customer_tenure_days IS NULL OR customer_tenure_days >= 0),
+    days_since_last_transaction INTEGER
+        CHECK (days_since_last_transaction IS NULL OR days_since_last_transaction >= 0),
+    days_since_last_engagement INTEGER
+        CHECK (days_since_last_engagement IS NULL OR days_since_last_engagement >= 0),
+    active_months_12m SMALLINT
+        CHECK (active_months_12m IS NULL OR active_months_12m BETWEEN 0 AND 12),
+    active_days_30d INTEGER
+        CHECK (active_days_30d IS NULL OR active_days_30d >= 0),
+    transactions_30d BIGINT
+        CHECK (transactions_30d IS NULL OR transactions_30d >= 0),
+    transactions_90d BIGINT
+        CHECK (transactions_90d IS NULL OR transactions_90d >= 0),
+    transactions_12m BIGINT
+        CHECK (transactions_12m IS NULL OR transactions_12m >= 0),
+    sessions_30d BIGINT
+        CHECK (sessions_30d IS NULL OR sessions_30d >= 0),
+    engagement_events_30d BIGINT
+        CHECK (engagement_events_30d IS NULL OR engagement_events_30d >= 0),
+    product_views_30d BIGINT
+        CHECK (product_views_30d IS NULL OR product_views_30d >= 0),
+    add_to_cart_30d BIGINT
+        CHECK (add_to_cart_30d IS NULL OR add_to_cart_30d >= 0),
+
+    -- Historical economics. Contribution profit may be negative.
+    historical_revenue_12m NUMERIC(20, 4)
+        CHECK (historical_revenue_12m IS NULL OR historical_revenue_12m >= 0),
+    recurring_revenue_12m NUMERIC(20, 4)
+        CHECK (recurring_revenue_12m IS NULL OR recurring_revenue_12m >= 0),
+    average_transaction_value_12m NUMERIC(20, 4)
+        CHECK (average_transaction_value_12m IS NULL OR average_transaction_value_12m >= 0),
+    historical_gross_profit NUMERIC(20, 4),
+    historical_contribution_profit_12m NUMERIC(20, 4),
+    acquisition_cost NUMERIC(20, 4)
+        CHECK (acquisition_cost IS NULL OR acquisition_cost >= 0),
+
+    -- Canonical forecast inputs.
+    retention_probability_12m NUMERIC(7, 6)
+        CHECK (retention_probability_12m IS NULL OR retention_probability_12m BETWEEN 0 AND 1),
+    churn_probability_12m NUMERIC(7, 6)
+        CHECK (churn_probability_12m IS NULL OR churn_probability_12m BETWEEN 0 AND 1),
+    expected_transactions_per_year NUMERIC(18, 6)
+        CHECK (expected_transactions_per_year IS NULL OR expected_transactions_per_year >= 0),
+    expected_value_per_transaction NUMERIC(20, 4)
+        CHECK (expected_value_per_transaction IS NULL OR expected_value_per_transaction >= 0),
+    gross_margin_rate NUMERIC(7, 6)
+        CHECK (gross_margin_rate IS NULL OR gross_margin_rate BETWEEN 0 AND 1),
+    expected_annual_revenue NUMERIC(20, 4)
+        CHECK (expected_annual_revenue IS NULL OR expected_annual_revenue >= 0),
+    expected_annual_contribution_profit NUMERIC(20, 4),
+    expected_annual_service_cost NUMERIC(20, 4)
+        CHECK (expected_annual_service_cost IS NULL OR expected_annual_service_cost >= 0),
+    expected_annual_marketing_cost NUMERIC(20, 4)
+        CHECK (expected_annual_marketing_cost IS NULL OR expected_annual_marketing_cost >= 0),
+    discount_rate NUMERIC(7, 6)
+        CHECK (discount_rate IS NULL OR discount_rate >= 0),
+    annual_value_growth_rate NUMERIC(7, 6) NOT NULL DEFAULT 0
+        CHECK (annual_value_growth_rate > -1),
+    forecast_horizon_years SMALLINT NOT NULL DEFAULT 5
+        CHECK (forecast_horizon_years BETWEEN 1 AND 30),
+
+    -- Domain-specific aggregates, derived location, assumptions, and features.
+    domain_features JSONB NOT NULL DEFAULT '{}'::jsonb,
+    location_features JSONB NOT NULL DEFAULT '{}'::jsonb,
+    model_assumptions JSONB NOT NULL DEFAULT '{}'::jsonb,
+    feature_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+
+    -- Discounted contribution-value outputs.
+    predicted_clv_12m NUMERIC(20, 4),
+    predicted_clv_36m NUMERIC(20, 4),
+    predicted_clv_horizon_before_cac NUMERIC(20, 4),
+    predicted_clv_horizon_after_cac NUMERIC(20, 4),
+    predicted_revenue_horizon NUMERIC(20, 4),
+    predicted_contribution_profit_horizon NUMERIC(20, 4),
+    model_confidence NUMERIC(7, 6)
+        CHECK (model_confidence IS NULL OR model_confidence BETWEEN 0 AND 1),
+    data_quality_score NUMERIC(5, 2)
+        CHECK (data_quality_score IS NULL OR data_quality_score BETWEEN 0 AND 100),
+    clv_segment VARCHAR(50),
+
+    -- Optional upstream scores and campaign-value estimate.
+    purchase_intent_score NUMERIC(7, 4)
+        CHECK (purchase_intent_score IS NULL OR purchase_intent_score BETWEEN 0 AND 100),
+    churn_risk_score NUMERIC(7, 4)
+        CHECK (churn_risk_score IS NULL OR churn_risk_score BETWEEN 0 AND 100),
+    next_best_product_score NUMERIC(7, 4)
+        CHECK (next_best_product_score IS NULL OR next_best_product_score BETWEEN 0 AND 100),
+    incremental_campaign_value NUMERIC(20, 4),
+    profile_quality_score NUMERIC(5, 2)
+        CHECK (profile_quality_score IS NULL OR profile_quality_score BETWEEN 0 AND 100),
+    explanation JSONB NOT NULL DEFAULT '{}'::jsonb,
+    insights TEXT,
+    actions JSONB NOT NULL DEFAULT '[]'::jsonb
+        CHECK (jsonb_typeof(actions) = 'array'),
+
+    calculation_status VARCHAR(30) NOT NULL DEFAULT 'PENDING'
+        CHECK (calculation_status IN ('PENDING', 'COMPUTED', 'INSUFFICIENT_DATA', 'FAILED')),
+    last_error TEXT,
+    calculated_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT uq_cdp_customer_valuation_snapshot UNIQUE
+        (tenant_id, master_profile_id, domain_code, as_of_date, model_name, model_version)
+);
+
+COMMENT ON TABLE customer360.cdp_customer_valuation IS
+'Cross-industry customer lifetime value feature snapshot and model-output table. One row per tenant/profile/domain/as-of-date/model/version.';
+COMMENT ON COLUMN customer360.cdp_customer_valuation.domain_features IS
+'Industry-specific aggregate features and expected annual economics. Avoid raw PII and unnecessary sensitive data.';
+COMMENT ON COLUMN customer360.cdp_customer_valuation.location_features IS
+'Privacy-minimized derived location features; avoid precise raw location unless justified and authorized.';
+COMMENT ON COLUMN customer360.cdp_customer_valuation.data_quality_score IS
+'Input completeness score (0-100), not statistical model confidence or prediction accuracy.';
+COMMENT ON COLUMN customer360.cdp_customer_valuation.actions IS
+'JSON array of LLM-recommended action candidates. Review before activating campaigns.';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_customer_valuation_tenant_domain_profile
+    ON customer360.cdp_customer_valuation (tenant_id, domain_code, master_profile_id);
+CREATE INDEX IF NOT EXISTS idx_cdp_customer_valuation_clv_rank
+    ON customer360.cdp_customer_valuation
+        (tenant_id, domain_code, predicted_clv_horizon_after_cac DESC NULLS LAST)
+    WHERE calculation_status = 'COMPUTED';
+CREATE INDEX IF NOT EXISTS idx_cdp_customer_valuation_pending
+    ON customer360.cdp_customer_valuation (tenant_id, created_at)
+    WHERE calculation_status = 'PENDING';
+CREATE INDEX IF NOT EXISTS idx_cdp_customer_valuation_domain_features
+    ON customer360.cdp_customer_valuation USING GIN (domain_features);
+
+CREATE TABLE IF NOT EXISTS customer360.cdp_profile_recommendation_runs (
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id) ON DELETE CASCADE,
+    segment_id UUID NOT NULL,
+    run_id TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('RUNNING', 'SUCCEEDED', 'FAILED')),
+    profile_count INTEGER NOT NULL CHECK (profile_count >= 0),
+    step_count INTEGER NOT NULL CHECK (step_count > 0),
+    profile_runs_processed INTEGER NOT NULL DEFAULT 0 CHECK (profile_runs_processed >= 0),
+    recommendations_written INTEGER NOT NULL DEFAULT 0 CHECK (recommendations_written >= 0),
+    error_message TEXT,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    completed_at TIMESTAMPTZ,
+    CONSTRAINT pk_cdp_profile_recommendation_runs PRIMARY KEY (tenant_id, segment_id, run_id),
+    CONSTRAINT fk_cdp_profile_recommendation_runs_tenant_segment
+        FOREIGN KEY (tenant_id, segment_id)
+        REFERENCES customer360.cdp_segments (tenant_id, segment_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS customer360.cdp_profile_recommendations (
+    tenant_id UUID NOT NULL,
+    segment_id UUID NOT NULL,
+    master_profile_id UUID NOT NULL,
+    agent_code TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    content_item_id UUID NOT NULL,
+    rank INTEGER NOT NULL CHECK (rank > 0),
+    score DOUBLE PRECISION NOT NULL CHECK (score BETWEEN 0 AND 1),
+    semantic_score DOUBLE PRECISION CHECK (semantic_score IS NULL OR semantic_score BETWEEN 0 AND 1),
+    tag_score DOUBLE PRECISION NOT NULL CHECK (tag_score BETWEEN 0 AND 1),
+    strategy TEXT NOT NULL CHECK (strategy IN ('tags', 'semantic', 'hybrid')),
+    matched_tags TEXT[] NOT NULL DEFAULT ARRAY[]::text[],
+    reason TEXT NOT NULL,
+    generated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT pk_cdp_profile_recommendations PRIMARY KEY (
+        tenant_id, segment_id, master_profile_id, agent_code, run_id, content_item_id
+    ),
+    CONSTRAINT fk_cdp_profile_recommendations_tenant_run
+        FOREIGN KEY (tenant_id, segment_id, run_id)
+        REFERENCES customer360.cdp_profile_recommendation_runs (tenant_id, segment_id, run_id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_cdp_profile_recommendations_tenant_profile
+        FOREIGN KEY (tenant_id, master_profile_id)
+        REFERENCES customer360.cdp_master_profiles (tenant_id, master_profile_id) ON DELETE CASCADE,
+    CONSTRAINT fk_cdp_profile_recommendations_tenant_content
+        FOREIGN KEY (tenant_id, content_item_id)
+        REFERENCES customer360.cdp_content_items (tenant_id, content_item_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_cdp_profile_recommendations_lookup
+    ON customer360.cdp_profile_recommendations
+        (tenant_id, master_profile_id, segment_id, run_id, rank);
+CREATE INDEX IF NOT EXISTS idx_cdp_profile_recommendation_runs_latest
+    ON customer360.cdp_profile_recommendation_runs
+        (tenant_id, segment_id, status, completed_at DESC);
+ALTER TABLE customer360.cdp_profile_recommendation_runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE customer360.cdp_profile_recommendation_runs FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_policy ON customer360.cdp_profile_recommendation_runs;
+CREATE POLICY tenant_policy ON customer360.cdp_profile_recommendation_runs
+    USING (tenant_id = NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid)
+    WITH CHECK (tenant_id = NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid);
+ALTER TABLE customer360.cdp_profile_recommendations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE customer360.cdp_profile_recommendations FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_policy ON customer360.cdp_profile_recommendations;
+CREATE POLICY tenant_policy ON customer360.cdp_profile_recommendations
+    USING (tenant_id = NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid)
+    WITH CHECK (tenant_id = NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid);
+
+DO $$
+DECLARE
+    fk RECORD;
+BEGIN
+    FOR fk IN
+        SELECT *
+        FROM jsonb_to_recordset($tenant_fk$
+        [
+            {"child_table":"sys_user","constraint_name":"fk_sys_user_tenant_organization","child_columns":"tenant_id, organization_id","parent_table":"sys_organization","parent_columns":"tenant_id, organization_id","on_delete":"SET NULL (organization_id)"},
+            {"child_table":"sys_userinfo","constraint_name":"fk_sys_userinfo_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"CASCADE"},
+            {"child_table":"sys_user_role","constraint_name":"fk_sys_user_role_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"CASCADE"},
+            {"child_table":"sys_user_role","constraint_name":"fk_sys_user_role_tenant_role","child_columns":"tenant_id, role_id","parent_table":"sys_role","parent_columns":"tenant_id, role_id","on_delete":"CASCADE"},
+            {"child_table":"sys_audit_log","constraint_name":"fk_sys_audit_log_tenant_organization","child_columns":"tenant_id, organization_id","parent_table":"sys_organization","parent_columns":"tenant_id, organization_id","on_delete":"SET NULL (organization_id)"},
+            {"child_table":"sys_audit_log","constraint_name":"fk_sys_audit_log_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"crm_campaign_performance_daily","constraint_name":"fk_crm_campaign_perf_tenant_campaign","child_columns":"tenant_id, campaign_id","parent_table":"crm_campaign","parent_columns":"tenant_id, campaign_id","on_delete":"CASCADE"},
+            {"child_table":"crm_campaign_member","constraint_name":"fk_crm_campaign_member_tenant_campaign","child_columns":"tenant_id, campaign_id","parent_table":"crm_campaign","parent_columns":"tenant_id, campaign_id","on_delete":"CASCADE"},
+            {"child_table":"crm_campaign_member","constraint_name":"fk_crm_campaign_member_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"crm_campaign_member","constraint_name":"fk_crm_campaign_member_tenant_contact","child_columns":"tenant_id, contact_id","parent_table":"crm_contact","parent_columns":"tenant_id, contact_id","on_delete":"SET NULL (contact_id)"},
+            {"child_table":"crm_lead","constraint_name":"fk_crm_lead_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"crm_lead","constraint_name":"fk_crm_lead_tenant_source","child_columns":"tenant_id, lead_source_id","parent_table":"crm_lead_source","parent_columns":"tenant_id, lead_source_id","on_delete":"SET NULL (lead_source_id)"},
+            {"child_table":"crm_contact","constraint_name":"fk_crm_contact_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"crm_contact","constraint_name":"fk_crm_contact_tenant_account","child_columns":"tenant_id, account_id","parent_table":"crm_account","parent_columns":"tenant_id, account_id","on_delete":"SET NULL (account_id)"},
+            {"child_table":"crm_account","constraint_name":"fk_crm_account_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"crm_account","constraint_name":"fk_crm_account_tenant_industry","child_columns":"tenant_id, industry_id","parent_table":"crm_industry","parent_columns":"tenant_id, industry_id","on_delete":"SET NULL (industry_id)"},
+            {"child_table":"crm_opportunity","constraint_name":"fk_crm_opportunity_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"crm_opportunity","constraint_name":"fk_crm_opportunity_tenant_account","child_columns":"tenant_id, account_id","parent_table":"crm_account","parent_columns":"tenant_id, account_id","on_delete":"SET NULL (account_id)"},
+            {"child_table":"crm_industry","constraint_name":"fk_crm_industry_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"cdp_master_profiles","constraint_name":"fk_cdp_master_profiles_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"cdp_master_profiles","constraint_name":"fk_cdp_master_profiles_tenant_persona","child_columns":"tenant_id, current_persona_id","parent_table":"cdp_customer_personas","parent_columns":"tenant_id, persona_id","on_delete":"SET NULL (current_persona_id)"},
+            {"child_table":"cdp_domain_profiles","constraint_name":"fk_cdp_domain_profiles_tenant_master","child_columns":"tenant_id, master_profile_id","parent_table":"cdp_master_profiles","parent_columns":"tenant_id, master_profile_id","on_delete":"CASCADE"},
+            {"child_table":"cdp_raw_profiles_stage","constraint_name":"fk_cdp_raw_profiles_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"cdp_profile_links","constraint_name":"fk_cdp_profile_links_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"cdp_profile_links","constraint_name":"fk_cdp_profile_links_tenant_raw","child_columns":"tenant_id, raw_profile_id","parent_table":"cdp_raw_profiles_stage","parent_columns":"tenant_id, raw_profile_id","on_delete":"CASCADE"},
+            {"child_table":"cdp_profile_links","constraint_name":"fk_cdp_profile_links_tenant_master","child_columns":"tenant_id, master_profile_id","parent_table":"cdp_master_profiles","parent_columns":"tenant_id, master_profile_id","on_delete":"CASCADE"},
+            {"child_table":"cdp_profile_links","constraint_name":"fk_cdp_profile_links_tenant_unlinked_by","child_columns":"tenant_id, unlinked_by","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (unlinked_by)"},
+            {"child_table":"cdp_identity_index","constraint_name":"fk_cdp_identity_index_tenant_master","child_columns":"tenant_id, master_profile_id","parent_table":"cdp_master_profiles","parent_columns":"tenant_id, master_profile_id","on_delete":"CASCADE"},
+            {"child_table":"cdp_profile_merge_history","constraint_name":"fk_cdp_merge_history_tenant_target","child_columns":"tenant_id, target_master_profile_id","parent_table":"cdp_master_profiles","parent_columns":"tenant_id, master_profile_id","on_delete":"RESTRICT"},
+            {"child_table":"cdp_profile_merge_history","constraint_name":"fk_cdp_merge_history_tenant_user","child_columns":"tenant_id, merged_by","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (merged_by)"},
+            {"child_table":"cdp_relations","constraint_name":"fk_cdp_relations_tenant_source","child_columns":"tenant_id, source_master_id","parent_table":"cdp_master_profiles","parent_columns":"tenant_id, master_profile_id","on_delete":"CASCADE"},
+            {"child_table":"cdp_relations","constraint_name":"fk_cdp_relations_tenant_target","child_columns":"tenant_id, target_master_id","parent_table":"cdp_master_profiles","parent_columns":"tenant_id, master_profile_id","on_delete":"CASCADE"},
+            {"child_table":"cdp_relations","constraint_name":"fk_cdp_relations_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"crm_customer_contacts","constraint_name":"fk_crm_customer_contacts_tenant_master","child_columns":"tenant_id, master_profile_id","parent_table":"cdp_master_profiles","parent_columns":"tenant_id, master_profile_id","on_delete":"CASCADE"},
+            {"child_table":"crm_customer_contacts","constraint_name":"fk_crm_customer_contacts_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"crm_transactions","constraint_name":"fk_crm_transactions_tenant_master","child_columns":"tenant_id, master_profile_id","parent_table":"cdp_master_profiles","parent_columns":"tenant_id, master_profile_id","on_delete":"SET NULL (master_profile_id)"},
+            {"child_table":"crm_transactions","constraint_name":"fk_crm_transactions_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"cdp_segments","constraint_name":"fk_cdp_segments_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"crm_campaign","constraint_name":"fk_crm_campaign_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"crm_campaign","constraint_name":"fk_crm_campaign_tenant_approved_by","child_columns":"tenant_id, approved_by","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (approved_by)"},
+            {"child_table":"crm_campaign","constraint_name":"fk_crm_campaign_tenant_segment","child_columns":"tenant_id, segment_id","parent_table":"cdp_segments","parent_columns":"tenant_id, segment_id","on_delete":"SET NULL (segment_id)"},
+            {"child_table":"crm_campaign_reviews","constraint_name":"fk_crm_campaign_reviews_tenant_campaign","child_columns":"tenant_id, campaign_id","parent_table":"crm_campaign","parent_columns":"tenant_id, campaign_id","on_delete":"CASCADE"},
+            {"child_table":"crm_campaign_reviews","constraint_name":"fk_crm_campaign_reviews_tenant_user","child_columns":"tenant_id, reviewer_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"RESTRICT"},
+            {"child_table":"crm_campaign_experiments","constraint_name":"fk_crm_campaign_experiments_tenant_campaign","child_columns":"tenant_id, campaign_id","parent_table":"crm_campaign","parent_columns":"tenant_id, campaign_id","on_delete":"CASCADE"},
+            {"child_table":"crm_campaign_experiments","constraint_name":"fk_crm_campaign_experiments_tenant_user","child_columns":"tenant_id, created_by","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (created_by)"},
+            {"child_table":"crm_campaign_experiment_variants","constraint_name":"fk_crm_campaign_experiment_variants_tenant_experiment","child_columns":"tenant_id, experiment_id","parent_table":"crm_campaign_experiments","parent_columns":"tenant_id, experiment_id","on_delete":"CASCADE"},
+            {"child_table":"crm_campaign_experiment_variants","constraint_name":"fk_crm_campaign_experiment_variants_tenant_segment","child_columns":"tenant_id, segment_id","parent_table":"cdp_segments","parent_columns":"tenant_id, segment_id","on_delete":"RESTRICT"},
+            {"child_table":"crm_campaign_experiment_variants","constraint_name":"fk_crm_campaign_experiment_variants_tenant_template","child_columns":"tenant_id, template_id","parent_table":"crm_message_templates","parent_columns":"tenant_id, template_id","on_delete":"SET NULL (template_id)"},
+            {"child_table":"crm_campaign_performance_daily","constraint_name":"fk_crm_campaign_performance_daily_tenant_variant","child_columns":"tenant_id, experiment_variant_id","parent_table":"crm_campaign_experiment_variants","parent_columns":"tenant_id, variant_id","on_delete":"SET NULL (experiment_variant_id)"},
+            {"child_table":"crm_campaign_content_items","constraint_name":"fk_crm_campaign_content_tenant_campaign","child_columns":"tenant_id, campaign_id","parent_table":"crm_campaign","parent_columns":"tenant_id, campaign_id","on_delete":"CASCADE"},
+            {"child_table":"crm_campaign_content_items","constraint_name":"fk_crm_campaign_content_tenant_item","child_columns":"tenant_id, content_item_id","parent_table":"cdp_content_items","parent_columns":"tenant_id, content_item_id","on_delete":"CASCADE"},
+            {"child_table":"crm_segment_sync_runs","constraint_name":"fk_crm_segment_sync_tenant_segment","child_columns":"tenant_id, segment_id","parent_table":"cdp_segments","parent_columns":"tenant_id, segment_id","on_delete":"CASCADE"},
+            {"child_table":"crm_segment_sync_runs","constraint_name":"fk_crm_segment_sync_tenant_user","child_columns":"tenant_id, triggered_by","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (triggered_by)"},
+            {"child_table":"cdp_campaign_dispatch_logs","constraint_name":"fk_cdp_dispatch_tenant_campaign","child_columns":"tenant_id, campaign_id","parent_table":"crm_campaign","parent_columns":"tenant_id, campaign_id","on_delete":"CASCADE"},
+            {"child_table":"cdp_campaign_dispatch_logs","constraint_name":"fk_cdp_dispatch_tenant_profile","child_columns":"tenant_id, master_profile_id","parent_table":"cdp_master_profiles","parent_columns":"tenant_id, master_profile_id","on_delete":"CASCADE"},
+            {"child_table":"cdp_campaign_dispatch_logs","constraint_name":"fk_cdp_dispatch_tenant_template","child_columns":"tenant_id, template_id","parent_table":"crm_message_templates","parent_columns":"tenant_id, template_id","on_delete":"SET NULL (template_id)"},
+            {"child_table":"crm_message_templates","constraint_name":"fk_crm_message_templates_tenant_user","child_columns":"tenant_id, created_by","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (created_by)"},
+            {"child_table":"crm_message_templates","constraint_name":"fk_crm_message_templates_tenant_approved_by","child_columns":"tenant_id, approved_by","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (approved_by)"},
+            {"child_table":"crm_message_templates","constraint_name":"fk_crm_message_templates_tenant_persona","child_columns":"tenant_id, persona_id","parent_table":"cdp_persona_archetypes","parent_columns":"tenant_id, persona_archetype_id","on_delete":"SET NULL (persona_id)"},
+            {"child_table":"crm_connector_config","constraint_name":"fk_crm_connector_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"crm_suppression_list","constraint_name":"fk_crm_suppression_tenant_profile","child_columns":"tenant_id, master_profile_id","parent_table":"cdp_master_profiles","parent_columns":"tenant_id, master_profile_id","on_delete":"SET NULL (master_profile_id)"},
+            {"child_table":"crm_suppression_list","constraint_name":"fk_crm_suppression_tenant_campaign","child_columns":"tenant_id, campaign_id","parent_table":"crm_campaign","parent_columns":"tenant_id, campaign_id","on_delete":"CASCADE"},
+            {"child_table":"crm_suppression_list","constraint_name":"fk_crm_suppression_tenant_user","child_columns":"tenant_id, removed_by","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (removed_by)"},
+            {"child_table":"cdp_customer_personas","constraint_name":"fk_cdp_personas_tenant_master","child_columns":"tenant_id, master_profile_id","parent_table":"cdp_master_profiles","parent_columns":"tenant_id, master_profile_id","on_delete":"CASCADE"},
+            {"child_table":"cdp_customer_personas","constraint_name":"fk_cdp_personas_tenant_archetype","child_columns":"tenant_id, persona_archetype_id","parent_table":"cdp_persona_archetypes","parent_columns":"tenant_id, persona_archetype_id","on_delete":"CASCADE"}
+        ]$tenant_fk$::jsonb) AS item(
+            child_table TEXT,
+            constraint_name TEXT,
+            child_columns TEXT,
+            parent_table TEXT,
+            parent_columns TEXT,
+            on_delete TEXT
+        )
+    LOOP
+        IF NOT EXISTS (
+            SELECT 1
+            FROM pg_attribute a
+            JOIN pg_class r ON r.oid = a.attrelid
+            JOIN pg_namespace n ON n.oid = r.relnamespace
+            WHERE n.nspname = 'customer360'
+              AND r.relname = fk.child_table
+              AND a.attname = 'tenant_id'
+              AND a.attnum > 0
+              AND NOT a.attisdropped
+        ) THEN
+            CONTINUE;
+        END IF;
+
+        IF NOT EXISTS (
+            SELECT 1
+            FROM pg_constraint c
+            JOIN pg_class r ON r.oid = c.conrelid
+            JOIN pg_namespace n ON n.oid = r.relnamespace
+            WHERE c.conname = fk.constraint_name
+              AND n.nspname = 'customer360'
+        ) THEN
+            EXECUTE format(
+                'ALTER TABLE customer360.%I ADD CONSTRAINT %I FOREIGN KEY (%s) REFERENCES customer360.%I (%s) ON DELETE %s',
+                fk.child_table,
+                fk.constraint_name,
+                fk.child_columns,
+                fk.parent_table,
+                fk.parent_columns,
+                fk.on_delete
+            );
+        END IF;
+    END LOOP;
+END;
+$$;
+
+-- ============================================================================
+-- sys_assistant_message: LEO Assistant chat memory (see migrations/007)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS customer360.sys_assistant_message (
+    message_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    conversation_id UUID NOT NULL,
+    user_id UUID NOT NULL,
+    page VARCHAR(120),
+    master_profile_id UUID,
+    role VARCHAR(10) NOT NULL CHECK (role IN ('user', 'assistant')),
+    message_text TEXT NOT NULL CHECK (char_length(message_text) <= 2000),
+    status VARCHAR(20),
+    clarify VARCHAR(10) CHECK (clarify IN ('accents', 'question')),
+    sources JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(sources) = 'array'),
+    summary TEXT CHECK (char_length(summary) <= 800),
+    -- clock_timestamp() (not now()) so a question and its answer written in one transaction keep their order.
+    created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+
+    CONSTRAINT fk_sys_assistant_message_tenant_user
+        FOREIGN KEY (tenant_id, user_id)
+        REFERENCES customer360.sys_user (tenant_id, user_id) ON DELETE CASCADE,
+    CONSTRAINT fk_sys_assistant_message_tenant_profile
+        FOREIGN KEY (tenant_id, master_profile_id)
+        REFERENCES customer360.cdp_master_profiles (tenant_id, master_profile_id) ON DELETE CASCADE
+);
+
+COMMENT ON TABLE customer360.sys_assistant_message IS
+    'LEO Assistant chat messages (long-term memory). One row per user question or assistant answer, grouped by conversation_id and bound to the page and customer the chat started on. message_text is stored with emails/phone numbers masked. Readable only by its author (every query filters user_id) for 30 days: reads ignore older rows and each write deletes them.';
+COMMENT ON COLUMN customer360.sys_assistant_message.conversation_id IS
+    'Client-held chat id (no conversation table). A request whose page or master_profile_id differs from the first message of the id starts a new conversation.';
+COMMENT ON COLUMN customer360.sys_assistant_message.summary IS
+    'For assistant rows: model-written summary of the whole conversation up to and including this answer (masked, at most 800 chars). The newest one is sent back to the model with the last exchange instead of the older messages.';
+COMMENT ON COLUMN customer360.sys_assistant_message.sources IS
+    'For assistant rows: the documents the answer used, [{path, title, heading}]. Empty for user rows and refusals.';
+
+CREATE INDEX IF NOT EXISTS idx_sys_assistant_message_conversation
+    ON customer360.sys_assistant_message (tenant_id, user_id, conversation_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sys_assistant_message_scope
+    ON customer360.sys_assistant_message (tenant_id, user_id, page, master_profile_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sys_assistant_message_created
+    ON customer360.sys_assistant_message (tenant_id, created_at);
+
+---------------------------------------------------
+-- Customer engagement flows (workflow JSON)
+---------------------------------------------------
+-- crm_flow          one row per flow: name, status and which version is live
+-- crm_flow_version  immutable JSON snapshot per save; source of truth for exact round trips
+-- crm_flow_node     one row per node, shredded from the JSON for SQL queries and joins
+-- crm_flow_edge     parent -> child links; one parent per node and one child per branch
+-- Every row carries tenant_id, so the tenant RLS policies apply to all four tables.
+--
+-- Agentic governance: a version is written by a user or by an AI agent (created_by).
+-- Agent versions start InReview and cannot go live until a human reviewer who did not
+-- start the run approves them (crm_review_flow_version). Snapshots and their node/edge
+-- projections are immutable; the only mutable fields on a version are its review fields.
+--
+-- Functions: crm_save_flow() stores a snapshot, crm_review_flow_version() approves or
+-- rejects an agent version, crm_publish_flow() sets the live version (approved only),
+-- crm_load_flow() rebuilds the JSON that the studio reads with setWorkflow().
+
+CREATE TABLE IF NOT EXISTS customer360.crm_flow (
+    flow_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft'
+        CHECK (status IN ('draft', 'active', 'paused', 'archived')),
+    live_version INT, -- NULL until the first publish
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT crm_flow_tenant_name_key UNIQUE (tenant_id, name),
+    CONSTRAINT crm_flow_id_tenant_key UNIQUE (flow_id, tenant_id)
+);
+
+CREATE TABLE IF NOT EXISTS customer360.crm_flow_version (
+    flow_id UUID NOT NULL,
+    tenant_id UUID NOT NULL,
+    version INT NOT NULL,
+    schema_version INT NOT NULL DEFAULT 2,
+    definition JSONB NOT NULL CHECK (jsonb_typeof(definition -> 'root') = 'object'),
+    -- 'user' = saved by a person in the studio; 'agent' = proposed by an AI agent.
+    created_by TEXT NOT NULL DEFAULT 'user' CHECK (created_by IN ('user', 'agent')),
+    -- The person who saved the version, or who started the agent run.
+    created_by_user_id UUID,
+    -- Agent that proposed this version (required when created_by = 'agent').
+    agent_code VARCHAR(100),
+    -- Generation context for agent versions: model, prompt version, rationale,
+    -- input references. Informational only; never used for authorization.
+    provenance JSONB NOT NULL DEFAULT '{}'::jsonb,
+    -- Draft / InReview / Approved / Rejected, the same vocabulary as campaign drafts.
+    approval_status VARCHAR(50) NOT NULL DEFAULT 'Draft',
+    reviewed_by UUID,
+    reviewed_at TIMESTAMPTZ,
+    review_reason TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (flow_id, version),
+    CONSTRAINT crm_flow_version_tenant_key UNIQUE (flow_id, version, tenant_id),
+    CONSTRAINT crm_flow_version_flow_fk FOREIGN KEY (flow_id, tenant_id)
+        REFERENCES customer360.crm_flow (flow_id, tenant_id) ON DELETE CASCADE
+);
+
+-- Upgrades: existing deployments already have crm_flow_version without these columns.
+-- Every pre-existing version was saved by a person, so it is backfilled as Approved.
+ALTER TABLE customer360.crm_flow_version
+    ADD COLUMN IF NOT EXISTS created_by_user_id UUID,
+    ADD COLUMN IF NOT EXISTS agent_code VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS provenance JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS approval_status VARCHAR(50) NOT NULL DEFAULT 'Draft',
+    ADD COLUMN IF NOT EXISTS reviewed_by UUID,
+    ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS review_reason TEXT;
+
+UPDATE customer360.crm_flow_version
+SET approval_status = 'Approved', reviewed_at = created_at
+WHERE approval_status = 'Draft' AND created_by = 'user';
+
+DO $$
+DECLARE
+    c RECORD;
+BEGIN
+    FOR c IN
+        SELECT * FROM (VALUES
+            ('crm_flow_version', 'crm_flow_version_agent_fk',
+             'FOREIGN KEY (agent_code) REFERENCES customer360.cdp_ai_agents (agent_code) ON DELETE RESTRICT'),
+            ('crm_flow_version', 'crm_flow_version_creator_fk',
+             'FOREIGN KEY (tenant_id, created_by_user_id) REFERENCES customer360.sys_user (tenant_id, user_id)'),
+            ('crm_flow_version', 'crm_flow_version_reviewer_fk',
+             'FOREIGN KEY (tenant_id, reviewed_by) REFERENCES customer360.sys_user (tenant_id, user_id)'),
+            ('crm_flow_version', 'crm_flow_version_approval_status_check',
+             'CHECK (approval_status IN (''Draft'', ''InReview'', ''Approved'', ''Rejected''))'),
+            ('crm_flow_version', 'crm_flow_version_provenance_object_check',
+             'CHECK (jsonb_typeof(provenance) = ''object'')'),
+            ('crm_flow_version', 'crm_flow_version_agent_actor_check',
+             'CHECK (created_by <> ''agent'' OR agent_code IS NOT NULL)'),
+            ('crm_flow_version', 'crm_flow_version_agent_creator_check',
+             'CHECK (created_by <> ''agent'' OR created_by_user_id IS NOT NULL)'),
+            ('crm_flow_version', 'crm_flow_version_user_actor_check',
+             'CHECK (created_by <> ''user'' OR agent_code IS NULL)'),
+            ('crm_flow_version', 'crm_flow_version_review_state_check',
+             'CHECK ((approval_status IN (''Approved'', ''Rejected'')) = (reviewed_at IS NOT NULL))'),
+            ('crm_flow_version', 'crm_flow_version_agent_review_check',
+             'CHECK (created_by = ''user'' OR approval_status IN (''Draft'', ''InReview'') OR reviewed_by IS NOT NULL)'),
+            ('crm_flow', 'crm_flow_live_version_fk',
+             'FOREIGN KEY (flow_id, live_version) REFERENCES customer360.crm_flow_version (flow_id, version)')
+        ) AS t(table_name, constraint_name, definition)
+    LOOP
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname = c.constraint_name
+              AND conrelid = format('customer360.%I', c.table_name)::regclass
+        ) THEN
+            EXECUTE format('ALTER TABLE customer360.%I ADD CONSTRAINT %I %s',
+                           c.table_name, c.constraint_name, c.definition);
+        END IF;
+    END LOOP;
+END $$;
+
+ALTER TABLE customer360.crm_campaign
+    ADD COLUMN IF NOT EXISTS workflow_id UUID,
+    ADD COLUMN IF NOT EXISTS workflow_version INT,
+    ADD COLUMN IF NOT EXISTS workflow_execution_id UUID,
+    ADD COLUMN IF NOT EXISTS planning_constraints TEXT;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'crm_campaign_workflow_version_fk'
+          AND conrelid = 'customer360.crm_campaign'::regclass
+    ) THEN
+        ALTER TABLE customer360.crm_campaign
+            ADD CONSTRAINT crm_campaign_workflow_version_fk
+            FOREIGN KEY (workflow_id, workflow_version, tenant_id)
+            REFERENCES customer360.crm_flow_version (flow_id, version, tenant_id);
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'crm_campaign_workflow_version_pair_check'
+          AND conrelid = 'customer360.crm_campaign'::regclass
+    ) THEN
+        ALTER TABLE customer360.crm_campaign
+            ADD CONSTRAINT crm_campaign_workflow_version_pair_check
+            CHECK ((workflow_id IS NULL) = (workflow_version IS NULL));
+    END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS customer360.crm_flow_node (
+    flow_id UUID NOT NULL,
+    version INT NOT NULL,
+    tenant_id UUID NOT NULL,
+    node_id TEXT NOT NULL, -- "n1", "n2", ... as in the JSON
+    node_type TEXT NOT NULL CHECK (node_type IN (
+        'trigger', 'condition', 'wait', 'wait_event', 'exit',
+        'email', 'notification', 'push', 'update_profile', 'run_data_synch_job',
+        'ai_decide', 'ai_generate', 'ai_recommend')),
+    config JSONB NOT NULL DEFAULT '{}',
+    agent_code VARCHAR(100) GENERATED ALWAYS AS (config ->> 'agent_code') STORED,
+    PRIMARY KEY (flow_id, version, node_id),
+    CONSTRAINT crm_flow_node_version_fk FOREIGN KEY (flow_id, version, tenant_id)
+        REFERENCES customer360.crm_flow_version (flow_id, version, tenant_id) ON DELETE CASCADE,
+    CONSTRAINT crm_flow_node_agent_fk FOREIGN KEY (agent_code)
+        REFERENCES customer360.cdp_ai_agents (agent_code) ON DELETE RESTRICT,
+    CONSTRAINT crm_flow_node_ai_agent_check
+        CHECK (node_type NOT IN ('ai_decide', 'ai_generate', 'ai_recommend')
+               OR (config ->> 'agent_code' IS NOT NULL
+                   AND btrim(config ->> 'agent_code') <> '')),
+    CHECK (node_type NOT IN ('wait', 'wait_event') OR (config ? 'amount' AND config ? 'unit')),
+    CHECK (node_type <> 'email' OR (config ? 'subject' AND config ? 'body')),
+    CHECK (node_type <> 'update_profile' OR (config ? 'action' AND config ? 'tag')),
+    CHECK (node_type <> 'run_data_synch_job' OR (config ? 'platform' AND config ? 'audience_name'))
+);
+
+-- Refresh the legacy SMS-only constraint when applying this schema to an existing database.
+-- NOT VALID preserves immutable historical projections while checking every new node.
+ALTER TABLE customer360.crm_flow_node
+    DROP CONSTRAINT IF EXISTS crm_flow_node_node_type_check;
+ALTER TABLE customer360.crm_flow_node
+    ADD CONSTRAINT crm_flow_node_node_type_check CHECK (node_type IN (
+        'trigger', 'condition', 'wait', 'wait_event', 'exit',
+        'email', 'notification', 'push', 'update_profile', 'run_data_synch_job',
+        'ai_decide', 'ai_generate', 'ai_recommend'
+    )) NOT VALID;
+
+ALTER TABLE customer360.crm_flow_node
+    ADD COLUMN IF NOT EXISTS agent_code VARCHAR(100)
+    GENERATED ALWAYS AS (config ->> 'agent_code') STORED;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'customer360.crm_flow_node'::regclass
+          AND conname = 'crm_flow_node_ai_agent_check'
+    ) THEN
+        ALTER TABLE customer360.crm_flow_node
+            ADD CONSTRAINT crm_flow_node_ai_agent_check
+            CHECK (node_type NOT IN ('ai_decide', 'ai_generate', 'ai_recommend')
+                   OR (config ->> 'agent_code' IS NOT NULL
+                       AND btrim(config ->> 'agent_code') <> ''));
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'customer360.crm_flow_node'::regclass
+          AND conname = 'crm_flow_node_agent_fk'
+    ) THEN
+        ALTER TABLE customer360.crm_flow_node
+            ADD CONSTRAINT crm_flow_node_agent_fk
+            FOREIGN KEY (agent_code)
+            REFERENCES customer360.cdp_ai_agents (agent_code) ON DELETE RESTRICT;
+    END IF;
+END $$;
+
+COMMENT ON COLUMN customer360.crm_flow_node.agent_code IS
+    'Generated from config->>agent_code. Set only for AI nodes; FK keeps every AI node pointing at a registered agent.';
+
+CREATE INDEX IF NOT EXISTS crm_flow_node_agent_idx
+    ON customer360.crm_flow_node (agent_code)
+    WHERE agent_code IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS customer360.crm_flow_edge (
+    flow_id UUID NOT NULL,
+    version INT NOT NULL,
+    tenant_id UUID NOT NULL,
+    from_node TEXT NOT NULL,
+    to_node TEXT NOT NULL,
+    branch TEXT CHECK (branch IN ('yes', 'no', 'happened', 'timeout')), -- NULL for single-child nodes
+    position SMALLINT NOT NULL DEFAULT 0, -- left-to-right order on the canvas
+    PRIMARY KEY (flow_id, version, from_node, to_node),
+    UNIQUE (flow_id, version, to_node), -- a tree: every node has one parent
+    UNIQUE NULLS NOT DISTINCT (flow_id, version, from_node, branch), -- one child per branch
+    CONSTRAINT crm_flow_edge_from_fk FOREIGN KEY (flow_id, version, from_node)
+        REFERENCES customer360.crm_flow_node (flow_id, version, node_id) ON DELETE CASCADE,
+    CONSTRAINT crm_flow_edge_to_fk FOREIGN KEY (flow_id, version, to_node)
+        REFERENCES customer360.crm_flow_node (flow_id, version, node_id) ON DELETE CASCADE,
+    CONSTRAINT crm_flow_edge_version_fk FOREIGN KEY (flow_id, version, tenant_id)
+        REFERENCES customer360.crm_flow_version (flow_id, version, tenant_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS crm_flow_node_type_idx
+    ON customer360.crm_flow_node (flow_id, version, node_type);
+CREATE INDEX IF NOT EXISTS crm_idx_flow_tenant
+    ON customer360.crm_flow (tenant_id);
+CREATE INDEX IF NOT EXISTS crm_flow_version_review_queue_idx
+    ON customer360.crm_flow_version (tenant_id, created_at)
+    WHERE approval_status = 'InReview';
+CREATE INDEX IF NOT EXISTS crm_flow_version_agent_idx
+    ON customer360.crm_flow_version (tenant_id, agent_code, created_at)
+    WHERE agent_code IS NOT NULL;
+CREATE INDEX IF NOT EXISTS crm_campaign_workflow_idx
+    ON customer360.crm_campaign (workflow_id, workflow_version)
+    WHERE workflow_id IS NOT NULL;
+
+-- A saved version is a snapshot: its JSON, author, agent and provenance never change.
+-- Only review fields move (through crm_review_flow_version). Node and edge rows are the
+-- relational projection of that snapshot and are immutable too.
+CREATE OR REPLACE FUNCTION customer360.guard_flow_version_snapshot()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NEW.flow_id IS DISTINCT FROM OLD.flow_id
+       OR NEW.tenant_id IS DISTINCT FROM OLD.tenant_id
+       OR NEW.version IS DISTINCT FROM OLD.version
+       OR NEW.schema_version IS DISTINCT FROM OLD.schema_version
+       OR NEW.definition IS DISTINCT FROM OLD.definition
+       OR NEW.created_by IS DISTINCT FROM OLD.created_by
+       OR NEW.created_by_user_id IS DISTINCT FROM OLD.created_by_user_id
+       OR NEW.agent_code IS DISTINCT FROM OLD.agent_code
+       OR NEW.provenance IS DISTINCT FROM OLD.provenance
+       OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+        RAISE EXCEPTION 'workflow version % of flow % is immutable; only its review fields can change',
+            OLD.version, OLD.flow_id;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION customer360.forbid_flow_projection_update()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RAISE EXCEPTION 'workflow nodes and edges are immutable; save a new version instead';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_guard_flow_version_snapshot ON customer360.crm_flow_version;
+CREATE TRIGGER trg_guard_flow_version_snapshot
+    BEFORE UPDATE ON customer360.crm_flow_version
+    FOR EACH ROW EXECUTE FUNCTION customer360.guard_flow_version_snapshot();
+
+DROP TRIGGER IF EXISTS trg_forbid_flow_node_update ON customer360.crm_flow_node;
+CREATE TRIGGER trg_forbid_flow_node_update
+    BEFORE UPDATE ON customer360.crm_flow_node
+    FOR EACH ROW EXECUTE FUNCTION customer360.forbid_flow_projection_update();
+
+DROP TRIGGER IF EXISTS trg_forbid_flow_edge_update ON customer360.crm_flow_edge;
+CREATE TRIGGER trg_forbid_flow_edge_update
+    BEFORE UPDATE ON customer360.crm_flow_edge
+    FOR EACH ROW EXECUTE FUNCTION customer360.forbid_flow_projection_update();
+
+-- Channel and wait duration are derived on read, so they are never stored.
+CREATE OR REPLACE VIEW customer360.crm_vw_flow_node
+WITH (security_invoker = true) AS
+SELECT
+    n.flow_id,
+    n.version,
+    n.tenant_id,
+    n.node_id,
+    n.node_type,
+    n.config,
+    CASE n.node_type
+        WHEN 'email' THEN 'EMAIL'
+        WHEN 'notification' THEN 'NOTIFICATION'
+        WHEN 'push' THEN 'PUSH'
+    END AS channel,
+    CASE WHEN n.node_type IN ('wait', 'wait_event')
+        THEN (n.config ->> 'amount')::double precision * CASE n.config ->> 'unit'
+            WHEN 'minutes' THEN interval '1 minute'
+            WHEN 'hours' THEN interval '1 hour'
+            WHEN 'days' THEN interval '1 day'
+        END
+    END AS wait_for
+FROM customer360.crm_flow_node n;
+
+-- Saves a JSON snapshot and shreds its nodes and edges. Returns the new version.
+-- Pass NULL for p_flow_id to create a flow. The flow row is locked so concurrent saves
+-- number their versions in sequence. A user save is approved at once (its author is the
+-- approver of record). An agent save is InReview and needs p_agent_code and a human
+-- reviewer before it can be published.
+DROP FUNCTION IF EXISTS customer360.crm_save_flow(UUID, UUID, TEXT, JSONB, TEXT);
+CREATE OR REPLACE FUNCTION customer360.crm_save_flow(
+    p_tenant UUID,
+    p_flow_id UUID,
+    p_name TEXT,
+    p_workflow JSONB,
+    p_actor TEXT DEFAULT 'user',
+    p_user_id UUID DEFAULT NULL,
+    p_agent_code VARCHAR DEFAULT NULL,
+    p_provenance JSONB DEFAULT '{}'::jsonb
+) RETURNS TABLE (flow_id UUID, version INT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_flow UUID := p_flow_id;
+    v_ver INT;
+    v_status TEXT;
+    v_agent BOOLEAN := p_actor = 'agent';
+BEGIN
+    IF p_actor IS NULL OR p_actor NOT IN ('user', 'agent') THEN
+        RAISE EXCEPTION 'workflow actor must be user or agent';
+    END IF;
+    IF p_name IS NULL OR btrim(p_name) = '' THEN
+        RAISE EXCEPTION 'workflow name is required';
+    END IF;
+    IF COALESCE((p_workflow ->> 'schema_version')::int, 2) <> 2 THEN
+        RAISE EXCEPTION 'workflow schema_version must be 2';
+    END IF;
+    IF jsonb_typeof(p_workflow -> 'root') IS DISTINCT FROM 'object' THEN
+        RAISE EXCEPTION 'workflow must contain a root object';
+    END IF;
+    IF v_agent AND p_agent_code IS NULL THEN
+        RAISE EXCEPTION 'an agent-created workflow version must name its agent';
+    END IF;
+    IF v_agent AND p_user_id IS NULL THEN
+        RAISE EXCEPTION 'an agent-created workflow version must name its initiating user';
+    END IF;
+    IF NOT v_agent AND p_agent_code IS NOT NULL THEN
+        RAISE EXCEPTION 'only agent-created workflow versions can name an agent';
+    END IF;
+
+    IF v_flow IS NULL THEN
+        INSERT INTO customer360.crm_flow (tenant_id, name)
+        VALUES (p_tenant, p_name)
+        RETURNING customer360.crm_flow.flow_id INTO v_flow;
+    ELSE
+        SELECT f.status INTO v_status
+        FROM customer360.crm_flow f
+        WHERE f.flow_id = v_flow AND f.tenant_id = p_tenant
+        FOR UPDATE;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'flow % not found for this tenant', v_flow;
+        END IF;
+        IF v_status = 'archived' THEN
+            RAISE EXCEPTION 'flow % is archived; create a new flow to save changes', v_flow;
+        END IF;
+        UPDATE customer360.crm_flow f
+        SET name = p_name, updated_at = now()
+        WHERE f.flow_id = v_flow AND f.tenant_id = p_tenant;
+    END IF;
+
+    SELECT COALESCE(max(fv.version), 0) + 1 INTO v_ver
+    FROM customer360.crm_flow_version fv
+    WHERE fv.flow_id = v_flow;
+
+    INSERT INTO customer360.crm_flow_version (
+        flow_id, tenant_id, version, schema_version, definition,
+        created_by, created_by_user_id, agent_code, provenance,
+        approval_status, reviewed_by, reviewed_at
+    )
+    VALUES (
+        v_flow, p_tenant, v_ver,
+        COALESCE((p_workflow ->> 'schema_version')::int, 2), p_workflow,
+        p_actor, p_user_id, CASE WHEN v_agent THEN p_agent_code END, COALESCE(p_provenance, '{}'::jsonb),
+        CASE WHEN v_agent THEN 'InReview' ELSE 'Approved' END,
+        CASE WHEN v_agent THEN NULL ELSE p_user_id END,
+        CASE WHEN v_agent THEN NULL ELSE now() END
+    );
+
+    -- One walk over the JSON tree. Nodes and edges go in one statement; foreign keys are checked at its end.
+    WITH RECURSIVE t AS (
+        SELECT p_workflow -> 'root' AS n, NULL::text AS parent, NULL::text AS branch, 0::smallint AS pos
+        UNION ALL
+        SELECT c.value, t.n ->> 'id', c.value ->> 'branch', (c.ord - 1)::smallint
+        FROM t, jsonb_array_elements(COALESCE(t.n -> 'children', '[]')) WITH ORDINALITY AS c(value, ord)
+    ),
+    ins_nodes AS (
+        INSERT INTO customer360.crm_flow_node (flow_id, version, tenant_id, node_id, node_type, config)
+        SELECT v_flow, v_ver, p_tenant, n ->> 'id', n ->> 'type', COALESCE(n -> 'config', '{}')
+        FROM t
+        RETURNING 1
+    )
+    INSERT INTO customer360.crm_flow_edge (flow_id, version, tenant_id, from_node, to_node, branch, position)
+    SELECT v_flow, v_ver, p_tenant, parent, n ->> 'id', branch, pos
+    FROM t
+    WHERE parent IS NOT NULL;
+
+    flow_id := v_flow;
+    version := v_ver;
+    RETURN NEXT;
+END $$;
+
+-- Makes an approved saved version the live one. Returns the previous and new live versions,
+-- or no rows when the flow or version does not exist for this tenant. Refuses archived
+-- flows and versions that are not Approved.
+CREATE OR REPLACE FUNCTION customer360.crm_publish_flow(p_tenant UUID, p_flow_id UUID, p_version INT)
+RETURNS TABLE (previous_version INT, live_version INT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_previous INT;
+    v_status TEXT;
+    v_approval TEXT;
+BEGIN
+    SELECT f.live_version, f.status INTO v_previous, v_status
+    FROM customer360.crm_flow f
+    WHERE f.flow_id = p_flow_id AND f.tenant_id = p_tenant
+    FOR UPDATE;
+    IF NOT FOUND THEN
+        RETURN;
+    END IF;
+    IF v_status = 'archived' THEN
+        RAISE EXCEPTION 'flow % is archived and cannot be published', p_flow_id;
+    END IF;
+
+    SELECT v.approval_status INTO v_approval
+    FROM customer360.crm_flow_version v
+    WHERE v.flow_id = p_flow_id AND v.tenant_id = p_tenant AND v.version = p_version;
+    IF NOT FOUND THEN
+        RETURN;
+    END IF;
+    IF v_approval <> 'Approved' THEN
+        RAISE EXCEPTION 'version % of flow % is % and must be approved before it goes live',
+            p_version, p_flow_id, v_approval;
+    END IF;
+
+    UPDATE customer360.crm_flow f
+    SET live_version = p_version, status = 'active', updated_at = now()
+    WHERE f.flow_id = p_flow_id AND f.tenant_id = p_tenant;
+
+    previous_version := v_previous;
+    live_version := p_version;
+    RETURN NEXT;
+END $$;
+
+-- Approves or rejects a version that is InReview (normally an agent proposal). The
+-- reviewer must be a person, and must not be the person who started the run. Returns
+-- the resulting approval status.
+CREATE OR REPLACE FUNCTION customer360.crm_review_flow_version(
+    p_tenant UUID,
+    p_flow_id UUID,
+    p_version INT,
+    p_reviewer UUID,
+    p_decision TEXT,
+    p_reason TEXT DEFAULT NULL
+) RETURNS TABLE (reviewed_status TEXT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_status TEXT;
+    v_creator UUID;
+    v_result TEXT;
+BEGIN
+    IF p_decision IS NULL OR p_decision NOT IN ('approve', 'reject') THEN
+        RAISE EXCEPTION 'decision must be approve or reject, not %', p_decision;
+    END IF;
+    IF p_reviewer IS NULL THEN
+        RAISE EXCEPTION 'a human reviewer is required';
+    END IF;
+
+    SELECT v.approval_status, v.created_by_user_id INTO v_status, v_creator
+    FROM customer360.crm_flow_version v
+    WHERE v.flow_id = p_flow_id AND v.tenant_id = p_tenant AND v.version = p_version
+    FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'version % of flow % not found for this tenant', p_version, p_flow_id;
+    END IF;
+    IF v_status <> 'InReview' THEN
+        RAISE EXCEPTION 'only InReview versions can be reviewed; this version is %', v_status;
+    END IF;
+    IF v_creator IS NOT NULL AND v_creator = p_reviewer THEN
+        RAISE EXCEPTION 'the person who started a run cannot approve its output';
+    END IF;
+
+    v_result := CASE WHEN p_decision = 'approve' THEN 'Approved' ELSE 'Rejected' END;
+    UPDATE customer360.crm_flow_version v
+    SET approval_status = v_result,
+        reviewed_by = p_reviewer,
+        reviewed_at = now(),
+        review_reason = p_reason
+    WHERE v.flow_id = p_flow_id AND v.tenant_id = p_tenant AND v.version = p_version;
+
+    reviewed_status := v_result;
+    RETURN NEXT;
+END $$;
+
+-- Rebuilds one node and its subtree. p_branch is the branch name from the parent edge.
+CREATE OR REPLACE FUNCTION customer360.crm_node_json(p_flow UUID, p_ver INT, p_node TEXT, p_branch TEXT DEFAULT NULL)
+RETURNS JSONB LANGUAGE sql STABLE AS $$
+    SELECT jsonb_build_object(
+               'id', n.node_id,
+               'type', n.node_type,
+               'config', n.config,
+               'children', COALESCE((
+                   SELECT jsonb_agg(customer360.crm_node_json(p_flow, p_ver, e.to_node, e.branch) ORDER BY e.position)
+                   FROM customer360.crm_flow_edge e
+                   WHERE e.flow_id = p_flow AND e.version = p_ver AND e.from_node = n.node_id
+               ), '[]'::jsonb))
+           || CASE WHEN p_branch IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('branch', p_branch) END
+    FROM customer360.crm_flow_node n
+    WHERE n.flow_id = p_flow AND n.version = p_ver AND n.node_id = p_node;
+$$;
+
+-- Rebuilds the JSON for a version. p_version NULL means the live version, else the latest.
+-- The root is the node that no edge points to. Returns NULL for another tenant's flow.
+CREATE OR REPLACE FUNCTION customer360.crm_load_flow(p_tenant UUID, p_flow_id UUID, p_version INT DEFAULT NULL)
+RETURNS JSONB LANGUAGE sql STABLE AS $$
+    SELECT jsonb_build_object(
+               'schema_version', v.schema_version,
+               'root', customer360.crm_node_json(v.flow_id, v.version, r.node_id))
+    FROM customer360.crm_flow_version v
+    JOIN customer360.crm_flow f ON f.flow_id = v.flow_id AND f.tenant_id = v.tenant_id
+    JOIN LATERAL (
+        SELECT n.node_id
+        FROM customer360.crm_flow_node n
+        WHERE n.flow_id = v.flow_id AND n.version = v.version
+          AND NOT EXISTS (SELECT 1 FROM customer360.crm_flow_edge e
+                          WHERE e.flow_id = v.flow_id AND e.version = v.version AND e.to_node = n.node_id)
+        LIMIT 1
+    ) r ON true
+    WHERE f.flow_id = p_flow_id
+      AND f.tenant_id = p_tenant
+      AND v.version = COALESCE(p_version, f.live_version,
+                               (SELECT max(x.version) FROM customer360.crm_flow_version x
+                                WHERE x.flow_id = p_flow_id AND x.tenant_id = p_tenant));
+$$;
+
+---------------------------------------------------
+-- Row-Level Security: RBAC and tenant isolation
+---------------------------------------------------
+-- RLS policies below scope tenant_id to app.tenant_id. Set it transaction-
+-- locally on every connection before querying:
+--   SELECT set_config('app.tenant_id', '<tenant-uuid>', true);
+-- Every tenant-owned table must have a NOT NULL tenant_id FK to sys_tenant.
+--
+-- ENABLE + FORCE enforce policies for table owners. Superusers and roles with
+-- BYPASSRLS still bypass RLS; production API roles must be non-superusers
+-- without BYPASSRLS. Local DB_USER=postgres may bypass RLS, so do not use it
+-- to verify isolation. Grant the app role only its required schema/table access.
+--
+-- CIR processes multiple tenants per connection; it sets app.tenant_id for
+-- each tenant before querying and does not need BYPASSRLS. A missing setting
+-- yields NULL (current_setting(..., true)), denying rows by default.
+
+DO $$
+DECLARE
+    t TEXT;
+    tenant_tables TEXT[] := ARRAY[
+        'sys_organization',
+        'sys_tenant_domain',
+        'sys_user',
+        'sys_userinfo',
+        'sys_role',
+        'sys_audit_log',
+        'sys_assistant_message',
+        'crm_campaign',
+        'crm_campaign_performance_daily',
+        'crm_campaign_experiments',
+        'crm_campaign_experiment_variants',
+        'crm_campaign_member',
+        'crm_lead',
+        'crm_lead_source',
+        'crm_contact',
+        'crm_account',
+        'crm_opportunity',
+        'crm_industry',
+        'crm_customer_contacts',
+        'crm_transactions',
+        'cdp_master_profiles',
+        'cdp_raw_profiles_stage',
+        'cdp_profile_links',
+        'cdp_identity_index',
+        'cdp_profile_merge_history',
+        'cdp_relations',
+        'cdp_domain_profiles',
+        'cdp_segments',
+        'cdp_agent_workflow',
+        'cdp_content_items',
+        'cdp_product_items',
+        'cdp_customer_personas',
+        'cdp_persona_archetypes',
+        'crm_message_templates',
+        'crm_campaign_content_items',
+        'crm_campaign_agent',
+        'cdp_journey_metric_daily',
+        'crm_campaign_reviews',
+        'crm_segment_sync_runs',
+        'crm_ad_sync_runs',
+        'crm_campaign_workflow_action_runs',
+        'cdp_campaign_dispatch_logs',
+        'crm_connector_config',
+        'crm_suppression_list',
+        'sys_data_source',
+        'sys_user_role',
+        'cdp_customer_valuation',
+        'graph_edges',
+        'crm_flow',
+        'crm_flow_version',
+        'crm_flow_node',
+        'crm_flow_edge'
+    ];
+BEGIN
+    FOREACH t IN ARRAY tenant_tables LOOP
+        IF NOT EXISTS (
+            SELECT 1
+            FROM pg_attribute a
+            JOIN pg_class r ON r.oid = a.attrelid
+            JOIN pg_namespace n ON n.oid = r.relnamespace
+            WHERE n.nspname = 'customer360'
+              AND r.relname = t
+              AND a.attname = 'tenant_id'
+              AND a.attnum > 0
+              AND NOT a.attisdropped
+        ) THEN
+            CONTINUE;
+        END IF;
+
+        EXECUTE format('ALTER TABLE %I.%I ENABLE ROW LEVEL SECURITY;', 'customer360', t);
+        EXECUTE format('ALTER TABLE %I.%I FORCE ROW LEVEL SECURITY;', 'customer360', t);
+        EXECUTE format('DROP POLICY IF EXISTS tenant_policy ON customer360.%I;', t);
+        EXECUTE format(
+            'CREATE POLICY tenant_policy ON customer360.%I
+                USING (tenant_id = NULLIF(btrim(current_setting(''app.tenant_id'', true)), '''')::uuid)
+                WITH CHECK (tenant_id = NULLIF(btrim(current_setting(''app.tenant_id'', true)), '''')::uuid);',
+            t
+        );
+    END LOOP;
+END;
+$$;
+
+-- Example (as requested) -- equivalent to the loop-generated policy above for
+-- this one table, kept here for documentation/readability:
+-- CREATE POLICY tenant_policy
+-- ON customer360.cdp_master_profiles
+-- USING (
+--     tenant_id =
+--     NULLIF(btrim(current_setting('app.tenant_id')), '')::uuid
+-- );

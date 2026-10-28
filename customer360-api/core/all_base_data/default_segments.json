@@ -1,0 +1,1772 @@
+{
+  "COMMON_SEGMENTS": [
+    {
+      "segment_tag": "new_customer",
+      "audience_tags": [],
+      "segment_name": "New Customers",
+      "description": "Profiles that became a paying customer in the last 30 days.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "id": "days_as_customer",
+            "field": "customer_since",
+            "type": "integer",
+            "input": "number",
+            "operator": "less_or_equal",
+            "value": 30
+          }
+        ]
+      },
+      "sql_rules": "customer_since >= ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '30 days')"
+    },
+    {
+      "segment_tag": "high_value",
+      "audience_tags": [],
+      "segment_name": "High-Value Customers",
+      "description": "Profiles with predictive customer lifetime value of 10,000,000 VND or more.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "predictive_clv",
+            "operator": "greater_or_equal",
+            "value": 10000000
+          }
+        ]
+      },
+      "sql_rules": "predictive_clv >= 10000000"
+    },
+    {
+      "segment_tag": "churn_risk",
+      "audience_tags": [],
+      "segment_name": "At Risk of Churn",
+      "description": "Profiles the churn model places in the high or critical tier (model-based; not the 'churn_risk' lifecycle stage).",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "churn_risk_tier",
+            "operator": "in",
+            "value": [
+              "high",
+              "critical"
+            ]
+          }
+        ]
+      },
+      "sql_rules": "churn_risk_tier IN ('high', 'critical')"
+    },
+    {
+      "segment_tag": "dormant",
+      "audience_tags": [],
+      "segment_name": "Dormant Profiles",
+      "description": "Profiles with no activity in the last 90 days.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "id": "days_since_last_activity",
+            "field": "last_activity_at",
+            "type": "integer",
+            "input": "number",
+            "operator": "greater",
+            "value": 90
+          }
+        ]
+      },
+      "sql_rules": "last_activity_at < (now() - INTERVAL '90 days')"
+    },
+    {
+      "segment_tag": "recently_active",
+      "audience_tags": [],
+      "segment_name": "Recently Active",
+      "description": "Profiles active in the last 30 days.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "id": "days_since_last_activity",
+            "field": "last_activity_at",
+            "type": "integer",
+            "input": "number",
+            "operator": "less_or_equal",
+            "value": 30
+          }
+        ]
+      },
+      "sql_rules": "last_activity_at >= (now() - INTERVAL '30 days')"
+    },
+    {
+      "segment_tag": "growth_potential",
+      "audience_tags": [],
+      "segment_name": "Growth Potential",
+      "description": "Mid-value profiles (predictive CLV from 5,000,000 VND to under 10,000,000 VND) with room to grow into high-value customers.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "predictive_clv",
+            "operator": "greater_or_equal",
+            "value": 5000000
+          },
+          {
+            "field": "predictive_clv",
+            "operator": "less",
+            "value": 10000000
+          }
+        ]
+      },
+      "sql_rules": "predictive_clv >= 5000000 AND predictive_clv < 10000000"
+    },
+    {
+      "segment_tag": "win_back",
+      "audience_tags": [],
+      "segment_name": "Win-Back Candidates",
+      "description": "Existing customers inactive for 30-180 days with medium or higher churn risk.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "lifecycle_stage",
+            "operator": "in",
+            "value": [
+              "customer",
+              "vip",
+              "dormant",
+              "churn_risk"
+            ]
+          },
+          {
+            "id": "days_since_last_activity",
+            "field": "last_activity_at",
+            "type": "integer",
+            "input": "number",
+            "operator": "greater",
+            "value": 30
+          },
+          {
+            "id": "days_since_last_activity",
+            "field": "last_activity_at",
+            "type": "integer",
+            "input": "number",
+            "operator": "less",
+            "value": 180
+          },
+          {
+            "field": "churn_risk_tier",
+            "operator": "in",
+            "value": [
+              "medium",
+              "high",
+              "critical"
+            ]
+          }
+        ]
+      },
+      "sql_rules": "lifecycle_stage IN ('customer', 'vip', 'dormant', 'churn_risk') AND last_activity_at < (now() - INTERVAL '30 days') AND last_activity_at > (now() - INTERVAL '180 days') AND churn_risk_tier IN ('medium', 'high', 'critical')"
+    },
+    {
+      "segment_tag": "champions",
+      "audience_tags": [],
+      "segment_name": "Champions",
+      "description": "Long-tenure (over 1 year) customers with predictive CLV above 25,000,000 VND who are still active in the last 90 days; prioritize for loyalty experiences.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "predictive_clv",
+            "operator": "greater",
+            "value": 25000000
+          },
+          {
+            "id": "days_as_customer",
+            "field": "customer_since",
+            "type": "integer",
+            "input": "number",
+            "operator": "greater",
+            "value": 365
+          },
+          {
+            "id": "days_since_last_activity",
+            "field": "last_activity_at",
+            "type": "integer",
+            "input": "number",
+            "operator": "less_or_equal",
+            "value": 90
+          }
+        ]
+      },
+      "sql_rules": "predictive_clv > 25000000 AND customer_since < ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '365 days') AND last_activity_at >= (now() - INTERVAL '90 days')"
+    },
+    {
+      "segment_tag": "high_engagement",
+      "audience_tags": [],
+      "segment_name": "High Engagement",
+      "description": "Profiles with an engagement score of 75 or higher.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "engagement_score",
+            "operator": "greater_or_equal",
+            "value": 75
+          }
+        ]
+      },
+      "sql_rules": "engagement_score >= 75"
+    },
+    {
+      "segment_tag": "low_engagement",
+      "audience_tags": [],
+      "segment_name": "Low Engagement",
+      "description": "Profiles with an engagement score below 30 that may need re-engagement.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "engagement_score",
+            "operator": "less",
+            "value": 30
+          }
+        ]
+      },
+      "sql_rules": "engagement_score < 30"
+    },
+    {
+      "segment_tag": "promoters",
+      "audience_tags": [],
+      "segment_name": "Promoters",
+      "description": "Profiles with an NPS score of 9-10 (strong advocacy signal).",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "latest_nps_score",
+            "operator": "greater_or_equal",
+            "value": 9
+          }
+        ]
+      },
+      "sql_rules": "latest_nps_score >= 9"
+    },
+    {
+      "segment_tag": "detractors",
+      "audience_tags": [],
+      "segment_name": "Detractors",
+      "description": "Profiles with an NPS score of 0-6 that may need service recovery.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "latest_nps_score",
+            "operator": "less",
+            "value": 7
+          }
+        ]
+      },
+      "sql_rules": "latest_nps_score < 7"
+    },
+    {
+      "segment_tag": "hot_leads",
+      "audience_tags": [],
+      "segment_name": "Hot Leads",
+      "description": "Prospects and leads with a conversion probability of 0.7 or higher.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "lifecycle_stage",
+            "operator": "in",
+            "value": [
+              "prospect",
+              "lead"
+            ]
+          },
+          {
+            "field": "lead_conversion_probability",
+            "operator": "greater_or_equal",
+            "value": 0.7
+          }
+        ]
+      },
+      "sql_rules": "lifecycle_stage IN ('prospect', 'lead') AND lead_conversion_probability >= 0.7"
+    },
+    {
+      "segment_tag": "identity_review_needed",
+      "audience_tags": [],
+      "segment_name": "Needs Identity Review",
+      "description": "Operational segment (not for marketing activation): profiles with identity confidence below 0.6.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "identity_confidence_score",
+            "operator": "less",
+            "value": 0.6
+          }
+        ]
+      },
+      "sql_rules": "identity_confidence_score < 0.6"
+    },
+    {
+      "segment_tag": "profile_enrichment_needed",
+      "audience_tags": [],
+      "segment_name": "Needs Profile Enrichment",
+      "description": "Operational segment (not for marketing activation): profiles with completeness below 70%.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "profile_completeness_score",
+            "operator": "less",
+            "value": 70
+          }
+        ]
+      },
+      "sql_rules": "profile_completeness_score < 70"
+    },
+    {
+      "segment_tag": "age_18_29",
+      "audience_tags": [
+        "demographic/age-range/18-20",
+        "demographic/age-range/21-24",
+        "demographic/age-range/25-29"
+      ],
+      "segment_name": "Young Adults (18-29)",
+      "description": "Profiles aged 18-29 (Gen Z and young millennials), from date_of_birth.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "id": "age_years",
+            "field": "date_of_birth",
+            "type": "integer",
+            "input": "number",
+            "operator": "between",
+            "value": [
+              18,
+              29
+            ]
+          }
+        ]
+      },
+      "sql_rules": "(date_of_birth <= ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '18 years') AND date_of_birth > ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '30 years'))"
+    },
+    {
+      "segment_tag": "age_30_44",
+      "audience_tags": [
+        "demographic/age-range/30-34",
+        "demographic/age-range/35-39",
+        "demographic/age-range/40-44"
+      ],
+      "segment_name": "Adults (30-44)",
+      "description": "Profiles aged 30-44 (millennials), from date_of_birth.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "id": "age_years",
+            "field": "date_of_birth",
+            "type": "integer",
+            "input": "number",
+            "operator": "between",
+            "value": [
+              30,
+              44
+            ]
+          }
+        ]
+      },
+      "sql_rules": "(date_of_birth <= ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '30 years') AND date_of_birth > ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '45 years'))"
+    },
+    {
+      "segment_tag": "age_45_59",
+      "audience_tags": [
+        "demographic/age-range/45-49",
+        "demographic/age-range/50-54",
+        "demographic/age-range/55-59"
+      ],
+      "segment_name": "Mature Adults (45-59)",
+      "description": "Profiles aged 45-59, from date_of_birth.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "id": "age_years",
+            "field": "date_of_birth",
+            "type": "integer",
+            "input": "number",
+            "operator": "between",
+            "value": [
+              45,
+              59
+            ]
+          }
+        ]
+      },
+      "sql_rules": "(date_of_birth <= ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '45 years') AND date_of_birth > ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '60 years'))"
+    },
+    {
+      "segment_tag": "age_60_plus",
+      "audience_tags": [
+        "demographic/age-range/60-64",
+        "demographic/age-range/65-69",
+        "demographic/age-range/70-74",
+        "demographic/age-range/75-plus"
+      ],
+      "segment_name": "Seniors (60+)",
+      "description": "Profiles aged 60 or older, from date_of_birth.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "id": "age_years",
+            "field": "date_of_birth",
+            "type": "integer",
+            "input": "number",
+            "operator": "greater_or_equal",
+            "value": 60
+          }
+        ]
+      },
+      "sql_rules": "date_of_birth <= ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '60 years')"
+    }
+  ],
+  "RETAIL_SEGMENTS": [
+    {
+      "segment_tag": "retail_store_loyalists",
+      "audience_tags": [
+        "interest/shopping"
+      ],
+      "segment_name": "Store-First Shoppers",
+      "description": "Retail customers whose preferred channel is a physical store or POS.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "retail"
+            ]
+          },
+          {
+            "field": "lifecycle_stage",
+            "operator": "in",
+            "value": [
+              "customer",
+              "vip"
+            ]
+          },
+          {
+            "field": "preferred_channel",
+            "operator": "in",
+            "value": [
+              "In-Store",
+              "POS",
+              "Store"
+            ]
+          }
+        ]
+      },
+      "sql_rules": "domain = 'retail' AND lifecycle_stage IN ('customer', 'vip') AND preferred_channel IN ('In-Store', 'POS', 'Store')"
+    },
+    {
+      "segment_tag": "retail_discount_seekers",
+      "audience_tags": [
+        "interest/shopping",
+        "interest/personal-finance/frugal-living",
+        "purchase-intent/gifts-and-holiday-items/gift-cards-and-coupons"
+      ],
+      "segment_name": "Retail Discount Seekers",
+      "description": "Retail profiles first acquired through coupon, affiliate or deal-site channels.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "retail"
+            ]
+          },
+          {
+            "field": "acquisition_source",
+            "operator": "in",
+            "value": [
+              "coupon",
+              "affiliate",
+              "deal_site"
+            ]
+          }
+        ]
+      },
+      "sql_rules": "domain = 'retail' AND acquisition_source IN ('coupon', 'affiliate', 'deal_site')"
+    },
+    {
+      "segment_tag": "retail_marketplace_shoppers",
+      "audience_tags": [
+        "interest/shopping",
+        "purchase-intent/apps/shopping-apps"
+      ],
+      "segment_name": "Marketplace-Acquired Shoppers",
+      "description": "Retail profiles first acquired through Shopee, Lazada or TikTok Shop marketplaces.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "retail"
+            ]
+          },
+          {
+            "field": "acquisition_source",
+            "operator": "in",
+            "value": [
+              "shopee",
+              "lazada",
+              "tiktok_shop"
+            ]
+          }
+        ]
+      },
+      "sql_rules": "domain = 'retail' AND acquisition_source IN ('shopee', 'lazada', 'tiktok_shop')"
+    },
+    {
+      "segment_tag": "retail_high_basket_value",
+      "audience_tags": [
+        "interest/shopping"
+      ],
+      "segment_name": "High-Spend Retail Customers",
+      "description": "Retail profiles with predictive CLV of 15,000,000 VND or more (CLV is a proxy; true basket value lives in domain attributes).",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "retail"
+            ]
+          },
+          {
+            "field": "predictive_clv",
+            "operator": "greater_or_equal",
+            "value": 15000000
+          }
+        ]
+      },
+      "sql_rules": "domain = 'retail' AND predictive_clv >= 15000000"
+    },
+    {
+      "segment_tag": "retail_at_risk_regulars",
+      "audience_tags": [
+        "interest/shopping"
+      ],
+      "segment_name": "At-Risk Retail Regulars",
+      "description": "Retail customers at high or critical churn risk who went quiet 14-90 days ago (still recoverable).",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "retail"
+            ]
+          },
+          {
+            "field": "lifecycle_stage",
+            "operator": "in",
+            "value": [
+              "customer",
+              "vip"
+            ]
+          },
+          {
+            "field": "churn_risk_tier",
+            "operator": "in",
+            "value": [
+              "high",
+              "critical"
+            ]
+          },
+          {
+            "id": "days_since_last_activity",
+            "field": "last_activity_at",
+            "type": "integer",
+            "input": "number",
+            "operator": "greater",
+            "value": 14
+          },
+          {
+            "id": "days_since_last_activity",
+            "field": "last_activity_at",
+            "type": "integer",
+            "input": "number",
+            "operator": "less",
+            "value": 90
+          }
+        ]
+      },
+      "sql_rules": "domain = 'retail' AND lifecycle_stage IN ('customer', 'vip') AND churn_risk_tier IN ('high', 'critical') AND last_activity_at < (now() - INTERVAL '14 days') AND last_activity_at > (now() - INTERVAL '90 days')"
+    },
+    {
+      "segment_tag": "retail_omnichannel_shoppers",
+      "audience_tags": [
+        "interest/shopping"
+      ],
+      "segment_name": "Retail Omnichannel Shoppers",
+      "description": "Engaged retail profiles stitched from 3 or more raw profiles (identity-touchpoint proxy for multi-channel behavior).",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "retail"
+            ]
+          },
+          {
+            "field": "linked_raw_profile_count",
+            "operator": "greater_or_equal",
+            "value": 3
+          },
+          {
+            "field": "engagement_score",
+            "operator": "greater_or_equal",
+            "value": 60
+          }
+        ]
+      },
+      "sql_rules": "domain = 'retail' AND linked_raw_profile_count >= 3 AND engagement_score >= 60"
+    }
+  ],
+  "ECOMMERCE_SEGMENTS": [
+    {
+      "segment_tag": "ecommerce_new_visitors",
+      "audience_tags": [
+        "interest/shopping"
+      ],
+      "segment_name": "New Online Customers",
+      "description": "Online-first customers (website, app or Zalo) who converted in the last 30 days.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "retail"
+            ]
+          },
+          {
+            "field": "preferred_channel",
+            "operator": "in",
+            "value": [
+              "Website",
+              "Mobile App",
+              "Zalo"
+            ]
+          },
+          {
+            "id": "days_as_customer",
+            "field": "customer_since",
+            "type": "integer",
+            "input": "number",
+            "operator": "less_or_equal",
+            "value": 30
+          }
+        ]
+      },
+      "sql_rules": "domain = 'retail' AND preferred_channel IN ('Website', 'Mobile App', 'Zalo') AND customer_since >= ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '30 days')"
+    },
+    {
+      "segment_tag": "ecommerce_power_buyers",
+      "audience_tags": [
+        "interest/shopping"
+      ],
+      "segment_name": "Top Online Customers",
+      "description": "Online-first customers with predictive CLV above 20,000,000 VND.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "retail"
+            ]
+          },
+          {
+            "field": "preferred_channel",
+            "operator": "in",
+            "value": [
+              "Website",
+              "Mobile App",
+              "Zalo"
+            ]
+          },
+          {
+            "field": "predictive_clv",
+            "operator": "greater",
+            "value": 20000000
+          }
+        ]
+      },
+      "sql_rules": "domain = 'retail' AND preferred_channel IN ('Website', 'Mobile App', 'Zalo') AND predictive_clv > 20000000"
+    },
+    {
+      "segment_tag": "ecommerce_conversion_nudge",
+      "audience_tags": [
+        "interest/shopping"
+      ],
+      "segment_name": "Likely Online Buyers",
+      "description": "Online prospects and leads with a conversion probability of 0.45 or higher.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "retail"
+            ]
+          },
+          {
+            "field": "preferred_channel",
+            "operator": "in",
+            "value": [
+              "Website",
+              "Mobile App",
+              "Zalo"
+            ]
+          },
+          {
+            "field": "lead_conversion_probability",
+            "operator": "greater_or_equal",
+            "value": 0.45
+          },
+          {
+            "field": "lifecycle_stage",
+            "operator": "in",
+            "value": [
+              "prospect",
+              "lead"
+            ]
+          }
+        ]
+      },
+      "sql_rules": "domain = 'retail' AND preferred_channel IN ('Website', 'Mobile App', 'Zalo') AND lead_conversion_probability >= 0.45 AND lifecycle_stage IN ('prospect', 'lead')"
+    },
+    {
+      "segment_tag": "ecommerce_churn_watch",
+      "audience_tags": [
+        "interest/shopping"
+      ],
+      "segment_name": "Online Churn Watchlist",
+      "description": "Online customers at medium churn risk: the early-warning tier below 'At Risk of Churn'.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "retail"
+            ]
+          },
+          {
+            "field": "preferred_channel",
+            "operator": "in",
+            "value": [
+              "Website",
+              "Mobile App",
+              "Zalo"
+            ]
+          },
+          {
+            "field": "lifecycle_stage",
+            "operator": "in",
+            "value": [
+              "customer",
+              "vip"
+            ]
+          },
+          {
+            "field": "churn_risk_tier",
+            "operator": "in",
+            "value": [
+              "medium"
+            ]
+          }
+        ]
+      },
+      "sql_rules": "domain = 'retail' AND preferred_channel IN ('Website', 'Mobile App', 'Zalo') AND lifecycle_stage IN ('customer', 'vip') AND churn_risk_tier = 'medium'"
+    },
+    {
+      "segment_tag": "ecommerce_reactivation_90d",
+      "audience_tags": [
+        "interest/shopping"
+      ],
+      "segment_name": "Inactive Online Customers (90+ Days)",
+      "description": "Existing online customers with no activity for at least 90 days.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "retail"
+            ]
+          },
+          {
+            "field": "preferred_channel",
+            "operator": "in",
+            "value": [
+              "Website",
+              "Mobile App",
+              "Zalo"
+            ]
+          },
+          {
+            "field": "lifecycle_stage",
+            "operator": "in",
+            "value": [
+              "customer",
+              "vip",
+              "dormant",
+              "churn_risk"
+            ]
+          },
+          {
+            "id": "days_since_last_activity",
+            "field": "last_activity_at",
+            "type": "integer",
+            "input": "number",
+            "operator": "greater",
+            "value": 90
+          }
+        ]
+      },
+      "sql_rules": "domain = 'retail' AND preferred_channel IN ('Website', 'Mobile App', 'Zalo') AND lifecycle_stage IN ('customer', 'vip', 'dormant', 'churn_risk') AND last_activity_at < (now() - INTERVAL '90 days')"
+    }
+  ],
+  "TRAVEL_SEGMENTS": [
+    {
+      "segment_tag": "travel_frequent_travelers",
+      "audience_tags": [
+        "interest/travel"
+      ],
+      "segment_name": "Frequent Travelers",
+      "description": "Highly engaged travel profiles stitched from 3 or more raw profiles (proxy for trip frequency).",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "travel"
+            ]
+          },
+          {
+            "field": "engagement_score",
+            "operator": "greater_or_equal",
+            "value": 70
+          },
+          {
+            "field": "linked_raw_profile_count",
+            "operator": "greater_or_equal",
+            "value": 3
+          }
+        ]
+      },
+      "sql_rules": "domain = 'travel' AND engagement_score >= 70 AND linked_raw_profile_count >= 3"
+    },
+    {
+      "segment_tag": "travel_premium_travelers",
+      "audience_tags": [
+        "interest/travel"
+      ],
+      "segment_name": "Premium Travelers",
+      "description": "Travel profiles with predictive CLV of 25,000,000 VND or more.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "travel"
+            ]
+          },
+          {
+            "field": "predictive_clv",
+            "operator": "greater_or_equal",
+            "value": 25000000
+          }
+        ]
+      },
+      "sql_rules": "domain = 'travel' AND predictive_clv >= 25000000"
+    },
+    {
+      "segment_tag": "travel_booking_dropout_risk",
+      "audience_tags": [
+        "purchase-intent/travel-and-tourism"
+      ],
+      "segment_name": "Travel Booking Dropout Risk",
+      "description": "High-intent travel leads (probability 0.5+) quiet for 14-90 days; still worth a recovery nudge.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "travel"
+            ]
+          },
+          {
+            "field": "lifecycle_stage",
+            "operator": "in",
+            "value": [
+              "prospect",
+              "lead"
+            ]
+          },
+          {
+            "field": "lead_conversion_probability",
+            "operator": "greater_or_equal",
+            "value": 0.5
+          },
+          {
+            "id": "days_since_last_activity",
+            "field": "last_activity_at",
+            "type": "integer",
+            "input": "number",
+            "operator": "greater",
+            "value": 14
+          },
+          {
+            "id": "days_since_last_activity",
+            "field": "last_activity_at",
+            "type": "integer",
+            "input": "number",
+            "operator": "less",
+            "value": 90
+          }
+        ]
+      },
+      "sql_rules": "domain = 'travel' AND lifecycle_stage IN ('prospect', 'lead') AND lead_conversion_probability >= 0.5 AND last_activity_at < (now() - INTERVAL '14 days') AND last_activity_at > (now() - INTERVAL '90 days')"
+    },
+    {
+      "segment_tag": "travel_loyalty_growth",
+      "audience_tags": [
+        "interest/travel"
+      ],
+      "segment_name": "Growing Travel Loyalists",
+      "description": "Established travel customers (over 1 year) with predictive CLV from 8,000,000 VND to under 25,000,000 VND.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "travel"
+            ]
+          },
+          {
+            "id": "days_as_customer",
+            "field": "customer_since",
+            "type": "integer",
+            "input": "number",
+            "operator": "greater",
+            "value": 365
+          },
+          {
+            "field": "predictive_clv",
+            "operator": "greater_or_equal",
+            "value": 8000000
+          },
+          {
+            "field": "predictive_clv",
+            "operator": "less",
+            "value": 25000000
+          }
+        ]
+      },
+      "sql_rules": "domain = 'travel' AND customer_since < ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '365 days') AND predictive_clv >= 8000000 AND predictive_clv < 25000000"
+    },
+    {
+      "segment_tag": "travel_churn_alert",
+      "audience_tags": [
+        "interest/travel"
+      ],
+      "segment_name": "Travel Churn Alert",
+      "description": "Travel customers at high or critical churn risk.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "travel"
+            ]
+          },
+          {
+            "field": "lifecycle_stage",
+            "operator": "in",
+            "value": [
+              "customer",
+              "vip"
+            ]
+          },
+          {
+            "field": "churn_risk_tier",
+            "operator": "in",
+            "value": [
+              "high",
+              "critical"
+            ]
+          }
+        ]
+      },
+      "sql_rules": "domain = 'travel' AND lifecycle_stage IN ('customer', 'vip') AND churn_risk_tier IN ('high', 'critical')"
+    }
+  ],
+  "EDUCATION_SEGMENTS": [
+    {
+      "segment_tag": "education_high_intent_leads",
+      "audience_tags": [
+        "purchase-intent/education-and-careers",
+        "interest/education"
+      ],
+      "segment_name": "High-Intent Education Leads",
+      "description": "Education prospects and leads with enrollment probability of 0.65 or higher.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "education"
+            ]
+          },
+          {
+            "field": "lifecycle_stage",
+            "operator": "in",
+            "value": [
+              "prospect",
+              "lead"
+            ]
+          },
+          {
+            "field": "lead_conversion_probability",
+            "operator": "greater_or_equal",
+            "value": 0.65
+          }
+        ]
+      },
+      "sql_rules": "domain = 'education' AND lifecycle_stage IN ('prospect', 'lead') AND lead_conversion_probability >= 0.65"
+    },
+    {
+      "segment_tag": "education_active_learners",
+      "audience_tags": [
+        "interest/education"
+      ],
+      "segment_name": "Education Active Learners",
+      "description": "Learners with engagement of 70+ who were active in the last 14 days.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "education"
+            ]
+          },
+          {
+            "field": "engagement_score",
+            "operator": "greater_or_equal",
+            "value": 70
+          },
+          {
+            "id": "days_since_last_activity",
+            "field": "last_activity_at",
+            "type": "integer",
+            "input": "number",
+            "operator": "less_or_equal",
+            "value": 14
+          }
+        ]
+      },
+      "sql_rules": "domain = 'education' AND engagement_score >= 70 AND last_activity_at >= (now() - INTERVAL '14 days')"
+    },
+    {
+      "segment_tag": "education_completion_risk",
+      "audience_tags": [
+        "interest/education"
+      ],
+      "segment_name": "Learners at Dropout Risk",
+      "description": "Current learners with low engagement (below 40) and medium or higher churn risk.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "education"
+            ]
+          },
+          {
+            "field": "lifecycle_stage",
+            "operator": "in",
+            "value": [
+              "customer",
+              "vip"
+            ]
+          },
+          {
+            "field": "engagement_score",
+            "operator": "less",
+            "value": 40
+          },
+          {
+            "field": "churn_risk_tier",
+            "operator": "in",
+            "value": [
+              "medium",
+              "high",
+              "critical"
+            ]
+          }
+        ]
+      },
+      "sql_rules": "domain = 'education' AND lifecycle_stage IN ('customer', 'vip') AND engagement_score < 40 AND churn_risk_tier IN ('medium', 'high', 'critical')"
+    },
+    {
+      "segment_tag": "education_alumni_advocates",
+      "audience_tags": [
+        "interest/education"
+      ],
+      "segment_name": "Alumni Advocates",
+      "description": "Education customers of over 1 year with an NPS score of 9-10 (referral and testimonial candidates).",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "education"
+            ]
+          },
+          {
+            "id": "days_as_customer",
+            "field": "customer_since",
+            "type": "integer",
+            "input": "number",
+            "operator": "greater",
+            "value": 365
+          },
+          {
+            "field": "latest_nps_score",
+            "operator": "greater_or_equal",
+            "value": 9
+          }
+        ]
+      },
+      "sql_rules": "domain = 'education' AND customer_since < ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '365 days') AND latest_nps_score >= 9"
+    },
+    {
+      "segment_tag": "education_reenrollment_candidates",
+      "audience_tags": [
+        "purchase-intent/education-and-careers",
+        "interest/education"
+      ],
+      "segment_name": "Re-enrollment Candidates",
+      "description": "Previously enrolled learners inactive for 120-365 days with a return probability of 0.4 or higher.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "education"
+            ]
+          },
+          {
+            "field": "lifecycle_stage",
+            "operator": "in",
+            "value": [
+              "customer",
+              "dormant",
+              "churn_risk"
+            ]
+          },
+          {
+            "id": "days_since_last_activity",
+            "field": "last_activity_at",
+            "type": "integer",
+            "input": "number",
+            "operator": "greater",
+            "value": 120
+          },
+          {
+            "id": "days_since_last_activity",
+            "field": "last_activity_at",
+            "type": "integer",
+            "input": "number",
+            "operator": "less",
+            "value": 365
+          },
+          {
+            "field": "lead_conversion_probability",
+            "operator": "greater_or_equal",
+            "value": 0.4
+          }
+        ]
+      },
+      "sql_rules": "domain = 'education' AND lifecycle_stage IN ('customer', 'dormant', 'churn_risk') AND last_activity_at < (now() - INTERVAL '120 days') AND last_activity_at > (now() - INTERVAL '365 days') AND lead_conversion_probability >= 0.4"
+    }
+  ],
+  "REAL_ESTATE_SEGMENTS": [
+    {
+      "segment_tag": "real_estate_hot_buyers",
+      "audience_tags": [
+        "purchase-intent/real-estate/real-estate-sales",
+        "interest/real-estate/real-estate-buying-and-selling"
+      ],
+      "segment_name": "Real Estate Hot Buyers",
+      "description": "Real estate leads graded A or Hot, prioritized for fast follow-up.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "real_estate"
+            ]
+          },
+          {
+            "field": "lifecycle_stage",
+            "operator": "in",
+            "value": [
+              "prospect",
+              "lead"
+            ]
+          },
+          {
+            "field": "lead_grade",
+            "operator": "in",
+            "value": [
+              "A",
+              "Hot"
+            ]
+          }
+        ]
+      },
+      "sql_rules": "domain = 'real_estate' AND lifecycle_stage IN ('prospect', 'lead') AND lead_grade IN ('A', 'Hot')"
+    },
+    {
+      "segment_tag": "real_estate_investor_profile",
+      "audience_tags": [
+        "interest/real-estate"
+      ],
+      "segment_name": "Investor-Like Property Buyers",
+      "description": "Real estate profiles with predictive CLV above 100,000,000 VND (high-value proxy; investor intent lives in domain attributes).",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "real_estate"
+            ]
+          },
+          {
+            "field": "predictive_clv",
+            "operator": "greater",
+            "value": 100000000
+          }
+        ]
+      },
+      "sql_rules": "domain = 'real_estate' AND predictive_clv > 100000000"
+    },
+    {
+      "segment_tag": "real_estate_nurture_long_cycle",
+      "audience_tags": [
+        "purchase-intent/real-estate"
+      ],
+      "segment_name": "Long-Cycle Property Leads",
+      "description": "Real estate leads (probability 0.35+) quiet for 30-180 days; keep nurturing through a long consideration journey.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "real_estate"
+            ]
+          },
+          {
+            "field": "lifecycle_stage",
+            "operator": "in",
+            "value": [
+              "prospect",
+              "lead"
+            ]
+          },
+          {
+            "field": "lead_conversion_probability",
+            "operator": "greater_or_equal",
+            "value": 0.35
+          },
+          {
+            "id": "days_since_last_activity",
+            "field": "last_activity_at",
+            "type": "integer",
+            "input": "number",
+            "operator": "greater",
+            "value": 30
+          },
+          {
+            "id": "days_since_last_activity",
+            "field": "last_activity_at",
+            "type": "integer",
+            "input": "number",
+            "operator": "less",
+            "value": 180
+          }
+        ]
+      },
+      "sql_rules": "domain = 'real_estate' AND lifecycle_stage IN ('prospect', 'lead') AND lead_conversion_probability >= 0.35 AND last_activity_at < (now() - INTERVAL '30 days') AND last_activity_at > (now() - INTERVAL '180 days')"
+    },
+    {
+      "segment_tag": "real_estate_tour_ready",
+      "audience_tags": [
+        "purchase-intent/real-estate/real-estate-sales"
+      ],
+      "segment_name": "Tour-Ready Property Leads",
+      "description": "Real estate leads with engagement 65+ and conversion probability 0.55+, ready for a property tour.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "real_estate"
+            ]
+          },
+          {
+            "field": "lifecycle_stage",
+            "operator": "in",
+            "value": [
+              "prospect",
+              "lead"
+            ]
+          },
+          {
+            "field": "engagement_score",
+            "operator": "greater_or_equal",
+            "value": 65
+          },
+          {
+            "field": "lead_conversion_probability",
+            "operator": "greater_or_equal",
+            "value": 0.55
+          }
+        ]
+      },
+      "sql_rules": "domain = 'real_estate' AND lifecycle_stage IN ('prospect', 'lead') AND engagement_score >= 65 AND lead_conversion_probability >= 0.55"
+    },
+    {
+      "segment_tag": "real_estate_mortgage_risk",
+      "audience_tags": [
+        "interest/real-estate"
+      ],
+      "segment_name": "At-Risk Property Buyers",
+      "description": "Real estate profiles with medium or higher churn risk and negative sentiment.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "real_estate"
+            ]
+          },
+          {
+            "field": "churn_risk_tier",
+            "operator": "in",
+            "value": [
+              "medium",
+              "high",
+              "critical"
+            ]
+          },
+          {
+            "field": "overall_sentiment_score",
+            "operator": "less",
+            "value": 0
+          }
+        ]
+      },
+      "sql_rules": "domain = 'real_estate' AND churn_risk_tier IN ('medium', 'high', 'critical') AND overall_sentiment_score < 0"
+    }
+  ],
+  "BANKING_SEGMENTS": [
+    {
+      "segment_tag": "banking_digital_adopters",
+      "audience_tags": [
+        "purchase-intent/finance-and-insurance/banking",
+        "purchase-intent/apps/finance-apps"
+      ],
+      "segment_name": "Digital Banking Adopters",
+      "description": "Banking customers whose preferred channel is the mobile or internet banking app, with engagement of 60+.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "banking"
+            ]
+          },
+          {
+            "field": "lifecycle_stage",
+            "operator": "in",
+            "value": [
+              "customer",
+              "vip"
+            ]
+          },
+          {
+            "field": "preferred_channel",
+            "operator": "in",
+            "value": [
+              "Mobile App",
+              "Internet Banking App"
+            ]
+          },
+          {
+            "field": "engagement_score",
+            "operator": "greater_or_equal",
+            "value": 60
+          }
+        ]
+      },
+      "sql_rules": "domain = 'banking' AND lifecycle_stage IN ('customer', 'vip') AND preferred_channel IN ('Mobile App', 'Internet Banking App') AND engagement_score >= 60"
+    },
+    {
+      "segment_tag": "banking_premium_clients",
+      "audience_tags": [
+        "purchase-intent/finance-and-insurance/banking",
+        "interest/personal-finance"
+      ],
+      "segment_name": "Banking Premium Clients",
+      "description": "Banking customers with predictive CLV of 50,000,000 VND or more.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "banking"
+            ]
+          },
+          {
+            "field": "lifecycle_stage",
+            "operator": "in",
+            "value": [
+              "customer",
+              "vip"
+            ]
+          },
+          {
+            "field": "predictive_clv",
+            "operator": "greater_or_equal",
+            "value": 50000000
+          }
+        ]
+      },
+      "sql_rules": "domain = 'banking' AND lifecycle_stage IN ('customer', 'vip') AND predictive_clv >= 50000000"
+    },
+    {
+      "segment_tag": "banking_cross_sell_ready",
+      "audience_tags": [
+        "purchase-intent/finance-and-insurance"
+      ],
+      "segment_name": "Banking Cross-Sell Ready",
+      "description": "Existing banking customers with a new-product propensity of 0.6+ and low-to-medium churn risk.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "banking"
+            ]
+          },
+          {
+            "field": "lifecycle_stage",
+            "operator": "in",
+            "value": [
+              "customer",
+              "vip"
+            ]
+          },
+          {
+            "field": "lead_conversion_probability",
+            "operator": "greater_or_equal",
+            "value": 0.6
+          },
+          {
+            "field": "churn_risk_tier",
+            "operator": "in",
+            "value": [
+              "low",
+              "medium"
+            ]
+          }
+        ]
+      },
+      "sql_rules": "domain = 'banking' AND lifecycle_stage IN ('customer', 'vip') AND lead_conversion_probability >= 0.6 AND churn_risk_tier IN ('low', 'medium')"
+    },
+    {
+      "segment_tag": "banking_attrition_risk",
+      "audience_tags": [
+        "purchase-intent/finance-and-insurance/banking"
+      ],
+      "segment_name": "Banking Attrition Risk",
+      "description": "Banking customers at high or critical churn risk; route to retention outreach.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "banking"
+            ]
+          },
+          {
+            "field": "lifecycle_stage",
+            "operator": "in",
+            "value": [
+              "customer",
+              "vip"
+            ]
+          },
+          {
+            "field": "churn_risk_tier",
+            "operator": "in",
+            "value": [
+              "high",
+              "critical"
+            ]
+          }
+        ]
+      },
+      "sql_rules": "domain = 'banking' AND lifecycle_stage IN ('customer', 'vip') AND churn_risk_tier IN ('high', 'critical')"
+    }
+  ],
+  "MEDIA_SEGMENTS": [
+    {
+      "segment_tag": "media_power_users",
+      "audience_tags": [
+        "purchase-intent/arts-and-entertainment"
+      ],
+      "segment_name": "Media Power Users",
+      "description": "Highly engaged media profiles (80+) active in the last 7 days.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "media"
+            ]
+          },
+          {
+            "field": "engagement_score",
+            "operator": "greater_or_equal",
+            "value": 80
+          },
+          {
+            "id": "days_since_last_activity",
+            "field": "last_activity_at",
+            "type": "integer",
+            "input": "number",
+            "operator": "less_or_equal",
+            "value": 7
+          }
+        ]
+      },
+      "sql_rules": "domain = 'media' AND engagement_score >= 80 AND last_activity_at >= (now() - INTERVAL '7 days')"
+    },
+    {
+      "segment_tag": "media_free_to_paid_candidates",
+      "audience_tags": [
+        "purchase-intent/arts-and-entertainment"
+      ],
+      "segment_name": "Free-to-Paid Candidates",
+      "description": "Media prospects and leads with engagement of 50+ and conversion probability of 0.5+.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "media"
+            ]
+          },
+          {
+            "field": "lifecycle_stage",
+            "operator": "in",
+            "value": [
+              "prospect",
+              "lead"
+            ]
+          },
+          {
+            "field": "engagement_score",
+            "operator": "greater_or_equal",
+            "value": 50
+          },
+          {
+            "field": "lead_conversion_probability",
+            "operator": "greater_or_equal",
+            "value": 0.5
+          }
+        ]
+      },
+      "sql_rules": "domain = 'media' AND lifecycle_stage IN ('prospect', 'lead') AND engagement_score >= 50 AND lead_conversion_probability >= 0.5"
+    },
+    {
+      "segment_tag": "media_lapsing_subscribers",
+      "audience_tags": [
+        "purchase-intent/arts-and-entertainment"
+      ],
+      "segment_name": "Lapsing Subscribers",
+      "description": "Media customers inactive for 14-60 days with medium or higher churn risk.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "media"
+            ]
+          },
+          {
+            "field": "lifecycle_stage",
+            "operator": "in",
+            "value": [
+              "customer",
+              "vip"
+            ]
+          },
+          {
+            "id": "days_since_last_activity",
+            "field": "last_activity_at",
+            "type": "integer",
+            "input": "number",
+            "operator": "greater",
+            "value": 14
+          },
+          {
+            "id": "days_since_last_activity",
+            "field": "last_activity_at",
+            "type": "integer",
+            "input": "number",
+            "operator": "less",
+            "value": 60
+          },
+          {
+            "field": "churn_risk_tier",
+            "operator": "in",
+            "value": [
+              "medium",
+              "high",
+              "critical"
+            ]
+          }
+        ]
+      },
+      "sql_rules": "domain = 'media' AND lifecycle_stage IN ('customer', 'vip') AND last_activity_at < (now() - INTERVAL '14 days') AND last_activity_at > (now() - INTERVAL '60 days') AND churn_risk_tier IN ('medium', 'high', 'critical')"
+    },
+    {
+      "segment_tag": "media_loyal_subscribers",
+      "audience_tags": [
+        "purchase-intent/arts-and-entertainment"
+      ],
+      "segment_name": "Loyal Subscribers",
+      "description": "Media customers of over 1 year with engagement 60+ and low churn risk.",
+      "json_rules": {
+        "condition": "AND",
+        "rules": [
+          {
+            "field": "domain",
+            "operator": "in",
+            "value": [
+              "media"
+            ]
+          },
+          {
+            "field": "lifecycle_stage",
+            "operator": "in",
+            "value": [
+              "customer",
+              "vip"
+            ]
+          },
+          {
+            "id": "days_as_customer",
+            "field": "customer_since",
+            "type": "integer",
+            "input": "number",
+            "operator": "greater",
+            "value": 365
+          },
+          {
+            "field": "engagement_score",
+            "operator": "greater_or_equal",
+            "value": 60
+          },
+          {
+            "field": "churn_risk_tier",
+            "operator": "in",
+            "value": [
+              "low"
+            ]
+          }
+        ]
+      },
+      "sql_rules": "domain = 'media' AND lifecycle_stage IN ('customer', 'vip') AND customer_since < ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '365 days') AND engagement_score >= 60 AND churn_risk_tier = 'low'"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+Domain	Item_Type	Title	Summary	Image_URL	CTA_Label	CTA_URL	Segment_Tags	Published_At	Status_Code
+retail	article	Smart shopping guide	A practical guide to compare products and make informed retail choices.	https://images.example.com/content/smart-shopping.jpg	Read article	https://content.example.com/retail/smart-shopping	shopper,retail	2026-09-15T00:00:00Z	1
+retail	news	Retail trends this month	A short update on current retail and ecommerce trends.		Read news	https://content.example.com/retail/trends	retail,ecommerce	2026-09-20T00:00:00Z	1
+banking	article	Understanding savings goals	An introductory guide to setting and reviewing personal savings goals.		Learn more	https://content.example.com/banking/savings-goals	savings,banking	2026-09-18T00:00:00Z	1
+banking	news	Digital banking update	News and information about digital banking services.		View update	https://content.example.com/banking/digital-update	digital_banking,finance	2026-09-22T00:00:00Z	1
+travel	video	Plan a weekend getaway	A short video with ideas for planning a weekend trip.	https://images.example.com/content/weekend-trip.jpg	Watch video	https://content.example.com/travel/weekend-getaway	travel,weekend	2026-09-10T00:00:00Z	1

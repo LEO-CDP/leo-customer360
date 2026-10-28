@@ -45,7 +45,7 @@ The suite runs against a **shared** UAT tenant, so every case cleans up after it
 4. **Routing tests** (`test_routing_e2e.py`) that *do* write to `crm_lead`/`crm_contact`/
    `crm_customer_contacts`/`crm_transactions`/`crm_lead_source` are **opt-in**
    (`E2E_ALLOW_DATA_WRITES=1`) and self-clean by computing the sync's **deterministic
-   `uuid5` PKs** (imported from `core.crud.crm_sync`) and `DELETE`-ing exactly those
+   `uuid5` PKs** (imported from `leo_customer360_dao.crud.crm_sync`) and `DELETE`-ing exactly those
    ids — but only rows **absent before** the test ran (pre-existing rows for a real
    profile are left untouched).
 5. **Sweeper** `cleanup.py` (`CLEANUP=1 ./test.sh` or `python cleanup.py`) removes any
@@ -74,7 +74,7 @@ tables; (d) SQLAlchemy models + Pydantic schemas updated.
 | S93-10 | a | Forward migration `002_*.sql` applies (idempotent, re-runnable) | Positive | DB smoke | tables/columns/FK/index/RLS present; second run no-op | scratch DB dropped |
 | S93-11 | a | Rollback `002_*.down.sql` reverses cleanly | Positive | DB smoke | all objects dropped in dependency-safe order | scratch DB dropped |
 | S93-12 | c | RLS `ENABLE`+`FORCE`+`tenant_policy` on the 3 new tables | Integrity | DB smoke | `pg_policies` shows `tenant_policy`; blank `app.tenant_id` → 0 rows | scratch DB dropped |
-| S93-13 | d | Models importable & mapped (`EmailTemplate`, `CampaignContentItem`, `SegmentSyncRun`) | Positive | Unit | import + metadata assert | n/a |
+| S93-13 | d | Models importable & mapped (`MessageTemplate`, `CampaignContentItem`, `SegmentSyncRun`) | Positive | Unit | import + metadata assert | n/a |
 | S93-14 | b | `crm_campaign_content_items` unique `(campaign_id, content_item_id)` | Integrity | DB smoke / Unit | duplicate link rejected | scratch DB |
 
 > **Not E2E-automatable:** S93-10/11/12/14 have **no HTTP surface** (migrations run via
@@ -144,11 +144,11 @@ per-run E2E suite:
 
 ```bash
 # apply-then-rollback smoke (S93-10/11/12)
-psql "$DB" -f database-init/migrations/002_email_marketing_schema_foundation.sql   # apply (idempotent)
-psql "$DB" -f database-init/migrations/002_email_marketing_schema_foundation.sql   # re-apply: no-op
+psql "$DB" -f customer360-database/migrations/002_email_marketing_schema_foundation.sql   # apply (idempotent)
+psql "$DB" -f customer360-database/migrations/002_email_marketing_schema_foundation.sql   # re-apply: no-op
 psql "$DB" -c "\d+ customer360.crm_segment_sync_runs"                              # columns/index present
 psql "$DB" -c "SELECT polname FROM pg_policies WHERE tablename='crm_segment_sync_runs';"  # tenant_policy
-psql "$DB" -f database-init/migrations/002_email_marketing_schema_foundation.down.sql     # rollback clean
+psql "$DB" -f customer360-database/migrations/002_email_marketing_schema_foundation.down.sql     # rollback clean
 ```
 
 ## 7. Coverage summary
@@ -173,7 +173,7 @@ psql "$DB" -f database-init/migrations/002_email_marketing_schema_foundation.dow
 
 ## 8. SCRUM-97 — Dagster Execution Modernization (campaign activation + email dispatch)
 
-> **Deploy gate:** S97 targets campaign activation on customer360-api. S98 targets data-tracking-api through `E2E_TRACKING_BASE_URL`. Run: `CASES=S97 ./test.sh` or `CASES=S98 ./test.sh`.
+> **Deploy gate:** S97 targets campaign activation on customer360-api. S98 targets customer360-event-api through `E2E_TRACKING_BASE_URL`. Run: `CASES=S97 ./test.sh` or `CASES=S98 ./test.sh`.
 
 | ID | AC | Scenario | Type | Method | Expected | Cleanup |
 |----|----|----------|------|--------|----------|---------|
@@ -190,7 +190,7 @@ psql "$DB" -f database-init/migrations/002_email_marketing_schema_foundation.dow
 
 ## 9. SCRUM-98 — Tracking, Webhooks & Compliance (public endpoints)
 
-> Tokens are minted for **synthetic random** (tenant, campaign, profile) ids using `E2E_EMAIL_TRACKING_SECRET` (must match data-tracking-api), so these exercise the contract + security fixes with **zero database footprint**. Run: `E2E_TRACKING_BASE_URL=https://<host>/data CASES=S98 ./test.sh`.
+> Tokens are minted for **synthetic random** (tenant, campaign, profile) ids using `E2E_EMAIL_TRACKING_SECRET` (must match customer360-event-api), so these exercise the contract + security fixes with **zero database footprint**. Run: `E2E_TRACKING_BASE_URL=https://<host>/data CASES=S98 ./test.sh`.
 
 | ID | AC | Scenario | Type | Method | Expected |
 |----|----|----------|------|--------|----------|

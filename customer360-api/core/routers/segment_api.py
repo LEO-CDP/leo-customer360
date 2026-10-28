@@ -7,7 +7,6 @@ injection-safety validation applied before every execution).
 """
 
 import logging
-import re
 import uuid
 from collections.abc import Iterable
 from typing import Any, Optional
@@ -16,20 +15,32 @@ from fastapi import Depends, HTTPException, Query, Request
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from core.auth import require_tenant
 from core.cache import cache_response, invalidate_prefix
-from core.config import settings
-from core.crud.base import CRUDBase
-from core.crud.segmentation import DOMAIN_ATTRIBUTES_JOIN_SQL
+from leo_customer360_dao.config import settings
+from leo_customer360_dao.crud.base import CRUDBase
 from core.database import get_db
 from core.init_core_data import list_tenant_ids, seed_default_segments_with_breakdown
-from core.models.segmentation import CdpSegment
-from core.repositories.segment_respository import SegmentRepository
+from leo_customer360_dao.models.segmentation import CdpSegment
+from core.repositories.segment_draft_repository import (
+    SegmentDraftGenerationError,
+    SegmentDraftRepository,
+    SegmentDraftValidationError,
+)
+from core.repositories.segment_repository import SegmentRepository
 from core.routers._generic import build_crud_router, insert_before_item_routes
-from core.schemas.identity import MasterProfileRead
-from core.schemas.segmentation import SegmentCreate, SegmentRead, SegmentUpdate
+from leo_customer360_dao.schemas.identity import MasterProfileRead
+from leo_customer360_dao.schemas.segmentation import (
+    SegmentAudienceTagsRequest,
+    SegmentCreate,
+    SegmentDraftRequest,
+    SegmentDraftResult,
+    SegmentRead,
+    SegmentUpdate,
+)
 from core.utils.dagster_client import DagsterJobTriggerError, dagster_client
 from core.utils.domains import validate_domain_value
-from core.utils.sql_safety import validate_sql_where_fragment
+from leo_customer360_dao.utils.sql_safety import validate_sql_where_fragment
 
 logger = logging.getLogger(__name__)
 
@@ -40,16 +51,6 @@ _segment_crud = CRUDBase(CdpSegment)
 # LEFT JOINed to cdp_domain_profiles (via DOMAIN_ATTRIBUTES_JOIN_SQL, aliased as
 # "dp"), so the "field picker" endpoint below offers both plain cdp_master_profiles
 # columns and cdp_domain_profiles.domain_attributes JSONB keys (as dp.domain_attributes->>'key').
-_SEGMENTABLE_SOURCE_TABLES = ("cdp_master_profiles", "cdp_domain_profiles")
-
-_RELATIVE_INTERVAL_PATTERN = re.compile(
-    r"(?P<quote>['\"])(?P<sign>[+-])\s*(?P<amount>\d+)\s+"
-    r"(?P<unit>milliseconds?|seconds?|minutes?|hours?|days?|weeks?|months?|years?)"
-    r"(?P=quote)",
-    re.IGNORECASE,
-)
-
-
 def _normalize_relative_intervals(sql_rules: str) -> str:
     """Translate UI date offsets into PostgreSQL interval expressions.
 
@@ -58,70 +59,23 @@ def _normalize_relative_intervals(sql_rules: str) -> str:
     convert it before both execution and audit SQL generation.
     """
 
-    def replace(match: re.Match[str]) -> str:
-        sign = "+" if match.group("sign") == "+" else "-"
-        amount = match.group("amount")
-        unit = match.group("unit").lower()
-        return f"(now() {sign} INTERVAL '{amount} {unit}')"
-
-    return _RELATIVE_INTERVAL_PATTERN.sub(replace, sql_rules)
+    return SegmentRepository.normalize_relative_intervals(sql_rules)
 
 
 def _has_wrapping_parentheses(value: str) -> bool:
-    stripped = value.strip()
-    if not stripped.startswith("(") or not stripped.endswith(")"):
-        return False
-
-    depth = 0
-    quote: Optional[str] = None
-    index = 0
-    while index < len(stripped):
-        char = stripped[index]
-        if quote:
-            if char == quote:
-                if index + 1 < len(stripped) and stripped[index + 1] == quote:
-                    index += 2
-                    continue
-                quote = None
-        elif char in {"'", '"'}:
-            quote = char
-        elif char == "(":
-            depth += 1
-        elif char == ")":
-            depth -= 1
-            if depth == 0 and index != len(stripped) - 1:
-                return False
-        index += 1
-    return depth == 0 and quote is None
+    return SegmentRepository._has_wrapping_parentheses(value)
 
 
 def _final_generated_sql(sql_rules: str, tenant_id: uuid.UUID) -> str:
-    where_clause = sql_rules.strip() if _has_wrapping_parentheses(sql_rules) else f"({sql_rules.strip()})"
-    return (
-        f"SELECT master_profile_id FROM {settings.db_schema}.cdp_master_profiles "
-        f"WHERE tenant_id = '{tenant_id}'::uuid AND {where_clause}"
-    )
+    return SegmentRepository.final_generated_sql(sql_rules, tenant_id)
 
 
 def _transform_segment_create(_db: Session, payload: dict[str, Any]) -> dict[str, Any]:
-    sql_rules = payload.get("sql_rules")
-    if sql_rules:
-        normalized_rules = _normalize_relative_intervals(sql_rules)
-        payload["sql_rules"] = normalized_rules
-        payload["final_generated_sql"] = _final_generated_sql(normalized_rules, payload["tenant_id"])
-    return payload
+    return SegmentRepository.transform_create(payload)
 
 
 def _transform_segment_update(_db: Session, segment: CdpSegment, payload: dict[str, Any]) -> dict[str, Any]:
-    if "sql_rules" in payload:
-        sql_rules = payload["sql_rules"]
-        if sql_rules:
-            normalized_rules = _normalize_relative_intervals(sql_rules)
-            payload["sql_rules"] = normalized_rules
-            payload["final_generated_sql"] = _final_generated_sql(normalized_rules, segment.tenant_id)
-        else:
-            payload["final_generated_sql"] = None
-    return payload
+    return SegmentRepository.transform_update(segment, payload)
 
 
 def _trigger_segment_recompute(segment: CdpSegment, trigger_reason: str) -> None:
@@ -129,27 +83,7 @@ def _trigger_segment_recompute(segment: CdpSegment, trigger_reason: str) -> None
     segment row has been committed. A Dagster outage must not turn an already
     successful segment CRUD write into an HTTP failure; the scheduled job can
     reconcile the stale member_count later."""
-    try:
-        run_id = getattr(dagster_client.segmentation, trigger_reason)(
-            tenant_id=str(segment.tenant_id),
-            segment_id=str(segment.segment_id),
-        )
-    except DagsterJobTriggerError:
-        logger.warning(
-            "Could not submit segmentation_job for segment_id=%s (trigger_reason=%s); "
-            "member_count will be refreshed by a later recompute.",
-            segment.segment_id,
-            trigger_reason,
-        )
-        return
-
-    logger.info(
-        "Submitted segmentation_job for segment_id=%s (tenant_id=%s, trigger_reason=%s, run_id=%s)",
-        segment.segment_id,
-        segment.tenant_id,
-        trigger_reason,
-        run_id,
-    )
+    SegmentRepository.trigger_recompute(segment, trigger_reason)
 
 
 def _trigger_segment_recompute_after_create(segment: CdpSegment) -> None:
@@ -162,11 +96,25 @@ def _trigger_segment_recompute_after_update(segment: CdpSegment) -> None:
 
 def _segment_integrity_error_detail(exc: IntegrityError) -> Optional[str]:
     """Returns a client-safe conflict message for known segment constraints."""
-    original = getattr(exc, "orig", None)
-    diagnostic = getattr(original, "diag", None)
-    if getattr(diagnostic, "constraint_name", None) == "uq_cdp_segments_tenant_tag":
-        return "A segment with this tag already exists in this workspace."
-    return None
+    return SegmentRepository.integrity_error_detail(exc)
+
+def _validate_segment_create(db: Session, payload: dict[str, Any]) -> None:
+    validate_domain_value(db, payload.get("domain"), allow_all=True)
+    audience_tags = payload.get("audience_tags") or []
+    if audience_tags and db is not None and hasattr(db, "execute"):
+        from core.repositories.audience_tag_repository import AudienceTagRepository
+
+        AudienceTagRepository(db).validate_tag_names(audience_tags)
+
+
+def _validate_segment_update(db: Session, _obj: CdpSegment, payload: dict[str, Any]) -> None:
+    validate_domain_value(db, payload.get("domain"), allow_all=True)
+    audience_tags = payload.get("audience_tags") or []
+    if audience_tags and db is not None and hasattr(db, "execute"):
+        from core.repositories.audience_tag_repository import AudienceTagRepository
+
+        AudienceTagRepository(db).validate_tag_names(audience_tags)
+
 
 segments_router = build_crud_router(
     model=CdpSegment,
@@ -177,8 +125,9 @@ segments_router = build_crud_router(
     read_schema=SegmentRead,
     prefix="/segments",
     tags=["Segmentation"],
-    create_validator=lambda db, payload: validate_domain_value(db, payload.get("domain"), allow_all=True),
-    update_validator=lambda db, obj, payload: validate_domain_value(db, payload.get("domain"), allow_all=True),
+    crud_factory=lambda db: SegmentRepository(db).crud,
+    create_validator=_validate_segment_create,
+    update_validator=_validate_segment_update,
     create_transform=_transform_segment_create,
     update_transform=_transform_segment_update,
     integrity_error_detail=_segment_integrity_error_detail,
@@ -186,7 +135,7 @@ segments_router = build_crud_router(
     update_hook=_trigger_segment_recompute_after_update,
 )
 
-PLATFORM_ADMIN_ROLES = {"platform_admin", "super_admin", "system_admin"}
+PLATFORM_ADMIN_ROLES = {"platform_admin", "super_admin", "system_admin", "root"}
 TENANT_ADMIN_ROLES = PLATFORM_ADMIN_ROLES | {"tenant_admin", "admin"}
 
 
@@ -350,6 +299,32 @@ def count_segment_matched_profiles(segment_id: uuid.UUID, db: Session = Depends(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@segments_router.post("/{segment_id}/audience-tags", response_model=SegmentRead)
+def assign_segment_audience_tags(
+    segment_id: uuid.UUID,
+    payload: SegmentAudienceTagsRequest,
+    db: Session = Depends(get_db),
+):
+    """Assign standardized IAB ``audience_tags`` (from ``cdp_audience_tags.tag_name``)
+    to a segment and optionally recompute matching ``cdp_master_profiles.audience_tags``."""
+    repo = SegmentRepository(db)
+    _get_segment_or_404(repo, segment_id)
+    try:
+        updated = repo.assign_audience_tags(
+            segment_id,
+            payload.audience_tags,
+            recompute_profiles=payload.recompute_profiles,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    invalidate_prefix("cdp_segments")
+    invalidate_prefix("segments/matched_profiles")
+    invalidate_prefix("segments/matched_profiles_count")
+    invalidate_prefix("master_profiles")
+    return updated
+
+
 @segments_router.post("/{segment_id}/recompute")
 def recompute_segment(segment_id: uuid.UUID, request: Request, db: Session = Depends(get_db)):
     """Submits an asynchronous Dagster run for this tenant's one segment.
@@ -451,7 +426,7 @@ def recompute_all_segments(request: Request):
     1M+ rows in production, and scanning it once per active segment inside
     an HTTP request handler would block an API worker for the whole scan and
     risk request timeouts. Instead this submits a run of
-    ``backend-system/segmentation``'s ``segmentation_job``, scoped to the
+    ``customer360-backend/segmentation``'s ``segmentation_job``, scoped to the
     caller's tenant via run_config, to the Dagster webserver (see
     core/utils/dagster_client.py) -- Dagster's daemon/run worker executes it
     out-of-process, with its own retry policy, and the caller polls
@@ -533,10 +508,11 @@ def get_segmentable_profile_attributes(
     read-only endpoint that does not require authentication, since it only
     returns metadata about the system and not any sensitive data.
 
-    Only rows with ``is_segmentable = true``, ``status = 'ACTIVE'`` and
-    ``source_table IN ('cdp_master_profiles', 'cdp_domain_profiles')`` are
-    returned. ``cdp_master_profiles`` rows return their bare column name as
-    ``field``; ``cdp_domain_profiles`` rows (JSONB keys in
+    Only rows with ``is_segmentable = true`` and ``status = 'ACTIVE'`` are
+    returned. Rows whose catalog metadata identifies a direct
+    ``cdp_master_profiles`` column are included even when their lineage also
+    mentions ``cdp_raw_profiles_stage``. ``cdp_master_profiles`` rows return
+    their bare column name as ``field``; ``cdp_domain_profiles`` rows (JSONB keys in
     ``domain_attributes``, e.g. ``risk_segment``/``membership_tier``) return
     ``dp.domain_attributes->>'<key>'`` -- the alias exposed by
     ``DOMAIN_ATTRIBUTES_JOIN_SQL``, which every ``sql_rules`` execution site
@@ -564,6 +540,41 @@ def get_segmentable_profile_attributes(
 # Static sub-path added after build_crud_router(); must be reordered ahead of
 # the generic "/{item_id}" routes or it'd be shadowed by them (see
 # insert_before_item_routes docstring).
+insert_before_item_routes(segments_router)
+
+
+@segments_router.post("/from-description", response_model=SegmentDraftResult)
+def draft_segment_from_description(
+    payload: SegmentDraftRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Description -> validated ``json_rules`` for the form. Saves nothing; no server state.
+
+    200 for valid / needs_clarification / rejected; 422 bad request; 502 agent failure.
+    """
+    tenant_id = uuid.UUID(require_tenant(request))
+    try:
+        validate_domain_value(db, payload.domain, allow_all=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    try:
+        return SegmentDraftRepository(db).draft_from_description(
+            tenant_id,
+            payload.description,
+            payload.domain,
+            current_rules=payload.current_rules,
+            so_far=payload.so_far,
+            last_question=payload.last_question,
+        )
+    except SegmentDraftValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except SegmentDraftGenerationError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+# Also a static path: keep it ahead of the "/{item_id}" routes.
 insert_before_item_routes(segments_router)
 
 all_segment_routers = [segments_router]

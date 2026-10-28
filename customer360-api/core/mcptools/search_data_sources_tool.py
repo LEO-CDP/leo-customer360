@@ -13,7 +13,7 @@ from sqlalchemy import case, func, literal, or_, select
 
 from core.database import SessionLocal
 from core.mcptools.context import get_bound_tenant_id
-from core.models.system import SysDataSource
+from leo_customer360_dao.models.system import SysDataSource
 
 
 DEFAULT_MCP_SEARCH_LIMIT = 5

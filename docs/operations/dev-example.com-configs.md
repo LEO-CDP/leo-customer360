@@ -8,16 +8,17 @@
 ```
 
 The applications must be configured for the public prefixes before starting
-the services. For the `/c360/ai/ask` flow, the browser calls the frontend-admin
+the services. For the `/c360/ai/ask` flow, the browser calls the customer360-frontend
 proxy; `DOCS_SEARCH_URL` is the private local upstream and must not be set to
 the public `/c360/ai/ask` URL:
 
 - `customer360-api`: `root_path=/c360api`
+- `customer360-agent`: `AGENT_ROOT_PATH=/agent` when exposing its API through Nginx
 - Keycloak: `KC_HTTP_RELATIVE_PATH=/auth`
-- `ads-server`: `LEO_AD_ROOT_PATH=/ads`
-- `frontend-admin`: `FRONTEND_ROOT_PATH=/c360`, `FRONTEND_API_HOSTNAME=https://c360.example.com/c360api`, and `DOCS_SEARCH_URL=http://127.0.0.1:8001`
+- `customer360-promotions`: `c360_PROMOTION_ROOT_PATH=/ads`
+- `customer360-frontend`: `FRONTEND_ROOT_PATH=/c360`, `FRONTEND_API_HOSTNAME=https://c360.example.com/c360api`, and `DOCS_SEARCH_URL=http://127.0.0.1:8001`
 - `docs-vector-search`: start locally on `127.0.0.1:8001`; `dev-c360.sh` builds the image, refreshes the index, and starts it
-- `data-tracking-api`: no root path; nginx strips `/data`
+- `customer360-event-api`: no root path; nginx strips `/data`
 - Dagster: start the UI with `--path-prefix /dagster`
 - MinIO console: `MINIO_BROWSER_REDIRECT_URL=https://s3dev.example.com/minio/`
 
@@ -27,6 +28,9 @@ are:
 ```dotenv
 FRONTEND_ROOT_PATH=/c360
 FRONTEND_API_HOSTNAME=https://c360.example.com/c360api
+AGENT_SERVICE_URL=http://127.0.0.1:8009
+AGENT_ROOT_PATH=/agent
+C360_AGENT_PORT=8009
 DOCS_SEARCH_HOST_PORT=8001
 DOCS_SEARCH_URL=http://127.0.0.1:8001
 DOCS_SEARCH_TIMEOUT=120
@@ -51,19 +55,20 @@ The browser-facing AI endpoint is then:
 https://c360.example.com/c360/ai/ask
 ```
 
-Nginx routes that request to `frontend-admin`; `frontend-admin` forwards the
+Nginx routes that request to `customer360-frontend`; `customer360-frontend` forwards the
 request to `http://127.0.0.1:8001/ask`.
 
 With this configuration, the public endpoints are:
 
 | Service | Public URL | Local upstream |
 | --- | --- | --- |
-| frontend-admin (UI) | `https://c360.example.com/c360/` | `127.0.0.1:8890` |
-| frontend-admin AI proxy | `https://c360.example.com/c360/ai/ask` | `127.0.0.1:8890` -> `127.0.0.1:8001/ask` |
+| customer360-frontend (UI) | `https://c360.example.com/c360/` | `127.0.0.1:8890` |
+| customer360-frontend AI proxy | `https://c360.example.com/c360/ai/ask` | `127.0.0.1:8890` -> `127.0.0.1:8001/ask` |
 | customer360-api | `https://c360.example.com/c360api/api/v1` | `127.0.0.1:8008` |
+| customer360-agent | `https://c360.example.com/agent` | `127.0.0.1:8009` |
 | Keycloak | `https://c360.example.com/auth` | `127.0.0.1:8080` |
-| ads-server and docs | `https://c360.example.com/ads` and `/ads/docs` | `127.0.0.1:9009` |
-| data-tracking-api | POST `https://c360.example.com/data/api/v1/tracking/logs`; health `https://c360.example.com/data/health` | `127.0.0.1:8010` |
+| customer360-promotions and docs | `https://c360.example.com/ads` and `/ads/docs` | `127.0.0.1:9009` |
+| customer360-event-api | POST `https://c360.example.com/data/api/v1/tracking/logs`; health `https://c360.example.com/data/health` | `127.0.0.1:8010` |
 | Dagster UI | `https://c360.example.com/dagster` | `127.0.0.1:3000` |
 | MinIO S3 API | `https://s3dev.example.com` | `127.0.0.1:9000` |
 | MinIO console | `https://s3dev.example.com/minio` | `127.0.0.1:9001` |
@@ -81,7 +86,7 @@ MinIO itself uses `http://minio:9000` internally for console authentication;
 `S3_ENDPOINT_URL=https://s3dev.example.com` remains the public endpoint for
 host-side clients and the tracking/analytics services.
 
-The cross-origin web SDK iframe is served by `data-tracking-api`, not the admin
+The cross-origin web SDK iframe is served by `customer360-event-api`, not the admin
 frontend. Because the embedding page is `https://example.com` and the iframe
 origin is `https://c360.example.com`, do not use `X-Frame-Options: SAMEORIGIN`;
 use the iframe route's `frame-ancestors` policy below instead.
@@ -100,12 +105,17 @@ upstream c360_core_api {
   server 127.0.0.1:8008;
 }
 
+# customer360-agent
+upstream c360_agent {
+  server 127.0.0.1:8009;
+}
+
 # Keycloak
 upstream c360_keycloak {
   server 127.0.0.1:8080;
 }
 
-# ads-server
+# customer360-promotions
 upstream c360_ads {
   server 127.0.0.1:9009;
 }
@@ -133,7 +143,7 @@ upstream c360_minio_console {
 server {
   server_name c360.example.com;
 
-  # frontend-admin uses /c360 as its public root path. Keep the AI routes
+  # customer360-frontend uses /c360 as its public root path. Keep the AI routes
   # prefixed because FastAPI registers /c360/ai/* when FRONTEND_ROOT_PATH=/c360.
   location = /c360 {
     return 308 /c360/;
@@ -178,6 +188,20 @@ server {
     proxy_read_timeout 600s;
   }
 
+  # customer360-agent: preserve /agent because AGENT_ROOT_PATH=/agent.
+  location = /agent {
+    return 308 /agent/;
+  }
+
+  location ^~ /agent/ {
+    proxy_pass http://c360_agent;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Port $server_port;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_read_timeout 120s;
+  }
+
   # Keycloak: preserve /auth because KC_HTTP_RELATIVE_PATH is /auth.
   location = /auth {
     proxy_pass http://c360_keycloak;
@@ -197,7 +221,7 @@ server {
     proxy_read_timeout 600s;
   }
 
-  # ads-server: preserve /ads for LEO_AD_ROOT_PATH=/ads.
+  # customer360-promotions: preserve /ads for c360_PROMOTION_ROOT_PATH=/ads.
   location = /ads {
     proxy_pass http://c360_ads;
     proxy_set_header Host $host;
@@ -216,7 +240,7 @@ server {
     proxy_read_timeout 600s;
   }
 
-  # data-tracking-api: strip /data so /data/health reaches /health.
+  # customer360-event-api: strip /data so /data/health reaches /health.
   location = /data {
     return 308 /data/;
   }
@@ -230,7 +254,7 @@ server {
     proxy_read_timeout 600s;
   }
 
-  # c360 web SDK iframe endpoint is served by data-tracking-api at
+  # c360 web SDK iframe endpoint is served by customer360-event-api at
   # /cdp-sdk/html/cdp-event-proxy.html. Public URL can be prefixed with /data
   # (for example /data/cdp-sdk/html/cdp-event-proxy.html) because this block
   # strips /data before forwarding to the upstream service.

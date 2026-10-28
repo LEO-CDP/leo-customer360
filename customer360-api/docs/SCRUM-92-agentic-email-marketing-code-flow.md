@@ -84,7 +84,7 @@ flowchart TB
     R4["crm_api.py<br/>campaign CRUD + analytics"]
     DCL["utils/dagster_client.py<br/>GraphQL client"]
   end
-  subgraph BE["backend-system · Dagster"]
+  subgraph BE["customer360-backend · Dagster"]
     J1["campaign_activation_job"]
     J2["email_engine_job"]
     J3["segmentation_job + poll sensor"]
@@ -119,9 +119,9 @@ Key facts:
   token**, not a header.
 - **Cross-service hand-off is not one job graph.** `campaign_activation` submits a *separate*
   `email_engine_job` run via the Dagster webserver GraphQL API
-  (`backend-system/campaign_activation/campaign_activation/triggers.py:29`).
-- **Provider config** resolves Redis cache → DB (`crm_email_provider_config`) → `SMTP_*` env → mock,
-  with write-through cache invalidation from the API. Both services must share one Redis.
+  (`customer360-backend/campaign_activation/campaign_activation/triggers.py:29`).
+- **Connector config** resolves DB (`crm_connector_config`, `connector_type='EMAIL'`) → `SMTP_*` env
+  → mock. The outbound activation connector model is separate from inbound `sys_data_source`.
 
 ---
 
@@ -139,7 +139,7 @@ sequenceDiagram
   participant CA as "campaign_activation/activation.py"
   participant TR as "campaign_activation/triggers.py"
   participant EE as "email_engine/send.py"
-  participant PC as "email_engine/provider_config.py"
+  participant PC as "email_engine/connector_config.py"
   participant AD as "email_engine/adapters.py"
   participant PG as "PostgreSQL (RLS)"
   actor User as "Recipient"
@@ -156,13 +156,13 @@ sequenceDiagram
   TR-->>EE: GraphQL submit email_engine_job
   EE->>PG: pg_try_advisory_lock(1, hashtext(campaign_id))
   EE->>PC: load_email_config(tenant_id)
-  PC->>PG: active crm_email_provider_config (on Redis miss)
+  PC->>PG: active crm_connector_config EMAIL row
   EE->>AD: build_adapter(config) → smtp | mock
   EE->>PG: re-validate campaign/template/segment (defense in depth)
   EE->>PG: iter_recipients(...) keyset batches
   loop per recipient (SAVEPOINT)
     EE->>PG: _current_status → skip if Sent/Suppressed
-    EE->>PG: _suppressed_emails
+    EE->>PG: _suppressed_recipients (email + profile suppression)
     EE->>EE: _render_for_recipient (encode_tracking_token · sign click links · pixel)
     EE->>AD: adapter.send(...)
     EE->>PG: _upsert_dispatch → cdp_campaign_dispatch_logs (ON CONFLICT terminal-guard)
@@ -176,23 +176,23 @@ sequenceDiagram
   TK->>TK: verify_click_url(url,k) — else 302 to /
   TK->>CR: record_engagement_event(...)
   Note over TK: POST /track/email/webhook — 503 if secret unset, 401 if bad HMAC
-  TK->>CR: resolve_recipient_email → add_suppression (hard bounce / complaint)
-  CR->>PG: INSERT cdp_email_suppression (ON CONFLICT DO NOTHING)
+  TK->>CR: record provider event + suppression reason in S3/MinIO
+  CR-->>PG: Activation reads crm_suppression_list before dispatch
 ```
 
-**Send-engine internals** (`backend-system/email_engine/email_engine/send.py`) — the per-recipient
+**Send-engine internals** (`customer360-backend/email_engine/email_engine/send.py`) — the per-recipient
 call graph and where each branch lands in the ledger:
 
 ```mermaid
 flowchart TD
   A["send_campaign() · send.py:255"] --> B["pg_try_advisory_lock(1, campaign)"]
-  A --> C["load_email_config() · provider_config.py:97"]
+  A --> C["load_email_config() · connector_config.py"]
   C --> D["build_adapter() · adapters.py:115"]
   A --> E["load_campaign / load_template / load_segment_tag — re-validate"]
   A --> F["iter_recipients() · send.py:107 — keyset batches"]
   F --> G["_process_batch() · send.py:347"]
   G --> H["_current_status() — terminal guard"]
-  G --> I["_suppressed_emails()"]
+  G --> I["_suppressed_recipients()"]
   G --> J{"eligible?"}
   J -->|"suppressed"| K["status = Suppressed"]
   J -->|"no email / opted-out"| L["status = Skipped"]
@@ -206,7 +206,7 @@ flowchart TD
   O --> P[("cdp_campaign_dispatch_logs<br/>ON CONFLICT(campaign_id, master_profile_id)<br/>WHERE status NOT IN (Sent, Suppressed)")]
 ```
 
-**Sync-engine internals** (`customer360-api/core/crud/crm_sync.py`) — the routing + idempotent upsert
+**Sync-engine internals** (`customer360-dao/src/leo_customer360_dao/crud/crm_sync.py`) — the routing + idempotent upsert
 graph for Stage 1 (SCRUM-94):
 
 ```mermaid
@@ -241,9 +241,9 @@ flowchart TD
 `customer360-api/core/routers/crm_sync_api.py:42` `sync_segment_crm` (tenant-admin gated;
 `GET /admin/crm/sync-runs[/{id}]` for audit).
 
-**Engine:** `customer360-api/core/crud/crm_sync.py` `sync_segment_to_crm`:
-1. Validate `sql_rules` (`core/utils/sql_safety.validate_sql_where_fragment`).
-2. `recompute_segment_membership(db, segment)` (reused from `core/crud/segmentation.py`) — unless `dry_run`.
+**Engine:** `customer360-dao/src/leo_customer360_dao/crud/crm_sync.py` `sync_segment_to_crm`:
+1. Validate `sql_rules` (`leo_customer360_dao.utils.sql_safety.validate_sql_where_fragment`).
+2. `recompute_segment_membership(db, segment)` (reused from `leo_customer360_dao/crud/segmentation.py`) — unless `dry_run`.
 3. `_iter_segment_members(...)` — keyset-paginated read of `cdp_master_profiles` (tenant-scoped, `status_code=1`).
 4. `classify_route(lifecycle_stage)` → route + upsert, each member inside a `SAVEPOINT`:
    - **customer** → `_upsert_customer_contact` (`crm_customer_contacts`) + `_upsert_transactions` (`crm_transactions`, facts never fabricated).
@@ -254,28 +254,28 @@ flowchart TD
 
 ### Stage 2 — AI email template draft — 📐 (SCRUM-95, design only)
 
-**Exists:** `crm_email_templates` table + `EmailTemplate` model (`core/models/crm.py:250`) and
-`EmailTemplate{Base,Create,Update,Read}` schemas (`core/schemas/crm.py:321`), `status` default `Draft`.
+**Exists:** `crm_message_templates` table + `MessageTemplate` model (`core/models/crm.py`) and
+`MessageTemplate{Base,Create,Update,Read}` schemas (`core/schemas/crm.py`), `status` default `Draft`.
 
 **Not built:** no generation endpoint, **no template CRUD/review router** (the generic router factory in
-`crm_api.py` deliberately does *not* build one for `EmailTemplate`), no Gemini/OpenAI integration, no
+`crm_api.py` deliberately does *not* build one for `MessageTemplate`), no Gemini/OpenAI integration, no
 prompt code. `core/config.py` has no LLM settings. Intended contract:
 `docs/action-plans/AGENTIC-EMAIL-MARKETING-FLOW.md:172-212`.
 
 **Reference provider-switch code to model the build on** (not wired to this feature):
-`all-data-simulator/adjust_faker.py`, `all-data-simulator/web_user_simulator.py`,
-`backend-system/identity_resolution/identity_resolution/persona_engine.py:874-911`.
+`customer360-seeding/adjust_faker.py`, `customer360-seeding/web_user_simulator.py`,
+`customer360-dao/src/leo_customer360_dao/agentic_engines/persona_engine.py:874-911`.
 
 ### Stage 3 — AI campaign draft — 🟡 (SCRUM-96)
 
 **Exists (data + human gate):**
-- `crm_campaign` columns `segment_id`, `template_id`, `approval_status`, `approved_by/at`,
+- `crm_campaign` columns `segment_id`, pinned workflow fields, `approval_status`, `approved_by/at`,
   `strategy_summary`, `ai_plan` (JSONB) — `core/models/crm.py:23`.
 - `crm_campaign_content_items` (content plan; `UNIQUE(campaign_id, content_item_id)`) — `core/models/crm.py:271`.
 - Campaign CRUD via `build_crud_router` and analytics sub-router — `core/routers/crm_api.py`.
 
 **Not built:** the AI planning endpoint (`…campaigns:plan`) and a real state-machine. Today
-`approval_status` is only **regex-validated** (`APPROVAL_STATUS_PATTERN`, `core/schemas/crm.py:18`);
+`approval_status` is only **regex-validated** (`APPROVAL_STATUS_PATTERN`, `leo_customer360_dao/schemas/crm.py`);
 the single enforced transition is the **activation gate** in Stage 5. Spec:
 `AGENTIC-EMAIL-MARKETING-FLOW.md:214-255`, `AGENTIC-MARKETING.md`.
 
@@ -288,24 +288,23 @@ is enforced at activation, below.
 
 **API entry:** `POST /api/v1/admin/campaigns/{campaign_id}/activate` →
 `core/routers/campaign_activation_api.py:44` `activate_campaign` — tenant-admin gated; re-checks
-`approval_status == "Approved"` **and** `template_id`+`segment_id` present (else `409`); submits a
+`approval_status == "Approved"` **and** pinned `workflow_id`/`workflow_version` + `segment_id` present (else `409`); submits a
 Dagster run via `core/utils/dagster_client.py:445` `CampaignActivationDagsterService.activate`
 (`503` if Dagster unreachable). Returns `run_id`.
 
 **Job:** `campaign_activation_job` → `activate_campaign_op`
-(`backend-system/campaign_activation/dagster_defs.py:52`, `RetryPolicy(max_retries=2, delay=10)`) →
+(`customer360-backend/campaign_activation/dagster_defs.py:52`, `RetryPolicy(max_retries=2, delay=10)`) →
 `campaign_activation/activation.py:71` `activate_campaign`:
 1. `set_tenant_context` (RLS) → `_load_campaign` (`crm_campaign`).
-2. Gate: `approval_status == 'Approved'` + template/segment present (else `CampaignActivationError`).
-3. `_template_status` must be `Approved` (`crm_email_templates`).
-4. Validate `cdp_segments` row + `segment_tag`; `_segment_snapshot_count` (freeze audience size).
+2. Gate: campaign approval + approved pinned workflow + segment present (else `CampaignActivationError`).
+3. Validate `cdp_segments` row + `segment_tag`.
 5. `UPDATE crm_campaign SET status='Running'` + commit.
-6. `triggers.trigger_email_engine_job(...)` → GraphQL `submit_job_execution("email_engine_job", location="email_engine", …)` (`triggers.py:29`).
+6. `triggers.trigger_campaign_workflow_job(...)` → GraphQL `submit_job_execution("campaign_workflow_job", location="campaign_activation", …)`.
 
-### Stage 6 — Dagster: render & dispatch — ✅ (SCRUM-97)
+### Stage 6 — Dagster: execute the persisted workflow — ✅ (SCRUM-97)
 
 **Job:** `email_engine_job` → `send_campaign_op`
-(`backend-system/email_engine/dagster_defs.py:53`, `RetryPolicy(max_retries=2, delay=15)`,
+(`customer360-backend/email_engine/dagster_defs.py:53`, `RetryPolicy(max_retries=2, delay=15)`,
 passes `run_id`) → `email_engine/send.py:255` `send_campaign`:
 1. **Per-campaign advisory lock** `pg_try_advisory_lock(1, hashtext(campaign_id))` — a concurrent/retry
    run that can't acquire it exits `skipped_locked` (no double-send). Released in `finally`.
@@ -335,7 +334,7 @@ passes `run_id`) → `email_engine/send.py:255` `send_campaign`:
 |---|---|---|
 | `GET /track/email/open` | `track_open` (58) | records `email-opened`; always returns 1×1 GIF even on bad token |
 | `GET /track/email/click` | `track_click` (69) | 302 **only** if `verify_click_url(url,k)` passes & http/https (anti open-redirect), else 302→`/` |
-| `GET /track/email/unsubscribe` | `unsubscribe` (87) | records `email-unsubscribed` + `add_suppression("unsubscribe")` |
+| `GET /track/email/unsubscribe` | `unsubscribe` (87) | records `email-unsubscribed` with suppression reason `unsubscribe` |
 | `POST /track/email/webhook` | `email_webhook` (107) | HMAC-verified provider callback; dedup; suppress on hard bounce/complaint |
 
 **Token & auth** — `core/utils/email_tracking.py`: `decode_tracking_token` (87, constant-time compare),
@@ -344,29 +343,30 @@ passes `run_id`) → `email_engine/send.py:255` `send_campaign`:
 unset, `401` on bad signature.
 
 **Write side** — email tracking normalizes engagement events through the
-`data-tracking-api` Redis/S3 contract. The public tracking service does not
+`customer360-event-api` Redis/S3 contract. The public tracking service does not
 open a PostgreSQL connection or insert behavioral-event rows. Deduplication is
 represented by the canonical event ID/dedup key and immutable S3 state.
-- `resolve_recipient_email` (62): reads the address from `cdp_campaign_dispatch_logs` (falls back to
-  profile email) — suppression is keyed on the **real mailed address**, never the untrusted payload.
-- `add_suppression` (141): `INSERT … cdp_email_suppression … ON CONFLICT (tenant_id, lower(email)) DO NOTHING`.
+- Email tracking carries the provider event and suppression reason into the S3/MinIO event envelope.
+- Activation reads the canonical mailed address from the profile and checks `crm_suppression_list`
+  by tenant, `channel='EMAIL'`, `identifier_type='EMAIL'`, active status, expiry, and campaign scope.
 
-> The `data-tracking-api/` service owns both generic web behaviour and normalized
+> The `customer360-event-api/` service owns both generic web behaviour and normalized
 > email engagement ingestion (Redis Streams → S3/MinIO).
 
 ### Stage 8 — Feedback into Customer 360 — 🟡 (SCRUM-99, capture only)
 
 **Landed:** email events are captured in the S3/MinIO event lake and compliance
-suppression remains in `cdp_email_suppression` (Stage 7). A change-gated segmentation sensor exists
-(`backend-system/segmentation/dagster_defs.py:136` `segmentation_poll_sensor`, watches
+suppression is modeled in `crm_suppression_list` (Stage 7). A change-gated segmentation sensor exists
+(`customer360-backend/segmentation/dagster_defs.py:136` `segmentation_poll_sensor`, watches
 `cdp_master_profiles` via `count_recently_changed_master_profiles`). Campaign performance is exposed
 read-only through `vw_campaign_performance_metrics` + `CampaignRepository`
 (`core/repositories/campaign_repository.py`).
 
 **Not built (the three headline SCRUM-99 behaviours):**
 1. Writing email touchpoints/engagement back to `cdp_master_profiles` — nothing propagates
-  S3 Silver event projections → profile fields. The `scoring` Dagster location that would bridge this is still a
-   sleep placeholder (`backend-system/scoring/dagster_defs.py`).
+  S3 Silver event projections → profile fields. The `ai_agents_runners` Dagster
+   location provides the tenant-scoped workflow orchestration hook
+   (`customer360-backend/ai_agents_runners/dagster_defs.py`).
 2. Email-event-driven segment refresh — the sensor watches profiles, and email events don't touch
    profiles, so opens/clicks don't trip it.
 3. Email-metric rollup into campaign performance — `crm_campaign_performance_daily` has **ad-metric
@@ -374,56 +374,53 @@ read-only through `vw_campaign_performance_metrics` + `CampaignRepository`
 
 ---
 
-## 4. Provider config & dispatch adapter — ✅ (SCRUM-97)
+## 4. Connector config & dispatch adapter — ✅ (SCRUM-97)
 
-- **Resolution order** — `backend-system/email_engine/email_engine/provider_config.py:97`
-  `load_email_config`: Redis (`email_provider_config:{tenant}`, TTL 300s) → active
-  `crm_email_provider_config` row → `SMTP_*` env → mock default. All Redis ops fail-open.
-- **Write side + cache invalidation** — `customer360-api/core/crud/email_provider.py`:
-  `get_active_config`, `upsert_config` (keeps one active row per tenant), `invalidate_config_cache`
-  (deletes the same Redis key on every write). Exposed at
+- **Resolution order** — `customer360-backend/email_engine/email_engine/connector_config.py`
+  `load_email_config`: active outbound `crm_connector_config` EMAIL row → `SMTP_*` env → mock default.
+- **Write side** — `customer360-api/core/crud/email_provider.py`:
+  `get_active_config`, `upsert_config` (keeps one active EMAIL connector per tenant). Exposed at
   `GET/PUT /api/v1/admin/email-provider-config` (`campaign_activation_api.py`); `smtp_password` is
   write-only (never returned).
 - **Adapter selection** — `email_engine/adapters.py:115` `build_adapter`: `provider=='smtp'` →
   `SMTPDispatchAdapter` (real `smtplib`); anything else → `MockDispatchAdapter` (unknown provider logs
-  a warning and falls back to mock — a typo never triggers a real send). **SES is not implemented**
-  (documented future stub; DB CHECK allows only `('mock','smtp')`).
+  a warning and falls back to mock — a typo never triggers a real send). Additional connector providers
+  are represented in the generic table and can be implemented by adding adapters.
 
 ---
 
 ## 5. Data model (SCRUM-93) — ✅
 
-Fresh-cluster DDL: `database-init/database-schema.sql:2914-3218`. Incremental migrations (applied by
+Fresh-cluster DDL: `customer360-database/database-schema.sql:2914-3218`. Incremental migrations (applied by
 `deployments/postgres/run-sql.sh`, which runs forward `*.sql` in name order and **excludes**
 `*.down.sql`):
 
 | Table | Migration (fwd / down) | Change | Idempotency / key constraint | RLS |
 |-------|------------------------|--------|------------------------------|-----|
-| `crm_email_templates` | `002` | **new** | `chk_…_status ∈ {Draft,InReview,Approved,Rejected}` | ✔ |
-| `crm_campaign` (+cols) | `002` | **alter**: `segment_id`, `template_id`, `approval_status`, `approved_by/at`, `strategy_summary`, `ai_plan` | FKs → `cdp_segments`, `crm_email_templates` | (base) |
+| `crm_message_templates` | `003` | **renamed/generalized** | message type, persona, context, variables, and approval status | ✔ |
+| `crm_campaign` (+cols) | `002` + `015` | **alter**: `segment_id`, workflow pin, approval fields, strategy/AI fields; direct template link removed | FK → `cdp_segments` | (base) |
 | `crm_campaign_content_items` | `002` | **new** | `UNIQUE(campaign_id, content_item_id)` | ✔ |
 | `crm_segment_sync_runs` | `002` | **new** (audit) | status check; `segment_id` FK CASCADE | ✔ |
 | `crm_lead.lead_source_id` | `002` | **alter**: FK col | FK → `crm_lead_source` ON DELETE SET NULL | (base) |
 | `cdp_campaign_dispatch_logs` | `003` | **new** (send ledger) | **`UNIQUE(campaign_id, master_profile_id)`** | ✔ |
-| `crm_email_provider_config` | `003` | **new** | `UNIQUE(tenant_id,name)` + partial-unique one-active-per-tenant | ✔ |
-| `cdp_email_suppression` | `004` | **new** | **`UNIQUE(tenant_id, lower(email))`** | ✔ |
+| `crm_connector_config` | `002_crm_connector_config` | **new/migrated** | `UNIQUE(tenant_id,name)` + partial-unique default-per-channel | ✔ |
+| `crm_suppression_list` | `003_crm_suppression_list` | **new/migrated** | Active global/campaign uniqueness by channel and identifier | ✔ |
 | `cdp_event_catalog` (seed) | `004` | **data**: `email-delivered/…/-unsubscribed` | `ON CONFLICT (event_name) DO NOTHING` | n/a |
 
-SQLAlchemy models: `customer360-api/core/models/crm.py` (`Campaign:23`, `EmailTemplate:250`,
-`CampaignContentItem:271`, `SegmentSyncRun:290`, `CampaignDispatchLog:315`, `EmailProviderConfig:349`).
+SQLAlchemy models: `customer360-dao/src/leo_customer360_dao/models/crm.py` (`Campaign`,
+`MessageTemplate`, `CampaignContentItem`, `SegmentSyncRun`, `CampaignDispatchLog`, `ConnectorConfig`).
 Pydantic schemas: `customer360-api/core/schemas/crm.py` (`APPROVAL_STATUS_PATTERN:18`).
 
 ```mermaid
 erDiagram
   cdp_segments ||--o{ crm_campaign : "segment_id"
-  crm_email_templates ||--o{ crm_campaign : "template_id"
   crm_campaign ||--o{ crm_campaign_content_items : "campaign_id"
   cdp_content_items ||--o{ crm_campaign_content_items : "content_item_id"
   crm_campaign ||--o{ cdp_campaign_dispatch_logs : "campaign_id"
   cdp_master_profiles ||--o{ cdp_campaign_dispatch_logs : "master_profile_id"
   crm_lead_source ||--o{ crm_lead : "lead_source_id"
   cdp_segments ||--o{ crm_segment_sync_runs : "segment_id"
-  crm_campaign ||--o{ cdp_email_suppression : "campaign_id"
+  crm_campaign ||--o{ crm_suppression_list : "campaign_id"
 ```
 
 ---
@@ -462,7 +459,7 @@ Template: `.env.example` (§ around `EMAIL_*` / `CRM_EMAIL_*`).
 Harness: `conftest.py` (env config, `--case` selection mapped to `TEST_PLAN.md`, GitHub summary,
 LIFO cleanup, token/URL signing re-implemented to avoid importing app code), `test.sh` (mints
 Keycloak token), `README.md`, `TEST_PLAN.md` (AC → case traceability). Simulator pattern mirrored from
-`all-data-simulator/run_tracking_analytics_e2e.sh`.
+`customer360-seeding/run_tracking_analytics_e2e.sh`.
 
 **CI/CD gate:**
 - `.github/workflows/ci.yml` → `e2e` job: `needs [changes, test]`, runs only when `customer360-api`
@@ -481,7 +478,7 @@ Keycloak token), `README.md`, `TEST_PLAN.md` (AC → case traceability). Simulat
 | SCRUM-95 | AI template generation (Gemini/OpenAI) + template CRUD + approve/reject/edit APIs | `customer360-api/core` (new `ai/` + template router); model on the reference provider-switch code |
 | SCRUM-96 | AI campaign planning endpoint + real Draft→InReview→Approved/Rejected→Scheduled/Running state machine | `customer360-api/core` (planning service + transition validator) |
 | SCRUM-97 | (optional) SES adapter | `email_engine/adapters.py` (one subclass + branch); DB CHECK allows `mock/smtp` only today |
-| SCRUM-99 | profile touchpoint/engagement writeback; email-driven segment refresh; email-metric rollup into `crm_campaign_performance_daily` | `backend-system/scoring` (currently placeholder) + new perf columns/aggregation |
+| SCRUM-99 | profile touchpoint/engagement writeback; email-driven segment refresh; email-metric rollup into `crm_campaign_performance_daily` | `customer360-backend/ai_agents_runners` + new perf columns/aggregation |
 
 ---
 
@@ -489,26 +486,26 @@ Keycloak token), `README.md`, `TEST_PLAN.md` (AC → case traceability). Simulat
 
 **customer360-api**
 - `core/routers/crm_sync_api.py` — segment→CRM sync + audit endpoints
-- `core/crud/crm_sync.py` — the sync engine (routing, deterministic upserts, audit)
+- `customer360-dao/src/leo_customer360_dao/crud/crm_sync.py` — the sync engine (routing, deterministic upserts, audit)
 - `core/routers/campaign_activation_api.py` — approval gate + activation + dispatch-logs + provider-config
-- `core/crud/email_provider.py` — provider-config write side + Redis invalidation
+- `customer360-dao/src/leo_customer360_dao/crud/email_provider.py` — provider-config write side + Redis invalidation
 - `core/routers/email_tracking_api.py` — public open/click/unsubscribe/webhook
 - `core/crud/email_tracking.py` — event capture (dedup) + suppression
 - `core/utils/email_tracking.py` — token sign/verify, webhook verify, event maps
 - `core/utils/dagster_client.py` — GraphQL clients for the Dagster jobs
 - `core/routers/crm_api.py` / `core/repositories/campaign_repository.py` — campaign CRUD + analytics
-- `core/models/crm.py`, `core/schemas/crm.py` — ORM + Pydantic
+- `customer360-dao/src/leo_customer360_dao/models/crm.py`, `customer360-dao/src/leo_customer360_dao/schemas/crm.py` — ORM + Pydantic
 - `core/apps/http_api_app.py` — `PUBLIC_PATHS` allowlist
 - `tests/e2e/*` — E2E suite + plan
 
-**backend-system**
+**customer360-backend**
 - `campaign_activation/dagster_defs.py`, `campaign_activation/{activation,triggers,rls,db}.py`
-- `email_engine/dagster_defs.py`, `email_engine/{send,adapters,rendering,provider_config,tracking,rls,db}.py`
+- `email_engine/dagster_defs.py`, `email_engine/{send,adapters,rendering,connector_config,provider_config,tracking,rls,db}.py`
 - `segmentation/dagster_defs.py` + `segmentation/recompute.py` — recompute + poll sensor
-- `scoring/dagster_defs.py` — placeholder (engagement writeback gap)
+- `ai_agents_runners/dagster_defs.py` — tenant-scoped API/cron workflow orchestration
 - `workspace.yaml` — Dagster code-location registration
 
-**database-init**
+**customer360-database**
 - `database-schema.sql` (2914-3218), `migrations/002_…`, `003_…`, `004_…` (+ `.down.sql`)
 - `deployments/postgres/run-sql.sh` — migration runner
 

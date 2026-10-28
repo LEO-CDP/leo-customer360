@@ -25,7 +25,7 @@ Runs on **`push`** to any branch and on **`pull_request`** targeting
 
 `dorny/paths-filter`](https://github.com/dorny/paths-filter) compares the diff
 against a filter per service and emits a **JSON array of the changed services**
-(e.g. `["ads-server","frontend-admin"]`). Branch and PR matrices use that
+(e.g. `["customer360-promotions","customer360-frontend"]`). Branch and PR matrices use that
 array; `main` and release tags expand it to all publishable services.
 
 ### 3. `test` — one job per selected service
@@ -58,10 +58,10 @@ renders **one aggregated table** into the run summary, and sends the Brevo email
 
 | Service          | Build context       | Port | Test runner(s)                                          | Image on GHCR                                      |
 | ---------------- | ------------------- | ---- | ------------------------------------------------------- | -------------------------------------------------- |
-| `ads-server`     | `./ads-server`      | 9009 | `run_unit_tests.sh`                                     | `ghcr.io/leo-cdp/leo-customer360/ads-server`       |
-| `backend-system` | `./backend-system`  | 3000 | `identity_resolution/run_tests.sh` + `segmentation/run_tests.sh` | `ghcr.io/leo-cdp/leo-customer360/customer360-dagster` |
+| `customer360-promotions`     | `./customer360-promotions`      | 9009 | `run_unit_tests.sh`                                     | `ghcr.io/leo-cdp/leo-customer360/customer360-promotions`       |
+| `customer360-backend` | `./customer360-backend`  | 3000 | `identity_resolution/run_tests.sh` + `segmentation/run_tests.sh` | `ghcr.io/leo-cdp/leo-customer360/customer360-dagster` |
 | `customer360-api`| `./customer360-api` | 8008 | `run_unit_tests.sh`                                     | `ghcr.io/leo-cdp/leo-customer360/customer360-api`  |
-| `frontend-admin` | `./frontend-admin`  | 8890 | *(none — reported as skip)*                             | `ghcr.io/leo-cdp/leo-customer360/frontend-admin`   |
+| `customer360-frontend` | `./customer360-frontend`  | 8890 | *(none — reported as skip)*                             | `ghcr.io/leo-cdp/leo-customer360/customer360-frontend`   |
 | `docs-vector-search` | `./tools/docs-vector-search` | 8001 | `run_unit_tests.sh` (py_compile)             | `ghcr.io/leo-cdp/leo-customer360/docs-vector-search` |
 
 > **`docs-vector-search`** is the only service whose source lives under `tools/`, so its
@@ -104,9 +104,9 @@ The full local run of every suite still lives in [`../run_all_tests.sh`](../run_
   arm in the `test` job's runner map; both matrices pick it up automatically.
 - **Test/build gating is all-or-nothing across the matrix:** if any service's
   tests fail, the whole `test` job is red and `build-and-push` is skipped.
-- All backend-system code locations, including `identity_resolution`, are
-  packaged in the single `backend-system` Dagster image. A change anywhere
-  under `backend-system/` rebuilds that image.
+- All customer360-backend code locations, including `identity_resolution`, are
+  packaged in the single `customer360-backend` Dagster image. A change anywhere
+  under `customer360-backend/` rebuilds that image.
 
 ---
 

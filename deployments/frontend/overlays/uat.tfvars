@@ -1,4 +1,4 @@
-# UAT overlay — frontend-admin runs as a Docker container on the API box.
+# UAT overlay — customer360-frontend runs as a Docker container on the API box.
 # Read by deploy-frontend.sh (grep); no Terraform. No secrets here.
 
 frontend_server_key = "api"    # SHARE c360-api-uat-api (10.100.1.5): the browser-facing box
@@ -22,7 +22,7 @@ sso_login          = true      # match customer360-api (SSO_LOGIN=true)
 otel_enabled = "true"
 
 # --- Docs Assistant (chatbot) -> docs-vector-search on the "docs" box -------------------
-# The browser calls the same-origin /ai/* proxy in frontend-admin, which forwards SERVER-SIDE
+# The browser calls the same-origin /ai/* proxy in customer360-frontend, which forwards SERVER-SIDE
 # to the docs box over the PRIVATE network (no CORS; the docs box stays unexposed). Leave
 # docs_search_url EMPTY to auto-resolve the "docs" server's private fixed_ip:docs_search_port
 # from ../server outputs; set it explicitly only to override. NOTE: the api box (10.100.1.5,

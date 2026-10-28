@@ -1,0 +1,531 @@
+from datetime import datetime, timezone
+from uuid import UUID
+
+import pytest
+from pydantic import ValidationError
+
+from ai_agents_runners.agent_pipeline.contracts import AgentPipelineInput, AgentPipelineOutput
+from ai_agents_runners.agent_pipeline.agent_types.classification import ClassificationPipeline
+from ai_agents_runners.agent_pipeline.pipelines import (
+    PIPELINE_HANDLERS,
+    execute_agent_pipeline,
+    execute_agent_pipeline_batch,
+)
+import ai_agents_runners.agent_pipeline.pipelines as pipelines
+
+TENANT_ID = "11111111-1111-1111-1111-111111111111"
+SEGMENT_ID = "22222222-2222-2222-2222-222222222222"
+
+
+def _input(model_type="classification", **overrides):
+    payload = {
+        "tenant_id": TENANT_ID,
+        "segment_id": SEGMENT_ID,
+        "agent_code": "test_agent",
+        "model_type": model_type,
+        "input_data": {"features": {"visits": 3}},
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_pipeline_input_validates_tenant_scope_and_agent_code():
+    payload = AgentPipelineInput.model_validate(_input())
+
+    assert payload.tenant_id == UUID(TENANT_ID)
+    assert payload.agent_code == "test_agent"
+
+
+@pytest.mark.parametrize(
+    "overrides, message",
+    [
+        ({"tenant_id": "not-a-uuid"}, "tenant_id"),
+        ({"agent_code": " "}, "agent_code"),
+        ({"model_type": "lead_scoring"}, "model_type"),
+        ({"candidate_content_item_ids": [SEGMENT_ID]}, "only valid"),
+        (
+            {
+                "model_type": "ranking_recommendation",
+                "candidate_content_item_ids": [SEGMENT_ID, SEGMENT_ID],
+            },
+            "unique",
+        ),
+        ({"input_data": {"score": float("nan")}}, "must be finite"),
+    ],
+)
+def test_pipeline_input_rejects_invalid_payload(overrides, message):
+    with pytest.raises(ValidationError, match=message):
+        AgentPipelineInput.model_validate(_input(**overrides))
+
+
+def test_pipeline_input_allows_at_most_one_thousand_candidates():
+    candidate_ids = [str(UUID(int=index + 1)) for index in range(1001)]
+    valid = AgentPipelineInput.model_validate(
+        _input(
+            model_type="ranking_recommendation",
+            candidate_content_item_ids=candidate_ids[:1000],
+        )
+    )
+    assert len(valid.candidate_content_item_ids) == 1000
+
+    with pytest.raises(ValidationError, match="at most 1000"):
+        AgentPipelineInput.model_validate(
+            _input(
+                model_type="ranking_recommendation",
+                candidate_content_item_ids=candidate_ids,
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "model_type",
+    [
+        model_type
+        for model_type in PIPELINE_HANDLERS
+        if model_type not in {"ranking_recommendation", "rules_engine"}
+    ],
+)
+def test_each_agent_type_has_an_explicit_unimplemented_handler(model_type):
+    with pytest.raises(NotImplementedError, match=model_type):
+        execute_agent_pipeline(_input(model_type), run_id="dagster-run-1")
+
+
+def test_pipeline_dispatch_returns_validated_tenant_scoped_output(monkeypatch):
+    handler = ClassificationPipeline()
+    monkeypatch.setattr(
+        handler,
+        "process",
+        lambda _payload: {"label": "high_value", "probability": 0.9},
+    )
+    monkeypatch.setitem(pipelines.PIPELINE_HANDLERS, "classification", handler)
+
+    output = execute_agent_pipeline(_input(), run_id="dagster-run-1")
+
+    assert output.tenant_id == UUID(TENANT_ID)
+    assert output.segment_id == UUID(SEGMENT_ID)
+    assert output.run_id == "dagster-run-1"
+    assert output.result["label"] == "high_value"
+
+
+def test_pipeline_dispatch_validates_handler_output(monkeypatch):
+    handler = ClassificationPipeline()
+    monkeypatch.setattr(handler, "process", lambda _payload: {"probability": 0.9})
+    monkeypatch.setitem(pipelines.PIPELINE_HANDLERS, "classification", handler)
+
+    with pytest.raises(ValidationError, match="label"):
+        execute_agent_pipeline(_input(), run_id="dagster-run-1")
+
+
+def test_pipeline_batch_dispatches_and_validates_each_result(monkeypatch):
+    handler = ClassificationPipeline()
+    monkeypatch.setattr(
+        handler,
+        "process",
+        lambda payload: {
+            "label": payload.input_data["label"],
+            "probability": 0.9,
+        },
+    )
+    monkeypatch.setitem(pipelines.PIPELINE_HANDLERS, "classification", handler)
+    payloads = [
+        _input(input_data={"label": "first"}),
+        _input(input_data={"label": "second"}),
+    ]
+
+    outputs = execute_agent_pipeline_batch(payloads, run_id="dagster-run-batch")
+
+    assert [output.result["label"] for output in outputs] == ["first", "second"]
+    assert [output.run_id for output in outputs] == [
+        "dagster-run-batch",
+        "dagster-run-batch",
+    ]
+
+
+def test_rules_engine_denies_missing_consent_and_active_suppression():
+    output = execute_agent_pipeline(
+        _input(
+            model_type="rules_engine",
+            input_data={
+                "communication_preferences": {
+                    "email_opt_in": True,
+                    "sms_opt_in": "true",
+                    "meta_ads_opt_in": True,
+                },
+                "profile_email_opt_in": True,
+                "profile_sms_opt_in": False,
+                "profile_meta_ads_opt_in": True,
+                "active_suppression_channels": ["EMAIL"],
+            },
+        ),
+        run_id="eligibility-run-1",
+    )
+
+    assert output.result["decision"] == "deny"
+    assert output.result["channels"]["email"] == {
+        "eligible": False,
+        "reason_codes": ["active_suppression"],
+    }
+    assert output.result["channels"]["sms"] == {
+        "eligible": False,
+        "reason_codes": ["consent_invalid"],
+    }
+    assert output.result["channels"]["meta_ads"] == {
+        "eligible": False,
+        "reason_codes": ["active_suppression"],
+    }
+    assert output.result["channels"]["google_ads"] == {
+        "eligible": False,
+        "reason_codes": ["active_suppression", "consent_missing"],
+    }
+
+
+def test_rules_engine_requires_provider_specific_advertising_consent():
+    output = execute_agent_pipeline(
+        _input(
+            model_type="rules_engine",
+            input_data={
+                "communication_preferences": {
+                    "meta_ads_opt_in": True,
+                },
+                "profile_meta_ads_opt_in": True,
+                "active_suppression_channels": [],
+            },
+        ),
+        run_id="eligibility-run-provider-consent",
+    )
+
+    assert output.result["channels"]["meta_ads"]["eligible"] is True
+    assert output.result["channels"]["google_ads"] == {
+        "eligible": False,
+        "reason_codes": ["consent_missing"],
+    }
+    assert output.result["channels"]["tiktok_ads"] == {
+        "eligible": False,
+        "reason_codes": ["consent_missing"],
+    }
+
+
+def test_rules_engine_applies_existing_profile_suppression_to_ad_audiences():
+    output = execute_agent_pipeline(
+        _input(
+            model_type="rules_engine",
+            input_data={
+                "communication_preferences": {
+                    "meta_ads_opt_in": True,
+                    "google_ads_opt_in": True,
+                    "tiktok_ads_opt_in": True,
+                },
+                "profile_meta_ads_opt_in": True,
+                "profile_google_ads_opt_in": True,
+                "profile_tiktok_ads_opt_in": True,
+                "active_suppression_channels": ["EMAIL"],
+            },
+        ),
+        run_id="eligibility-run-ads",
+    )
+
+    assert output.result["channels"]["meta_ads"] == {
+        "eligible": False,
+        "reason_codes": ["active_suppression"],
+    }
+
+
+def test_rules_engine_fails_closed_when_suppression_state_is_missing():
+    output = execute_agent_pipeline(
+        _input(
+            model_type="rules_engine",
+            input_data={
+                "communication_preferences": {"email_opt_in": True},
+                "profile_email_opt_in": True,
+            },
+        ),
+        run_id="eligibility-run-2",
+    )
+
+    assert output.result["decision"] == "deny"
+    assert output.result["channels"]["email"] == {
+        "eligible": False,
+        "reason_codes": ["suppression_state_missing"],
+    }
+
+
+@pytest.mark.parametrize(
+    "model_type, result",
+    [
+        ("classification", {"label": "high_value"}),
+        ("regression", {"value": 12.5}),
+        ("clustering", {"cluster_id": "cluster-a"}),
+        ("ranking_recommendation", {"ranked_items": []}),
+        ("forecasting", {"forecast_series": []}),
+        ("anomaly_detection", {"anomaly_score": 0.9, "is_anomaly": True}),
+        ("uplift_modeling", {"uplift_score": 0.2}),
+        ("optimization", {"selected_action": "send_offer"}),
+        (
+            "rules_engine",
+            {
+                "decision": "allow",
+                "eligible_channels": ["email"],
+                "not_ready_channels": [],
+                "channels": {"email": {"eligible": True, "reason_codes": []}},
+                "decision_trace": [],
+            },
+        ),
+        ("generative_llm", {"text": "summary"}),
+    ],
+)
+def test_pipeline_output_validates_each_agent_result_shape(model_type, result):
+    result = PIPELINE_HANDLERS[model_type].result_model.model_validate(
+        result
+    ).model_dump(mode="json")
+    output = AgentPipelineOutput.model_validate(
+        {
+            "run_id": "dagster-run-1",
+            "tenant_id": TENANT_ID,
+            "segment_id": SEGMENT_ID,
+            "agent_code": "test_agent",
+            "model_type": model_type,
+            "result": result,
+            "completed_at": datetime.now(timezone.utc),
+        }
+    )
+
+    assert output.tenant_id == UUID(TENANT_ID)
+    assert output.result == result
+
+
+@pytest.mark.parametrize(
+    "model_type, result",
+    [
+        ("classification", {"label": "yes", "probability": 1.1}),
+        ("regression", {"value": float("inf")}),
+        ("ranking_recommendation", {"ranked_items": {}}),
+        ("anomaly_detection", {"anomaly_score": 0.4, "is_anomaly": "no"}),
+        ("rules_engine", {"decision": "maybe", "decision_trace": []}),
+    ],
+)
+def test_pipeline_output_rejects_invalid_agent_results(model_type, result):
+    with pytest.raises(ValidationError):
+        PIPELINE_HANDLERS[model_type].result_model.model_validate(result)
+
+
+@pytest.mark.parametrize(
+    "model_type, expected_result",
+    [
+        pytest.param(
+            "classification",
+            {"label": "high_value", "probability": 0.9},
+            marks=pytest.mark.skip(reason="TODO: implement classification inference"),
+            id="classification",
+        ),
+        pytest.param(
+            "regression",
+            {"value": 12.5},
+            marks=pytest.mark.skip(reason="TODO: implement regression inference"),
+            id="regression",
+        ),
+        pytest.param(
+            "clustering",
+            {"cluster_id": "cluster-a", "membership_score": 0.8},
+            marks=pytest.mark.skip(reason="TODO: implement clustering inference"),
+            id="clustering",
+        ),
+        pytest.param(
+            "forecasting",
+            {"forecast_series": [{"period": "2026-11", "value": 14.0}]},
+            marks=pytest.mark.skip(reason="TODO: implement forecasting"),
+            id="forecasting",
+        ),
+        pytest.param(
+            "anomaly_detection",
+            {"anomaly_score": 0.9, "is_anomaly": True},
+            marks=pytest.mark.skip(reason="TODO: implement anomaly detection"),
+            id="anomaly-detection",
+        ),
+        pytest.param(
+            "uplift_modeling",
+            {"uplift_score": 0.2},
+            marks=pytest.mark.skip(reason="TODO: implement uplift modeling"),
+            id="uplift-modeling",
+        ),
+        pytest.param(
+            "optimization",
+            {"selected_action": "send_offer"},
+            marks=pytest.mark.skip(reason="TODO: implement optimization and decisioning"),
+            id="optimization",
+        ),
+        pytest.param(
+            "generative_llm",
+            {"text": "Customer summary"},
+            marks=pytest.mark.skip(reason="TODO: implement generative LLM processing"),
+            id="generative-llm",
+        ),
+    ],
+)
+def test_agent_type_pipeline_returns_expected_result(model_type, expected_result):
+    """TODO: enable each case when its corresponding handler is implemented."""
+    payload = _input(model_type)
+    if model_type == "ranking_recommendation":
+        payload["candidate_content_item_ids"] = [SEGMENT_ID]
+
+    output = execute_agent_pipeline(payload, run_id="dagster-run-1")
+
+    assert output.model_type == model_type
+    assert output.tenant_id == UUID(TENANT_ID)
+    assert output.segment_id == UUID(SEGMENT_ID)
+    assert output.result == expected_result
+
+
+def test_contracts_and_pipeline_edge_cases(monkeypatch):
+    with pytest.raises(ValidationError, match="object keys must be strings"):
+        AgentPipelineInput.model_validate(_input(input_data={"nested": {1: "bad"}}))
+
+    with pytest.raises(ValidationError, match="JSON-compatible"):
+        AgentPipelineInput.model_validate(
+            _input(input_data={"bad_obj": object()})
+        )
+
+    with pytest.raises(ValidationError, match="completed_at must be UTC"):
+        AgentPipelineOutput.model_validate(
+            {
+                "run_id": "r1",
+                "tenant_id": TENANT_ID,
+                "segment_id": SEGMENT_ID,
+                "agent_code": "test_agent",
+                "model_type": "classification",
+                "result": {"label": "ok"},
+                "completed_at": datetime(2026, 10, 5, 12, 0),
+            }
+        )
+
+    with pytest.raises(
+        ValidationError,
+        match="generative_llm result must include text, structured_output, or summary",
+    ):
+        PIPELINE_HANDLERS["generative_llm"].result_model.model_validate({})
+
+    clf_handler = ClassificationPipeline()
+    wrong_payload = AgentPipelineInput.model_validate(_input(model_type="regression"))
+    with pytest.raises(ValueError, match="cannot handle regression"):
+        clf_handler(wrong_payload)
+
+    assert execute_agent_pipeline_batch([], run_id="r1") == []
+
+    p1 = _input(
+        model_type="ranking_recommendation",
+        candidate_content_item_ids=[SEGMENT_ID],
+    )
+    p2_diff_candidates = _input(
+        model_type="ranking_recommendation",
+        candidate_content_item_ids=[TENANT_ID],
+    )
+    with pytest.raises(ValueError, match="share candidate_content_item_ids"):
+        execute_agent_pipeline_batch([p1, p2_diff_candidates], run_id="r1")
+
+    p2_diff_config = _input(
+        model_type="ranking_recommendation",
+        candidate_content_item_ids=[SEGMENT_ID],
+        configuration={"limit": 2},
+    )
+    with pytest.raises(ValueError, match="share configuration"):
+        execute_agent_pipeline_batch([p1, p2_diff_config], run_id="r1")
+
+    with pytest.raises(ValueError, match="one model_type"):
+        execute_agent_pipeline_batch(
+            [_input(model_type="classification"), _input(model_type="regression")],
+            run_id="r1",
+        )
+
+    monkeypatch.setattr(clf_handler, "process_batch", lambda _p: [])
+    monkeypatch.setitem(pipelines.PIPELINE_HANDLERS, "classification", clf_handler)
+    with pytest.raises(RuntimeError, match="returned 0 results for 1 inputs"):
+        execute_agent_pipeline_batch([_input()], run_id="r1")
+
+
+def test_dagster_defs_jobs_ops_and_sensor(monkeypatch):
+    from unittest.mock import MagicMock
+    from dagster import DagsterInstance, RunRequest, build_sensor_context
+    from ai_agents_runners import dagster_defs
+    from ai_agents_runners.runner import WorkflowRunSummary
+
+    assert dagster_defs.defs.get_job_def("ai_agents_master_job") is not None
+    assert dagster_defs.defs.get_job_def("agent_type_pipeline_job") is not None
+    assert dagster_defs.defs.get_job_def("personalization_job") is not None
+    assert (
+        dagster_defs.defs.resolve_sensor_def("ai_agent_workflow_schedule_sensor")
+        is not None
+    )
+
+    fake_summary = WorkflowRunSummary(
+        trigger="api",
+        tenant_id=TENANT_ID,
+        segment_id=SEGMENT_ID,
+        selected_steps=1,
+        skipped_steps=0,
+        plan=(),
+        executed_steps=1,
+    )
+    fake_task = MagicMock()
+    fake_task.run.return_value = fake_summary
+    fake_task.execute.return_value = fake_summary
+    monkeypatch.setattr(dagster_defs, "AgentWorkflowMasterTask", lambda: fake_task)
+
+    master_res = dagster_defs.ai_agents_master_job.execute_in_process(
+        run_config={
+            "ops": {
+                "run_agent_workflow_master_op": {
+                    "config": {
+                        "trigger": "cron",
+                        "tenant_id": TENANT_ID,
+                        "segment_id": SEGMENT_ID,
+                        "scheduled_at": "2026-10-05T12:00:00Z",
+                    }
+                }
+            }
+        }
+    )
+    assert master_res.success
+    assert master_res.output_for_node("run_agent_workflow_master_op") == fake_summary.as_dict()
+
+    fake_task.run.side_effect = RuntimeError("workflow boom")
+    failed_res = dagster_defs.ai_agents_master_job.execute_in_process(
+        raise_on_error=False
+    )
+    assert not failed_res.success
+
+    fake_output = AgentPipelineOutput.model_validate(
+        {
+            "run_id": "r1",
+            "tenant_id": TENANT_ID,
+            "segment_id": SEGMENT_ID,
+            "agent_code": "test_agent",
+            "model_type": "classification",
+            "result": {"label": "vip"},
+            "completed_at": datetime.now(timezone.utc),
+        }
+    )
+    monkeypatch.setattr(
+        dagster_defs, "execute_agent_pipeline", lambda _p, *, run_id: fake_output
+    )
+    pipeline_res = dagster_defs.agent_type_pipeline_job.execute_in_process(
+        run_config={
+            "ops": {
+                "run_agent_type_pipeline_op": {
+                    "config": {"payload": _input()}
+                }
+            }
+        }
+    )
+    assert pipeline_res.success
+    assert pipeline_res.output_for_node("run_agent_type_pipeline_op")["result"] == {
+        "label": "vip"
+    }
+
+    monkeypatch.setattr(dagster_defs.time, "sleep", lambda _s: None)
+    pers_res = dagster_defs.personalization_job.execute_in_process()
+    assert pers_res.success
+
+    with DagsterInstance.ephemeral() as instance:
+        context = build_sensor_context(instance=instance)
+        run_req = dagster_defs.ai_agent_workflow_schedule_sensor(context)
+    assert isinstance(run_req, RunRequest)
+    assert run_req.run_key.startswith("ai-agent-workflow-")

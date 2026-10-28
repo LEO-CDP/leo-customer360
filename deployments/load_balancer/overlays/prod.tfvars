@@ -52,8 +52,8 @@ backends = {
     listen_port = 5050
     health_path = "/ping"
   }
-  # redis-commander (broker Redis viewer) on the prod tracking box — own basic-auth login (direct).
-  # Uncomment once the "tracking" server key is provisioned and fill its private ip.
+  # redis-commander (broker Redis viewer) — there is no prod tracking box: customer360-event-api
+  # runs on VKS. Point this at wherever you run redis-commander if you enable it.
   # "redis-commander" = {
   #   member_ip   = "REPLACE_WITH_PROD_TRACKING_IP"
   #   member_port = 8081

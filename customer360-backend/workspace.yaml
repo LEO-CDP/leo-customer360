@@ -1,0 +1,51 @@
+# Dagster workspace for the customer360-backend services.
+#
+# Loads each service's `dagster_defs.py` as its own code location so they
+# all show up together in the Dagster UI / CLI:
+#
+#   cd customer360-backend
+#   pip install -r identity_resolution/requirements.txt   # (or a venv per service)
+#   dagster dev -w workspace.yaml
+#
+# Each `python_file` entry is resolved relative to this workspace file. Code
+# locations with nested local packages add their own directory to `sys.path`
+# in `dagster_defs.py`, so imports work consistently in Dagster and in tests.
+#
+# NOTE: Every code location ships its own requirements.txt because these are
+# independent services. Running `dagster dev` against this workspace from a
+# single environment requires all eight requirements files to be installed
+# there; once services diverge more, give each location its own venv and add
+# `executable_path: <path-to-venv-python>` under that entry.
+load_from:
+  # Customer Identity Resolution: matches raw profiles to master profiles.
+  - python_file:
+      relative_path: identity_resolution/dagster_defs.py
+      location_name: identity_resolution
+  # AI-agent runners: tenant-scoped workflow orchestration.
+  - python_file:
+      relative_path: ai_agents_runners/dagster_defs.py
+      location_name: ai_agents_runners
+  # Segmentation: recomputes active segment membership.
+  - python_file:
+      relative_path: segmentation/dagster_defs.py
+      location_name: segmentation
+  # Analytics: aggregates tracking logs into analytical metrics.
+  - python_file:
+      relative_path: analytics/dagster_defs.py
+      location_name: analytics
+  # Data synchronization: campaign custom-audience exports and catalog imports.
+  - python_file:
+      relative_path: data_synch/dagster_defs.py
+      location_name: data_synch
+  # Email engine: approved-campaign email delivery.
+  - python_file:
+      relative_path: email_engine/dagster_defs.py
+      location_name: email_engine
+  # Notification engine: Zalo OA token, ZNS delivery, and opt-out projection.
+  - python_file:
+      relative_path: notification_engine/dagster_defs.py
+      location_name: notification_engine
+  # Campaign activation: approval validation and downstream dispatch triggers.
+  - python_file:
+      relative_path: campaign_activation/dagster_defs.py
+      location_name: campaign_activation

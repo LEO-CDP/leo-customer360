@@ -1,6 +1,12 @@
+# Local leo-customer360 dao package
+leo-customer360-dao
+# Local leo-customer360 agent package
+leo-customer360-agent
+
 # Web framework and ASGI server
-fastapi>=0.111,<1
+fastapi>=0.141.1,<1
 uvicorn[standard]>=0.30,<1
+python-multipart>=0.0.9,<1
 psutil
 
 # Database and ORM
@@ -31,7 +37,7 @@ alembic>=1.13.0,<2
 PyJWT>=2.3,<3
 
 # Submit job execution into Dagster server
-dagster-graphql>=1.0,<2
+dagster-graphql==1.13.26
 
 # Test-only dependencies (see ./run_unit_tests.sh)
 pytest>=7.4,<9

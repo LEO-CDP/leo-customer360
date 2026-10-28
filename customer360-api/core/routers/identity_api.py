@@ -1,22 +1,27 @@
 """Routers for the Customer Identity Resolution (CIR) core models: master
 profiles, raw profile staging, profile links, and the matching-rule
-metadata / throttle-status tables consumed by backend-system/identity_resolution.
+metadata / throttle-status tables consumed by customer360-backend/identity_resolution.
 """
 
+import logging
 import uuid
+from contextlib import contextmanager
+from datetime import date, datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.cache import cache_response, invalidate_prefix
-from core.config import settings
-from core.crud import identity as identity_crud
-from core.crud import profile360 as profile360_crud
-from core.crud.base import CRUDBase
+from core.repositories.identity_repository import IdentityRepository
+from leo_customer360_dao.config import settings
+from leo_customer360_dao.crud import identity as identity_crud
+from leo_customer360_dao.crud import profile360 as profile360_crud
+from leo_customer360_dao.crud.base import CRUDBase
 from core.database import get_db
-from core.models.identity import (
+from leo_customer360_dao.models.identity import (
     CdpCustomerPersona,
     CdpDomainProfile,
     CdpIdentityIndex,
@@ -28,9 +33,9 @@ from core.models.identity import (
     CdpProfileMergeHistory,
     CdpRawProfileStage,
 )
-from core.models.system import SysDomain
+from leo_customer360_dao.models.system import SysDomain
 from core.routers._generic import build_crud_router
-from core.schemas.identity import (
+from leo_customer360_dao.schemas.identity import (
     DomainAttributeUpsert,
     DomainProfileCreate,
     DomainProfileRead,
@@ -58,19 +63,55 @@ from core.schemas.identity import (
     RawProfileRead,
     RawProfileUpdate,
 )
-from core.schemas.profile360 import ChannelActivity, EngagementSummary, TimelineEntry, TopInterest
+from leo_customer360_dao.schemas.profile360 import ChannelActivity, EngagementSummary, TimelineEntry, TopInterest
+from leo_customer360_dao.repositories.event_query_repository import (
+    EventDataSourceError,
+    EventQueryError,
+)
+from leo_customer360_dao.repositories.master_profile_event_repository import (
+    MasterProfileEventStoreError,
+)
 from core.utils.domains import validate_domain_value
+from core.utils.dagster_client import DagsterJobTriggerError, dagster_client
+
+logger = logging.getLogger(__name__)
 
 # --- Master Profiles ---------------------------------------------------------
 
+@contextmanager
+def _event_store_unavailable():
+    """Event-lake failures (no S3, bad projection, failed query) are a handled 503, not a bare 500 that
+    the browser reports as a CORS error."""
+    try:
+        yield
+    except EventQueryError as exc:
+        raise HTTPException(status_code=503, detail="Event lake query failed") from exc
+    except MasterProfileEventStoreError as exc:
+        raise HTTPException(status_code=503, detail="Master profile event projection unavailable") from exc
+
+
 master_profiles_router = APIRouter(prefix="/master-profiles", tags=["Identity Resolution - Master Profiles"])
 _master_crud = CRUDBase(CdpMasterProfile)
+
+
+def _identity_repository(db: Session) -> IdentityRepository:
+    """Build an identity repository from the current router test seams."""
+    return IdentityRepository(
+        db,
+        link_crud=_link_crud,
+        master_crud=_master_crud,
+        raw_crud=_raw_crud,
+        merge_history_crud=_merge_history_crud,
+        identity_module=identity_crud,
+        profile360_module=profile360_crud,
+    )
 
 
 @master_profiles_router.get("/", response_model=MasterProfileListResponse)
 @cache_response("master_profiles/list", ttl=settings.cache_ttl_seconds)
 def list_master_profiles(
     tenant_id: Optional[uuid.UUID] = None,
+    data_source_id: Optional[uuid.UUID] = Query(default=None),
     domain: Optional[str] = Query(default=None),
     lifecycle_stage: Optional[str] = Query(
         default=None, pattern="^(prospect|lead|customer|vip|dormant|churn_risk)$"
@@ -88,6 +129,10 @@ def list_master_profiles(
     churn_risk_tier: Optional[str] = Query(default=None, pattern="^(low|medium|high|critical)$"),
     linked_raw_profile_count_min: Optional[int] = Query(default=None, ge=0),
     q: Optional[str] = Query(default=None, description="Free-text search over full_name/persona_name/email"),
+    anonymous_id: Optional[str] = Query(default=None, min_length=1, max_length=256),
+    device_fingerprint: Optional[str] = Query(default=None, min_length=1, max_length=256),
+    from_date: Optional[date] = Query(default=None, description="Inclusive profile activity/update date"),
+    to_date: Optional[date] = Query(default=None, description="Inclusive profile activity/update date"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=settings.api_default_page_size, ge=1, le=settings.api_max_page_size),
     days: int = Query(default=90, ge=1, le=365),
@@ -97,9 +142,11 @@ def list_master_profiles(
         validate_domain_value(db, domain)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return identity_crud.list_master_profiles_page(
-        db,
+    if from_date is not None and to_date is not None and from_date > to_date:
+        raise HTTPException(status_code=422, detail="from_date must be on or before to_date")
+    return _identity_repository(db).list_master_profiles(
         tenant_id=tenant_id,
+        data_source_id=data_source_id,
         domain=domain,
         lifecycle_stage=lifecycle_stage,
         domain_attribute_key=domain_attribute_key,
@@ -109,6 +156,10 @@ def list_master_profiles(
         churn_risk_tier=churn_risk_tier,
         linked_raw_profile_count_min=linked_raw_profile_count_min,
         q=q,
+        anonymous_id=anonymous_id.strip() if anonymous_id else None,
+        device_fingerprint=device_fingerprint.strip() if device_fingerprint else None,
+        from_date=from_date,
+        to_date=to_date,
         days=days,
         page=page,
         page_size=page_size,
@@ -126,13 +177,13 @@ def count_master_profiles_endpoint(
         validate_domain_value(db, domain)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"count": _master_crud.count(db, tenant_id=tenant_id, domain=domain)}
+    return {"count": _identity_repository(db).count_master_profiles(tenant_id=tenant_id, domain=domain)}
 
 
 @master_profiles_router.get("/{master_profile_id}", response_model=MasterProfileRead)
 @cache_response("master_profiles/item", ttl=settings.cache_ttl_seconds)
 def get_master_profile(master_profile_id: uuid.UUID, db: Session = Depends(get_db)):
-    obj = _master_crud.get(db, master_profile_id)
+    obj = _identity_repository(db).get_master_profile(master_profile_id)
     if obj is None:
         raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
     return obj
@@ -148,13 +199,7 @@ def get_master_profile_links(
     """All raw profiles that were resolved/merged into this master profile.
     Bounded by `limit` (backed by idx_cdp_profile_links_master) so a single
     heavily-merged master profile can never return an unbounded result set."""
-    stmt = (
-        select(CdpProfileLink)
-        .where(CdpProfileLink.master_profile_id == master_profile_id)
-        .order_by(CdpProfileLink.created_at.desc())
-        .limit(limit)
-    )
-    return db.execute(stmt).scalars().all()
+    return _identity_repository(db).list_master_profile_links(master_profile_id, limit)
 
 
 @master_profiles_router.get("/{master_profile_id}/domain-profiles", response_model=list[DomainProfileRead])
@@ -163,24 +208,10 @@ def get_master_profile_domain_profiles(master_profile_id: uuid.UUID, db: Session
     """Every cdp_domain_profiles row for this master profile (one per business
     domain the person has activity in, e.g. banking + retail), each carrying
     its own domain_attributes JSONB bag."""
-    if _master_crud.get(db, master_profile_id) is None:
+    repository = _identity_repository(db)
+    if repository.get_master_profile(master_profile_id) is None:
         raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
-    stmt = select(CdpDomainProfile).where(CdpDomainProfile.master_profile_id == master_profile_id)
-    domain_profiles = db.execute(stmt).scalars().all()
-
-    # domain_id is a raw FK on cdp_domain_profiles -- resolve it to the
-    # human-readable domain_code here so the UI doesn't need a second call.
-    domain_ids = {dp.domain_id for dp in domain_profiles}
-    code_by_id = {}
-    if domain_ids:
-        code_by_id = dict(
-            db.execute(
-                select(SysDomain.domain_id, SysDomain.domain_code).where(SysDomain.domain_id.in_(domain_ids))
-            ).all()
-        )
-    for dp in domain_profiles:
-        dp.domain_code = code_by_id.get(dp.domain_id)
-    return domain_profiles
+    return repository.get_domain_profiles(master_profile_id)
 
 
 @master_profiles_router.post("/{master_profile_id}/domain-attributes", response_model=DomainProfileRead, status_code=201)
@@ -195,7 +226,8 @@ def upsert_master_profile_domain_attribute(
     existing key. The write fires customer360.sync_domain_attribute_catalog()
     (see database-schema.sql), which auto-registers a brand-new attribute_key
     into cdp_profile_attributes if one doesn't already exist there."""
-    master = _master_crud.get(db, master_profile_id)
+    repository = _identity_repository(db)
+    master = repository.get_master_profile(master_profile_id)
     if master is None:
         raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
     try:
@@ -203,34 +235,11 @@ def upsert_master_profile_domain_attribute(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    domain_id = db.execute(
-        select(SysDomain.domain_id).where(SysDomain.domain_code == payload.domain)
-    ).scalar_one_or_none()
-    if domain_id is None:
-        raise HTTPException(status_code=422, detail=f"Unknown domain '{payload.domain}'")
-
-    domain_profile = db.execute(
-        select(CdpDomainProfile).where(
-            CdpDomainProfile.master_profile_id == master_profile_id,
-            CdpDomainProfile.domain_id == domain_id,
-        )
-    ).scalar_one_or_none()
-
+    domain_profile = repository.upsert_domain_attribute(
+        master, payload.domain, payload.attribute_key, payload.attribute_value
+    )
     if domain_profile is None:
-        domain_profile = CdpDomainProfile(
-            tenant_id=master.tenant_id,
-            master_profile_id=master_profile_id,
-            domain_id=domain_id,
-            domain_attributes={payload.attribute_key: payload.attribute_value},
-        )
-        db.add(domain_profile)
-    else:
-        merged = dict(domain_profile.domain_attributes or {})
-        merged[payload.attribute_key] = payload.attribute_value
-        domain_profile.domain_attributes = merged
-
-    db.commit()
-    db.refresh(domain_profile)
+        raise HTTPException(status_code=422, detail=f"Unknown domain '{payload.domain}'")
     invalidate_prefix("master_profiles/domain_profiles")
     invalidate_prefix("profile_attributes")
     return domain_profile
@@ -250,22 +259,12 @@ def get_master_profile_linked_raw_profile_detail(
     Uses master_profile_id + raw_profile_id and enforces tenant-scoped joins so
     linked-raw detail cannot be fetched across tenants.
     """
-    master_profile = _master_crud.get(db, master_profile_id)
+    repository = _identity_repository(db)
+    master_profile = repository.get_master_profile(master_profile_id)
     if master_profile is None:
         raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
 
-    stmt = (
-        select(CdpProfileLink, CdpRawProfileStage)
-        .join(CdpRawProfileStage, CdpRawProfileStage.raw_profile_id == CdpProfileLink.raw_profile_id)
-        .where(
-            CdpProfileLink.master_profile_id == master_profile_id,
-            CdpProfileLink.raw_profile_id == raw_profile_id,
-            CdpProfileLink.tenant_id == master_profile.tenant_id,
-            CdpRawProfileStage.tenant_id == master_profile.tenant_id,
-        )
-        .limit(1)
-    )
-    row = db.execute(stmt).first()
+    row = repository.get_linked_raw_profile(master_profile_id, raw_profile_id, master_profile.tenant_id)
     if row is None:
         raise HTTPException(
             status_code=404,
@@ -283,17 +282,18 @@ def get_master_profile_linked_raw_profile_detail(
 @cache_response("master_profiles/persona", ttl=settings.cache_ttl_seconds)
 def get_master_profile_current_persona(master_profile_id: uuid.UUID, db: Session = Depends(get_db)):
     """The profile's CURRENT persona (identity *understanding*, computed from
-    the resolved identity by backend-system/identity_resolution's
+    the resolved identity by customer360-backend/identity_resolution's
     PersonaResolutionEngine), resolved via current_persona_id. 404 if the
     profile has no persona computed yet."""
-    profile = _master_crud.get(db, master_profile_id)
+    repository = _identity_repository(db)
+    profile = repository.get_master_profile(master_profile_id)
     if profile is None:
         raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
     if profile.current_persona_id is None:
         raise HTTPException(
             status_code=404, detail=f"No persona has been computed yet for master profile '{master_profile_id}'"
         )
-    persona = db.get(CdpCustomerPersona, profile.current_persona_id)
+    persona = repository.get_persona(profile)
     if persona is None:
         raise HTTPException(status_code=404, detail=f"CdpCustomerPersona '{profile.current_persona_id}' not found")
     return persona
@@ -309,16 +309,10 @@ def get_master_profile_persona_history(
     """Audit trail of material persona changes for this profile, most-recent
     first (joins cdp_persona_history -> cdp_customer_personas by
     master_profile_id, since history rows only carry persona_id)."""
-    if _master_crud.get(db, master_profile_id) is None:
+    repository = _identity_repository(db)
+    if repository.get_master_profile(master_profile_id) is None:
         raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
-    stmt = (
-        select(CdpPersonaHistory)
-        .join(CdpCustomerPersona, CdpPersonaHistory.persona_id == CdpCustomerPersona.persona_id)
-        .where(CdpCustomerPersona.master_profile_id == master_profile_id)
-        .order_by(CdpPersonaHistory.changed_at.desc())
-        .limit(limit)
-    )
-    return db.execute(stmt).scalars().all()
+    return repository.get_persona_history(master_profile_id, limit)
 
 
 @master_profiles_router.get("/{master_profile_id}/engagement-summary", response_model=EngagementSummary)
@@ -329,9 +323,12 @@ def get_master_profile_engagement_summary(
     """Login/transaction counts, spend, and last-interaction timestamp for the
     last ``days`` days. Behavioral event metrics are being migrated to the S3
     Silver query path; CRM transactions and contacts remain PostgreSQL-backed."""
-    if _master_crud.get(db, master_profile_id) is None:
+    repository = _identity_repository(db)
+    profile = repository.get_master_profile(master_profile_id)
+    if profile is None:
         raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
-    return profile360_crud.get_engagement_summary(db, master_profile_id, days=days)
+    with _event_store_unavailable():
+        return repository.get_engagement_summary(master_profile_id, days, tenant_id=profile.tenant_id)
 
 
 @master_profiles_router.get("/{master_profile_id}/channel-activity", response_model=ChannelActivity)
@@ -341,9 +338,12 @@ def get_master_profile_channel_activity(
 ):
     """Cross-channel activity counts (app/web sessions, customer service
     contacts, transactions) for the last ``days`` days."""
-    if _master_crud.get(db, master_profile_id) is None:
+    repository = _identity_repository(db)
+    profile = repository.get_master_profile(master_profile_id)
+    if profile is None:
         raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
-    return profile360_crud.get_channel_activity(db, master_profile_id, days=days)
+    with _event_store_unavailable():
+        return repository.get_channel_activity(master_profile_id, days, tenant_id=profile.tenant_id)
 
 
 @master_profiles_router.get("/{master_profile_id}/top-interests", response_model=list[TopInterest])
@@ -354,21 +354,46 @@ def get_master_profile_top_interests(
     """Top behavioral-event categories for this profile from the event
     projection. The projection is being migrated from PostgreSQL raw-event
     storage to the S3 Silver query path."""
-    if _master_crud.get(db, master_profile_id) is None:
+    repository = _identity_repository(db)
+    if repository.get_master_profile(master_profile_id) is None:
         raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
-    return profile360_crud.get_top_interests(db, master_profile_id, limit=limit)
+    with _event_store_unavailable():
+        return repository.get_top_interests(master_profile_id, limit)
 
 
 @master_profiles_router.get("/{master_profile_id}/timeline", response_model=list[TimelineEntry])
 @cache_response("master_profiles/timeline", ttl=settings.cache_ttl_seconds)
 def get_master_profile_timeline(
-    master_profile_id: uuid.UUID, limit: int = Query(default=20, ge=1, le=100), db: Session = Depends(get_db)
+    request: Request,
+    master_profile_id: uuid.UUID,
+    limit: int = Query(default=20, ge=1, le=100),
+    data_source_id: Optional[uuid.UUID] = Query(default=None),
+    from_event_time: Optional[datetime] = Query(default=None),
+    to_event_time: Optional[datetime] = Query(default=None),
+    db: Session = Depends(get_db),
 ):
     """Unified, most-recent-first activity feed merging behavioral events,
-    transactions, and logged customer service contacts."""
-    if _master_crud.get(db, master_profile_id) is None:
+    transactions, and logged customer service contacts. When ``data_source_id``
+    is supplied, the feed contains only behavioral events from that active,
+    tenant-owned source. The range is order-independent and defaults to the
+    last seven days."""
+    repository = _identity_repository(db)
+    if repository.get_master_profile(master_profile_id) is None:
         raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
-    return profile360_crud.get_timeline(db, master_profile_id, limit=limit)
+    try:
+        return repository.get_timeline(
+            master_profile_id,
+            limit=limit,
+            data_source_id=data_source_id,
+            from_event_time=from_event_time,
+            to_event_time=to_event_time,
+        )
+    except EventDataSourceError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except EventQueryError as exc:
+        raise HTTPException(status_code=503, detail="Event lake query failed") from exc
+    except MasterProfileEventStoreError as exc:
+        raise HTTPException(status_code=503, detail="Master profile event projection unavailable") from exc
 
 
 @master_profiles_router.post("/", response_model=MasterProfileRead, status_code=201)
@@ -377,33 +402,115 @@ def create_master_profile(payload: MasterProfileCreate, db: Session = Depends(ge
         validate_domain_value(db, payload.domain)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    obj = _master_crud.create(db, payload.model_dump())
+    obj = _identity_repository(db).create_master_profile(payload.model_dump())
     invalidate_prefix("master_profiles")
     return obj
 
 
 @master_profiles_router.patch("/{master_profile_id}", response_model=MasterProfileRead)
 def update_master_profile(master_profile_id: uuid.UUID, payload: MasterProfileUpdate, db: Session = Depends(get_db)):
-    obj = _master_crud.get(db, master_profile_id)
+    repository = _identity_repository(db)
+    obj = repository.get_master_profile(master_profile_id)
     if obj is None:
         raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
     obj_in = payload.model_dump(exclude_unset=True)
-    if "domain" in obj_in:
-        try:
-            validate_domain_value(db, obj_in.get("domain"))
-        except ValueError as exc:
+    domain_attributes = {
+        key: obj_in.pop(key)
+        for key in ("customer_tier", "kyc_status")
+        if key in obj_in
+    }
+    if "primary_relationship" in obj_in:
+        primary_relationship = obj_in.pop("primary_relationship")
+        attributes = dict(getattr(obj, "attributes", None) or {})
+        attributes.update(dict(obj_in.get("attributes") or {}))
+        attributes["primary_relationship"] = primary_relationship
+        obj_in["attributes"] = attributes
+    # PATCH clients may include an optional `domain` field with a null value
+    # when an edit form has no selected option. Never overwrite the database
+    # domain with null: cdp_master_profiles.domain is required.
+    domain_was_explicitly_provided = bool(obj_in.get("domain"))
+    requested_domain = obj_in.get("domain") or getattr(obj, "domain", None) or "_"
+    try:
+        validate_domain_value(db, requested_domain)
+    except ValueError as exc:
+        # Older ingested profiles may contain the legacy "unknown" value.
+        # When the PATCH does not explicitly choose a domain, repair that
+        # invalid legacy value with the schema's default instead of blocking
+        # an unrelated consent or contact-information update.
+        if domain_was_explicitly_provided:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-    obj = _master_crud.update(db, obj, obj_in)
+        requested_domain = "_"
+        try:
+            validate_domain_value(db, requested_domain)
+        except ValueError as fallback_exc:
+            raise HTTPException(status_code=422, detail=str(fallback_exc)) from fallback_exc
+    obj_in["domain"] = requested_domain
+
+    try:
+        obj = repository.update_master_profile(obj, obj_in)
+        attribute_domain = requested_domain
+        for attribute_key, attribute_value in domain_attributes.items():
+            if repository.upsert_domain_attribute(obj, attribute_domain, attribute_key, attribute_value) is None:
+                raise HTTPException(status_code=422, detail=f"Unknown domain '{attribute_domain}'")
+    except IntegrityError as exc:
+        db.rollback()
+        column_name = getattr(getattr(exc.orig, "diag", None), "column_name", None)
+        if column_name == "domain":
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "required_profile_field",
+                    "field": "domain",
+                    "message": "Domain is required and must be a valid profile domain.",
+                },
+            ) from exc
+        logger.exception(
+            "Master profile update violated a database constraint: master_profile_id=%s",
+            master_profile_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "profile_update_conflict",
+                "message": "The profile could not be saved because it conflicts with existing data.",
+            },
+        ) from exc
+
+    run_id = None
+    try:
+        run_id = dagster_client.identity_resolution.recompute_personas(
+            trigger_reason="master_profile_updated",
+            tenant_id=str(obj.tenant_id),
+            master_profile_id=str(obj.master_profile_id),
+        )
+    except DagsterJobTriggerError:
+        logger.warning(
+            "Could not submit persona recompute for master_profile_id=%s; "
+            "the scheduled identity-resolution run will refresh it later.",
+            obj.master_profile_id,
+            exc_info=True,
+        )
+    setattr(obj, "persona_recompute_run_id", run_id)
     invalidate_prefix("master_profiles")
     return obj
 
 
+@master_profiles_router.get("/{master_profile_id}/persona-recompute-status/{run_id}")
+def get_master_profile_persona_recompute_status(master_profile_id: uuid.UUID, run_id: str):
+    """Return the status of the targeted persona refresh submitted after an update."""
+    try:
+        return dagster_client.identity_resolution.get_status(run_id)
+    except DagsterJobTriggerError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 @master_profiles_router.delete("/{master_profile_id}", status_code=204)
 def delete_master_profile(master_profile_id: uuid.UUID, db: Session = Depends(get_db)):
-    obj = _master_crud.get(db, master_profile_id)
+    repository = _identity_repository(db)
+    obj = repository.get_master_profile(master_profile_id)
     if obj is None:
         raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
-    _master_crud.delete(db, obj)
+    repository.delete_master_profile(obj)
     invalidate_prefix("master_profiles")
 
 
@@ -430,8 +537,7 @@ def list_raw_profiles(
         validate_domain_value(db, domain)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return _raw_crud.list(
-        db,
+    return _identity_repository(db).list_raw_profiles(
         skip=skip,
         limit=limit,
         tenant_id=tenant_id,
@@ -455,8 +561,8 @@ def count_raw_profiles_endpoint(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {
-        "count": _raw_crud.count(
-            db, tenant_id=tenant_id, domain=domain, source_system=source_system, status_code=status_code
+        "count": _identity_repository(db).count_raw_profiles(
+            tenant_id=tenant_id, domain=domain, source_system=source_system, status_code=status_code
         )
     }
 
@@ -464,7 +570,7 @@ def count_raw_profiles_endpoint(
 @raw_profiles_router.get("/{raw_profile_id}", response_model=RawProfileRead)
 @cache_response("raw_profiles/item", ttl=settings.cache_ttl_seconds)
 def get_raw_profile(raw_profile_id: uuid.UUID, db: Session = Depends(get_db)):
-    obj = _raw_crud.get(db, raw_profile_id)
+    obj = _identity_repository(db).get_raw_profile(raw_profile_id)
     if obj is None:
         raise HTTPException(status_code=404, detail=f"CdpRawProfileStage '{raw_profile_id}' not found")
     return obj
@@ -473,28 +579,30 @@ def get_raw_profile(raw_profile_id: uuid.UUID, db: Session = Depends(get_db)):
 @raw_profiles_router.post("/", response_model=RawProfileRead, status_code=201)
 def create_raw_profile(payload: RawProfileCreate, db: Session = Depends(get_db)):
     """Ingests a raw profile event (status_code defaults to 1 = new/unprocessed,
-    ready to be picked up by backend-system/identity_resolution)."""
-    obj = _raw_crud.create(db, payload.model_dump())
+    ready to be picked up by customer360-backend/identity_resolution)."""
+    obj = _identity_repository(db).create_raw_profile(payload.model_dump())
     invalidate_prefix("raw_profiles")
     return obj
 
 
 @raw_profiles_router.patch("/{raw_profile_id}", response_model=RawProfileRead)
 def update_raw_profile(raw_profile_id: uuid.UUID, payload: RawProfileUpdate, db: Session = Depends(get_db)):
-    obj = _raw_crud.get(db, raw_profile_id)
+    repository = _identity_repository(db)
+    obj = repository.get_raw_profile(raw_profile_id)
     if obj is None:
         raise HTTPException(status_code=404, detail=f"CdpRawProfileStage '{raw_profile_id}' not found")
-    obj = _raw_crud.update(db, obj, payload.model_dump(exclude_unset=True))
+    obj = repository.update_raw_profile(obj, payload.model_dump(exclude_unset=True))
     invalidate_prefix("raw_profiles")
     return obj
 
 
 @raw_profiles_router.delete("/{raw_profile_id}", status_code=204)
 def delete_raw_profile(raw_profile_id: uuid.UUID, db: Session = Depends(get_db)):
-    obj = _raw_crud.get(db, raw_profile_id)
+    repository = _identity_repository(db)
+    obj = repository.get_raw_profile(raw_profile_id)
     if obj is None:
         raise HTTPException(status_code=404, detail=f"CdpRawProfileStage '{raw_profile_id}' not found")
-    _raw_crud.delete(db, obj)
+    repository.delete_raw_profile(obj)
     invalidate_prefix("raw_profiles")
 
 
@@ -514,8 +622,7 @@ def list_profile_links(
     limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
     db: Session = Depends(get_db),
 ):
-    return _link_crud.list(
-        db,
+    return _identity_repository(db).list_profile_links(
         skip=skip,
         limit=limit,
         tenant_id=tenant_id,
@@ -527,7 +634,7 @@ def list_profile_links(
 @profile_links_router.get("/{link_id}", response_model=ProfileLinkRead)
 @cache_response("profile_links/item", ttl=settings.cache_ttl_seconds)
 def get_profile_link(link_id: uuid.UUID, db: Session = Depends(get_db)):
-    obj = _link_crud.get(db, link_id)
+    obj = _identity_repository(db).get_profile_link(link_id)
     if obj is None:
         raise HTTPException(status_code=404, detail=f"CdpProfileLink '{link_id}' not found")
     return obj
@@ -535,17 +642,18 @@ def get_profile_link(link_id: uuid.UUID, db: Session = Depends(get_db)):
 
 @profile_links_router.post("/", response_model=ProfileLinkRead, status_code=201)
 def create_profile_link(payload: ProfileLinkCreate, db: Session = Depends(get_db)):
-    obj = _link_crud.create(db, payload.model_dump())
+    obj = _identity_repository(db).create_profile_link(payload.model_dump())
     invalidate_prefix("profile_links")
     return obj
 
 
 @profile_links_router.delete("/{link_id}", status_code=204)
 def delete_profile_link(link_id: uuid.UUID, db: Session = Depends(get_db)):
-    obj = _link_crud.get(db, link_id)
+    repository = _identity_repository(db)
+    obj = repository.get_profile_link(link_id)
     if obj is None:
         raise HTTPException(status_code=404, detail=f"CdpProfileLink '{link_id}' not found")
-    _link_crud.delete(db, obj)
+    repository.delete_profile_link(obj)
     invalidate_prefix("profile_links")
 
 
@@ -615,8 +723,7 @@ def list_profile_merge_history(
     limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
     db: Session = Depends(get_db),
 ):
-    return _merge_history_crud.list(
-        db,
+    return _identity_repository(db).list_profile_merge_history(
         skip=skip,
         limit=limit,
         tenant_id=tenant_id,
@@ -628,7 +735,7 @@ def list_profile_merge_history(
 @profile_merge_history_router.get("/{merge_id}", response_model=ProfileMergeHistoryRead)
 @cache_response("profile_merge_history/item", ttl=settings.cache_ttl_seconds)
 def get_profile_merge_history(merge_id: uuid.UUID, db: Session = Depends(get_db)):
-    obj = _merge_history_crud.get(db, merge_id)
+    obj = _identity_repository(db).get_profile_merge_history(merge_id)
     if obj is None:
         raise HTTPException(status_code=404, detail=f"CdpProfileMergeHistory '{merge_id}' not found")
     return obj
@@ -636,7 +743,7 @@ def get_profile_merge_history(merge_id: uuid.UUID, db: Session = Depends(get_db)
 
 @profile_merge_history_router.post("/", response_model=ProfileMergeHistoryRead, status_code=201)
 def create_profile_merge_history(payload: ProfileMergeHistoryCreate, db: Session = Depends(get_db)):
-    obj = _merge_history_crud.create(db, payload.model_dump())
+    obj = _identity_repository(db).create_profile_merge_history(payload.model_dump())
     invalidate_prefix("profile_merge_history")
     return obj
 
@@ -648,12 +755,12 @@ resolution_status_router = APIRouter(prefix="/resolution-status", tags=["Identit
 
 @resolution_status_router.get("/", response_model=IdResolutionStatusRead)
 def get_resolution_status(db: Session = Depends(get_db)):
-    obj = db.get(CdpIdResolutionStatus, True)
+    obj = _identity_repository(db).get_resolution_status()
     if obj is None:
         raise HTTPException(
             status_code=404,
             detail="cdp_id_resolution_status has not been initialized yet "
-            "(run backend-system/identity_resolution/scripts/init_sample_data.py).",
+            "(run customer360-seeding/dev-backend-seeding/init_sample_data.py).",
         )
     return obj
 

@@ -14,7 +14,7 @@ stay green without a deployment.
 - `test_campaign_activation_e2e.py` — SCRUM-97: campaign approval, activation,
   dispatch-log, and provider-config endpoints on customer360-api.
 - `test_email_tracking_e2e.py` — SCRUM-98: open, signed click, unsubscribe, and
-  fail-closed webhook checks on data-tracking-api.
+  fail-closed webhook checks on customer360-event-api.
 
 ## Configuration (environment variables)
 
@@ -34,7 +34,7 @@ stay green without a deployment.
 | `E2E_TIMEOUT` | no | `60` | Per-request timeout (seconds). |
 | `E2E_ALLOW_DATA_WRITES` | no | (off) | `1` enables the opt-in routing tests (`test_routing_e2e.py`) that write to `crm_*` tables. Off by default. |
 | `E2E_TENANT_ID_B` / `E2E_BEARER_TOKEN_B` | no | — | A second tenant's id + token; enables the real cross-tenant isolation checks (S94-13/14). |
-| `E2E_EMAIL_TRACKING_SECRET` | no | `leocdp-dev-tracking-secret` | HMAC secret for minting email tracking tokens; must match data-tracking-api's `EMAIL_TRACKING_SECRET`. Used by SCRUM-98. |
+| `E2E_EMAIL_TRACKING_SECRET` | no | `leocdp-dev-tracking-secret` | HMAC secret for minting email tracking tokens; must match customer360-event-api's `EMAIL_TRACKING_SECRET`. Used by SCRUM-98. |
 | `E2E_CAMPAIGN_ID` | no | — | An existing **Approved** campaign (with template + segment); enables the opt-in real activation test S97-07. |
 
 > **SCRUM-98 tracking is separately deploy-gated:** set `E2E_TRACKING_BASE_URL` to the data-tracking deployment. The tests probe `GET /api/v1/track/email/open` there and skip when that service is unavailable. Select them with `CASES=S98 ./test.sh`.
@@ -92,7 +92,7 @@ export E2E_SEGMENT_SQL="lifecycle_stage = 'lead'"
 - **Routing suite** (`test_routing_e2e.py`, `E2E_ALLOW_DATA_WRITES=1`) exercises Route
   A/B/C against one existing profile per stage and deletes exactly the rows it created
   (deterministic-PK, pre-existence-checked).
-- **Email tracking suite** (`test_email_tracking_e2e.py`) targets data-tracking-api
+- **Email tracking suite** (`test_email_tracking_e2e.py`) targets customer360-event-api
   through `E2E_TRACKING_BASE_URL` and uses synthetic signed tokens only.
 - **Sweeper** for a killed run:
 

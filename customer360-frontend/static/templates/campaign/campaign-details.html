@@ -1,0 +1,788 @@
+<main
+  id="campaign-details-view"
+  class="space-y-6"
+  aria-label="Campaign details and report"
+>
+  <header class="flex flex-wrap items-start justify-between gap-4">
+    <div>
+      <button
+        id="btn-campaign-details-back"
+        type="button"
+        class="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-indigo-700 mb-3"
+      >
+        <span aria-hidden="true">&larr;</span><span>Back to campaigns</span>
+      </button>
+      <div class="flex flex-wrap items-center gap-3">
+        <h1
+          id="campaign-details-title"
+          class="text-2xl font-bold text-slate-900"
+        >
+          Campaign details
+        </h1>
+        <span
+          id="campaign-details-status"
+          class="inline-flex items-center gap-1.5 text-xs font-semibold rounded-md px-2.5 py-1.5"
+          role="status"
+          aria-live="polite"
+          ><i
+            id="campaign-details-status-icon"
+            class="bi bi-question-circle"
+            aria-hidden="true"
+          ></i
+          ><span id="campaign-details-status-label">Loading</span></span
+        ><span
+          id="campaign-details-approval"
+          class="text-xs font-semibold rounded-md px-2.5 py-1.5"
+        ></span>
+      </div>
+      <p id="campaign-details-subtitle" class="text-sm text-slate-500 mt-1">
+        Loading campaign...
+      </p>
+    </div>
+    <div class="flex flex-wrap items-center justify-end gap-2">
+      <button
+        id="btn-campaign-details-refresh"
+        type="button"
+        class="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+      >
+        Refresh state
+      </button>
+      <button
+        id="btn-campaign-details-edit"
+        type="button"
+        class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+      >
+        <span aria-hidden="true">&#9998;</span><span>Edit</span>
+      </button>
+    </div>
+  </header>
+  <div
+    id="campaign-details-error"
+    class="hidden rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"
+    role="alert"
+  ></div>
+  <div
+    id="campaign-details-success"
+    class="hidden rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700"
+    role="status"
+  ></div>
+  <div
+    id="campaign-details-action-hint"
+    class="hidden rounded-xl border border-indigo-200 bg-indigo-50/70 px-4 py-3 text-sm text-indigo-800"
+    role="status"
+    aria-live="polite"
+  ></div>
+  <div
+    id="campaign-details-loading"
+    class="rounded-xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500"
+  >
+    Loading campaign...
+  </div>
+  <div id="campaign-details-content" class="hidden space-y-6">
+    <section
+      class="rounded-2xl border border-indigo-100 bg-white p-5 shadow-sm"
+      aria-labelledby="campaign-lifecycle-title"
+    >
+      <div class="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h2
+            id="campaign-lifecycle-title"
+            class="text-base font-bold text-slate-900"
+          >
+            Approval and execution
+          </h2>
+          <p class="mt-1 text-sm text-slate-500">
+            Review the pinned workflow, approve the campaign, then start
+            execution.
+          </p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button
+            id="btn-campaign-manage-state"
+            type="button"
+            class="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
+          >
+            Manage state</button
+          ><button
+            id="btn-campaign-state-history"
+            type="button"
+            class="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            View state history
+          </button>
+        </div>
+      </div>
+      <dl class="mt-4 grid gap-3 sm:grid-cols-3">
+        <div class="rounded-xl bg-slate-50 p-3">
+          <dt class="text-xs font-semibold uppercase text-slate-500">
+            Campaign approval
+          </dt>
+          <dd
+            id="campaign-state-approval"
+            class="mt-1 text-sm font-bold text-slate-900"
+          ></dd>
+        </div>
+        <div class="rounded-xl bg-slate-50 p-3">
+          <dt class="text-xs font-semibold uppercase text-slate-500">
+            Pinned workflow
+          </dt>
+          <dd
+            id="campaign-state-workflow"
+            class="mt-1 text-sm font-bold text-slate-900"
+          ></dd>
+        </div>
+        <div class="rounded-xl bg-slate-50 p-3">
+          <dt class="text-xs font-semibold uppercase text-slate-500">
+            Execution
+          </dt>
+          <dd
+            id="campaign-state-execution"
+            class="mt-1 text-sm font-bold text-slate-900"
+          ></dd>
+        </div>
+      </dl>
+    </section>
+    <section class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <article class="bg-white border border-slate-200 rounded-xl p-4">
+        <p class="text-xs uppercase tracking-wider text-slate-500">Spend</p>
+        <p
+          id="campaign-report-spend"
+          class="mt-2 text-xl font-bold text-slate-900"
+        >
+          -
+        </p>
+      </article>
+      <article class="bg-white border border-slate-200 rounded-xl p-4">
+        <p class="text-xs uppercase tracking-wider text-slate-500">
+          Impressions
+        </p>
+        <p
+          id="campaign-report-impressions"
+          class="mt-2 text-xl font-bold text-slate-900"
+        >
+          -
+        </p>
+      </article>
+      <article class="bg-white border border-slate-200 rounded-xl p-4">
+        <p class="text-xs uppercase tracking-wider text-slate-500">
+          Conversions
+        </p>
+        <p
+          id="campaign-report-conversions"
+          class="mt-2 text-xl font-bold text-slate-900"
+        >
+          -
+        </p>
+      </article>
+      <article class="bg-white border border-slate-200 rounded-xl p-4">
+        <p class="text-xs uppercase tracking-wider text-slate-500">ROAS</p>
+        <p
+          id="campaign-report-roas"
+          class="mt-2 text-xl font-bold text-slate-900"
+        >
+          -
+        </p>
+      </article>
+    </section>
+    <nav
+      class="flex flex-wrap gap-2 border-b border-slate-200"
+      role="tablist"
+      aria-label="Campaign detail sections"
+    >
+      <button
+        id="campaign-details-tab-overview"
+        type="button"
+        role="tab"
+        data-assistant-label="Overview"
+        aria-selected="true"
+        aria-controls="campaign-details-panel-overview"
+        class="campaign-details-tab border-b-2 border-indigo-600 px-3 py-3 text-sm font-semibold text-indigo-700"
+        data-panel="overview"
+      >
+        Overview</button
+      ><button
+        id="campaign-details-tab-strategy"
+        type="button"
+        role="tab"
+        data-assistant-label="Strategy"
+        aria-selected="false"
+        aria-controls="campaign-details-panel-strategy"
+        class="campaign-details-tab border-b-2 border-transparent px-3 py-3 text-sm font-semibold text-slate-500"
+        data-panel="strategy"
+      >
+        Strategy</button
+      ><button
+        id="campaign-details-tab-content"
+        type="button"
+        role="tab"
+        data-assistant-label="Content plan"
+        aria-selected="false"
+        aria-controls="campaign-details-panel-content"
+        class="campaign-details-tab border-b-2 border-transparent px-3 py-3 text-sm font-semibold text-slate-500"
+        data-panel="content"
+      >
+        Content plan</button
+      ><button
+        id="campaign-details-tab-report"
+        type="button"
+        role="tab"
+        data-assistant-label="Performance report"
+        aria-selected="false"
+        aria-controls="campaign-details-panel-report"
+        class="campaign-details-tab border-b-2 border-transparent px-3 py-3 text-sm font-semibold text-slate-500"
+        data-panel="report"
+      >
+        Performance report</button
+      ><button
+        id="campaign-details-tab-history"
+        type="button"
+        role="tab"
+        data-assistant-label="History"
+        aria-selected="false"
+        aria-controls="campaign-details-panel-history"
+        class="campaign-details-tab border-b-2 border-transparent px-3 py-3 text-sm font-semibold text-slate-500"
+        data-panel="history"
+      >
+        History</button
+      ><button
+	    style="display:none;"
+        id="campaign-details-tab-experiments"
+        type="button"
+        role="tab"
+        data-assistant-label="Experiments"
+        aria-selected="false"
+        aria-controls="campaign-details-panel-experiments"
+        class="campaign-details-tab border-b-2 border-transparent px-3 py-3 text-sm font-semibold text-slate-500"
+        data-panel="experiments"
+      >
+        Experiments
+      </button>
+    </nav>
+    <section
+      id="campaign-details-panel-overview"
+      role="tabpanel"
+      aria-labelledby="campaign-details-tab-overview"
+      class="campaign-details-panel bg-white border border-slate-200 rounded-2xl p-6"
+    >
+      <div class="flex flex-wrap items-start justify-between gap-3 mb-5">
+        <div>
+          <h2 class="text-base font-bold text-slate-900">Campaign metadata</h2>
+          <p class="mt-1 text-sm text-slate-500">
+            The operational details, schedule, ownership, and delivery
+            references for this campaign.
+          </p>
+        </div>
+        <span
+          class="inline-flex items-center gap-1.5 rounded-md bg-slate-100 px-2.5 py-1.5 text-xs font-semibold text-slate-600"
+          ><i class="bi bi-info-circle" aria-hidden="true"></i
+          ><span>Read-only overview</span></span
+        >
+      </div>
+      <div
+        id="campaign-details-audience"
+        class="mb-6 rounded-xl border border-indigo-100 bg-indigo-50/60 p-4"
+      >
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div class="flex min-w-0 items-start gap-3">
+            <span
+              class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700"
+              aria-hidden="true"
+              ><i class="bi bi-people-fill"></i
+            ></span>
+            <div class="min-w-0">
+              <p
+                class="text-xs font-semibold uppercase tracking-wider text-indigo-700"
+              >
+                Target audience
+              </p>
+              <h3
+                id="campaign-details-audience-name"
+                class="mt-1 truncate text-base font-bold text-slate-900"
+              >
+                Loading segment...
+              </h3>
+              <p
+                id="campaign-details-audience-meta"
+                class="mt-1 truncate text-xs text-slate-600"
+              ></p>
+            </div>
+          </div>
+          <span
+            id="campaign-details-audience-status"
+            class="hidden shrink-0 rounded-md px-2.5 py-1.5 text-xs font-semibold"
+          ></span>
+        </div>
+        <div
+          class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-indigo-100 pt-3"
+        >
+          <div class="min-w-0">
+            <p
+              class="text-[11px] font-semibold uppercase tracking-wider text-slate-500"
+            >
+              Segment ID
+            </p>
+            <p
+              id="campaign-details-audience-id"
+              class="mt-1 truncate font-mono text-xs text-slate-600"
+            >
+              -
+            </p>
+          </div>
+          <button
+            id="btn-campaign-copy-segment-id"
+            type="button"
+            class="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50"
+            title="Copy segment ID"
+          >
+            <i class="bi bi-copy" aria-hidden="true"></i
+            ><span id="campaign-copy-segment-label">Copy ID</span>
+          </button>
+        </div>
+      </div>
+      <dl
+        id="campaign-details-metadata"
+        class="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4"
+      ></dl>
+      <section
+        class="mb-6 min-w-0 overflow-hidden rounded-2xl border border-indigo-100 bg-white shadow-sm"
+        aria-labelledby="campaign-details-workflow-heading"
+      >
+        <div
+          class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-gradient-to-r from-indigo-50/80 to-white px-5 py-4"
+        >
+          <div class="flex min-w-0 items-start gap-3">
+            <span
+              class="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700"
+              aria-hidden="true"
+              ><i class="bi bi-diagram-3-fill"></i
+            ></span>
+            <div class="min-w-0">
+              <h2
+                id="campaign-details-workflow-heading"
+                class="text-base font-bold text-slate-900"
+              >
+                Customer journey workflow
+              </h2>
+              <p class="mt-1 text-sm text-slate-500">
+                Read-only workflow saved with this campaign.
+              </p>
+            </div>
+          </div>
+          <span
+            id="campaign-details-workflow-version"
+            class="rounded-md bg-indigo-50 px-2.5 py-1.5 text-xs font-semibold text-indigo-700"
+          ></span>
+        </div>
+        <div class="relative min-w-0">
+          <div
+            id="campaign-details-workflow-studio"
+            class="campaign-workflow-studio-viewport min-w-0 bg-slate-50"
+            tabindex="0"
+            role="region"
+            aria-label="Workflow diagram. Scroll horizontally or vertically inside this area to view the complete workflow."
+            aria-live="polite"
+          >
+            <div
+              class="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500"
+            >
+              Loading customer journey...
+            </div>
+          </div>
+        </div>
+      </section>
+    </section>
+    <section
+      id="campaign-details-panel-strategy"
+      role="tabpanel"
+      aria-labelledby="campaign-details-tab-strategy"
+      class="campaign-details-panel hidden bg-white border border-slate-200 rounded-2xl p-6"
+    >
+      <h2 class="text-base font-bold text-slate-900 mb-4">
+        Strategy and agent provenance
+      </h2>
+      <p
+        id="campaign-details-strategy"
+        class="text-sm leading-6 text-slate-700 whitespace-pre-wrap"
+      ></p>
+      <pre
+        id="campaign-details-ai-plan"
+        class="mt-5 overflow-auto rounded-lg bg-slate-950 p-4 text-xs text-slate-100"
+      ></pre>
+      <pre
+        id="campaign-details-agent"
+        class="mt-5 overflow-auto rounded-lg bg-slate-50 border border-slate-200 p-4 text-xs text-slate-700"
+      ></pre>
+    </section>
+    <section
+      id="campaign-details-panel-content"
+      role="tabpanel"
+      aria-labelledby="campaign-details-tab-content"
+      class="campaign-details-panel hidden bg-white border border-slate-200 rounded-2xl p-6"
+    >
+      <h2 class="text-base font-bold text-slate-900 mb-4">Content plan</h2>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr
+              class="border-b border-slate-200 text-left text-xs uppercase tracking-wider text-slate-500"
+            >
+              <th class="py-3 pr-4">Position</th>
+              <th class="py-3 pr-4">Title</th>
+              <th class="py-3 pr-4">Type</th>
+              <th class="py-3">Role</th>
+            </tr>
+          </thead>
+          <tbody
+            id="campaign-details-content-items"
+            class="divide-y divide-slate-100"
+          ></tbody>
+        </table>
+      </div>
+    </section>
+    <section
+      id="campaign-details-panel-report"
+      role="tabpanel"
+      aria-labelledby="campaign-details-tab-report"
+      class="campaign-details-panel hidden bg-white border border-slate-200 rounded-2xl p-6"
+    >
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <h2 class="text-base font-bold text-slate-900">Performance report</h2>
+        <div class="flex items-center gap-2">
+          <input
+            id="campaign-report-start"
+            type="date"
+            class="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            aria-label="Report start date"
+          /><input
+            id="campaign-report-end"
+            type="date"
+            class="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            aria-label="Report end date"
+          /><button
+            id="btn-campaign-report-refresh"
+            type="button"
+            class="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white"
+          >
+            Refresh
+          </button>
+        </div>
+      </div>
+      <div
+        id="campaign-report-warning"
+        class="hidden mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+      ></div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr
+              class="border-b border-slate-200 text-left text-xs uppercase tracking-wider text-slate-500"
+            >
+              <th class="py-3 pr-4">Date</th>
+              <th class="py-3 pr-4">Spend</th>
+              <th class="py-3 pr-4">Impressions</th>
+              <th class="py-3 pr-4">Clicks</th>
+              <th class="py-3 pr-4">Conversions</th>
+              <th class="py-3">Revenue</th>
+            </tr>
+          </thead>
+          <tbody
+            id="campaign-report-daily"
+            class="divide-y divide-slate-100"
+          ></tbody>
+        </table>
+      </div>
+    </section>
+    <section
+      id="campaign-details-panel-history"
+      role="tabpanel"
+      aria-labelledby="campaign-details-tab-history"
+      class="campaign-details-panel hidden bg-white border border-slate-200 rounded-2xl p-6"
+    >
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 class="text-base font-bold text-slate-900">
+            State and approval history
+          </h2>
+          <p class="mt-1 text-sm text-slate-500">
+            Newest first. Recorded campaign reviews and audit changes; runtime
+            and workflow reviews may not be recorded here.
+          </p>
+        </div>
+        <button
+          id="btn-campaign-history-refresh"
+          type="button"
+          class="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+        >
+          Refresh history
+        </button>
+      </div>
+      <div class="my-4 flex flex-wrap items-center gap-3">
+        <label
+          class="text-sm font-semibold text-slate-700"
+          for="campaign-history-filter"
+          >Show</label
+        ><select
+          id="campaign-history-filter"
+          class="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+        >
+          <option value="all">All activity</option>
+          <option value="states">State changes</option>
+          <option value="review">Approval decisions</option></select
+        ><span
+          id="campaign-history-count"
+          class="text-xs text-slate-500"
+          aria-live="polite"
+        ></span>
+      </div>
+      <div
+        id="campaign-history-error"
+        class="hidden mb-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700"
+        role="alert"
+      ></div>
+      <ol
+        id="campaign-details-history"
+        class="space-y-4"
+        aria-live="polite"
+      ></ol>
+    </section>
+    <section
+      id="campaign-details-panel-experiments"
+      role="tabpanel"
+      aria-labelledby="campaign-details-tab-experiments"
+      class="campaign-details-panel hidden space-y-5"
+    >
+      <div class="bg-white border border-slate-200 rounded-2xl p-6">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 class="text-base font-bold text-slate-900">
+              A/B targeting experiments
+            </h2>
+            <p class="mt-1 text-sm text-slate-500">
+              Compare multiple audience segments against a primary metric before
+              choosing a winning target.
+            </p>
+          </div>
+          <span
+            class="rounded-md bg-indigo-50 px-2.5 py-1.5 text-xs font-semibold text-indigo-700"
+            >Traffic must total 100%</span
+          >
+        </div>
+        <div
+          id="campaign-experiment-error"
+          class="hidden mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700"
+          role="alert"
+        ></div>
+        <form id="campaign-experiment-form" class="mt-5 space-y-4">
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <label class="text-sm font-semibold text-slate-700 md:col-span-2"
+              >Experiment name<input
+                id="campaign-experiment-name"
+                required
+                class="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
+                placeholder="Audience test - dormant VIPs" /></label
+            ><label class="text-sm font-semibold text-slate-700"
+              >Primary metric<select
+                id="campaign-experiment-metric"
+                class="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
+              >
+                <option value="conversions">Conversions</option>
+                <option value="revenue">Revenue</option>
+                <option value="roas">ROAS</option>
+                <option value="cvr">Conversion rate</option>
+              </select></label
+            >
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <h3 class="text-sm font-bold text-slate-800">Audience variants</h3>
+            <button
+              id="btn-campaign-experiment-add-variant"
+              type="button"
+              class="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+            >
+              <i class="bi bi-plus-lg" aria-hidden="true"></i>Add variant
+            </button>
+          </div>
+          <div id="campaign-experiment-variants" class="space-y-3"></div>
+          <div
+            class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4"
+          >
+            <span
+              id="campaign-experiment-allocation"
+              class="text-xs font-semibold text-slate-500"
+              >0% allocated</span
+            ><button
+              type="submit"
+              class="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
+            >
+              Create experiment
+            </button>
+          </div>
+        </form>
+      </div>
+      <div id="campaign-experiments-list" class="space-y-4"></div>
+    </section>
+  </div>
+  <dialog
+    id="campaign-state-modal"
+    aria-labelledby="campaign-state-modal-title"
+    aria-describedby="campaign-state-modal-description"
+    class="campaign-state-modal overflow-y-auto rounded-2xl border-0 bg-white p-0 text-slate-900 shadow-2xl"
+  >
+    <form id="campaign-state-form" novalidate>
+      <header
+        class="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5"
+      >
+        <div class="flex items-start gap-3">
+          <span
+            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-700"
+            ><i class="bi bi-arrow-left-right text-lg" aria-hidden="true"></i
+          ></span>
+          <div>
+            <h2 id="campaign-state-modal-title" class="text-lg font-bold">
+              Manage campaign state
+            </h2>
+            <p
+              id="campaign-state-modal-description"
+              class="mt-1 max-w-md text-sm leading-5 text-slate-500"
+            >
+              Review each lifecycle state separately. Approval never starts
+              delivery.
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          data-campaign-state-close
+          aria-label="Close state management"
+          class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+        >
+          &times;
+        </button>
+      </header>
+      <div class="space-y-5 p-6">
+        <p id="campaign-state-modal-name" class="break-words text-sm font-semibold text-slate-800"></p>
+        <dl
+          id="campaign-state-modal-summary"
+          class="grid grid-cols-1 gap-2 sm:grid-cols-3"
+          aria-label="Current campaign states"
+        >
+          <div
+            class="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3"
+          >
+            <dt
+              class="text-[11px] font-semibold uppercase tracking-wider text-slate-500"
+            >
+              Campaign approval
+            </dt>
+            <dd
+              id="campaign-state-modal-approval"
+              class="mt-1 break-words text-sm font-bold text-slate-900"
+            ></dd>
+          </div>
+          <div
+            class="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3"
+          >
+            <dt
+              class="text-[11px] font-semibold uppercase tracking-wider text-slate-500"
+            >
+              Pinned workflow
+            </dt>
+            <dd
+              id="campaign-state-modal-workflow"
+              class="mt-1 break-words text-sm font-bold text-slate-900"
+            ></dd>
+          </div>
+          <div
+            class="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3"
+          >
+            <dt
+              class="text-[11px] font-semibold uppercase tracking-wider text-slate-500"
+            >
+              Execution
+            </dt>
+            <dd
+              id="campaign-state-modal-execution"
+              class="mt-1 break-words text-sm font-bold text-slate-900"
+            ></dd>
+          </div>
+        </dl>
+        <label
+          class="block text-sm font-semibold text-slate-800"
+          for="campaign-state-action"
+          >Next action<select
+            id="campaign-state-action"
+            class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-3 text-sm font-medium text-slate-800 shadow-sm transition focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100"
+          ></select
+        ></label>
+        <p
+          id="campaign-state-action-description"
+          class="flex gap-2 rounded-xl border border-indigo-100 bg-indigo-50/60 px-4 py-3 text-sm leading-5 text-indigo-900"
+          aria-live="polite"
+        >
+          <i class="bi bi-info-circle mt-0.5 shrink-0" aria-hidden="true"></i
+          ><span></span>
+        </p>
+        <label
+          id="campaign-state-restart-confirm"
+          class="campaign-state-restart-confirm hidden cursor-pointer rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-5 text-amber-900"
+        >
+          <span class="flex items-start gap-3">
+            <input
+              id="campaign-state-restart-ack"
+              type="checkbox"
+              class="campaign-state-restart-checkbox mt-1 h-4 w-4 shrink-0 rounded border-amber-400 text-amber-600 focus:ring-amber-500"
+            />
+            <span>
+              <span class="flex items-center gap-2 font-semibold"><i class="bi bi-exclamation-triangle-fill text-amber-600" aria-hidden="true"></i><span>I understand this is a full replay</span></span>
+              <span class="mt-1 block text-[13px] leading-5 text-amber-800">Previously successful messages may be sent again to the current audience. There is no restart limit; verify provider configuration and consent first.</span>
+            </span>
+          </span>
+        </label>
+        <div id="campaign-state-reason-field" class="hidden">
+          <label
+            class="block text-sm font-semibold text-slate-800"
+            for="campaign-state-reason"
+            >Review reason
+            <span class="font-normal text-slate-500">(optional)</span></label
+          ><textarea
+            id="campaign-state-reason"
+            rows="3"
+            maxlength="2000"
+            aria-describedby="campaign-state-reason-help"
+            class="mt-2 w-full resize-y rounded-xl border border-slate-300 px-3.5 py-3 text-sm shadow-sm transition placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100"
+            placeholder="Explain the decision or changes needed."
+          ></textarea>
+          <p
+            id="campaign-state-reason-help"
+            class="mt-1 text-xs text-slate-500"
+          >
+            Included in the review record. Maximum 2,000 characters.
+          </p>
+        </div>
+        <div
+          id="campaign-state-error"
+          class="hidden rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700"
+          role="alert"
+          tabindex="-1"
+        ></div>
+      </div>
+      <footer
+        class="flex flex-col-reverse gap-2 border-t border-slate-200 bg-slate-50 px-6 py-4 sm:flex-row sm:justify-end"
+      >
+        <button
+          type="button"
+          data-campaign-state-close
+          class="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+        >
+          Cancel</button
+        ><button
+          id="campaign-state-confirm"
+          type="submit"
+          class="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Confirm action
+        </button>
+      </footer>
+    </form>
+  </dialog>
+</main>

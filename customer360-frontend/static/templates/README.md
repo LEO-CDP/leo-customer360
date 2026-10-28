@@ -1,0 +1,1 @@
+# handlerbars templates for the customer360-frontend app

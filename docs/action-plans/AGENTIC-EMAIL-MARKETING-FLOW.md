@@ -5,16 +5,17 @@
 This plan defines the v2.0 Beta path for a complete marketer workflow:
 
 1. Select a segment by `segment_id` from PostgreSQL and sync matched profiles to the correct `crm_*` tables.
-2. Create an email template draft with AI agents (Gemini or OpenAI) and human review.
-3. Create a campaign draft with AI strategy and objectives, attach schedule and content plan, then require human approval before run.
+2. Create message templates with AI agents (Gemini or OpenAI) and human review.
+3. Create a campaign workflow draft with AI strategy and objectives, attach
+   schedule and content plan, then require human approval before run.
 
 Final business outcome:
 
-Segment -> CRM sync routing -> AI template draft -> AI campaign draft -> Human approval -> Dispatch -> Track -> Feedback into Customer 360.
+Segment -> CRM sync routing -> AI message/template activation -> AI workflow draft -> Human approval -> Per-profile workflow execution -> Track -> Feedback into Customer 360.
 
 ## Verified Ground Truth (Repo Audit)
 
-### Database schema reality (`database-init/database-schema.sql`)
+### Database schema reality (`customer360-database/database-schema.sql`)
 
 - `cdp_segments` exists and supports segment selection by `segment_id`.
 - `cdp_master_profiles` exists and carries `lifecycle_stage` (`prospect`, `lead`, `customer`, `vip`, `dormant`, `churn_risk`) and personalization fields.
@@ -30,10 +31,11 @@ Segment -> CRM sync routing -> AI template draft -> AI campaign draft -> Human a
 Schema gaps that must be addressed in this story:
 
 - `crm_lead` currently has no `lead_source_id` foreign key.
-- `crm_campaign` currently has no `segment_id`, `template_id`, or campaign-content relation table.
+- `crm_campaign` owns `segment_id` and a pinned workflow version; it has no
+  direct `crm_message_templates` link.
 - No dedicated email-template table exists yet.
 
-### Dagster service reality (`backend-system/*/dagster_defs.py`)
+### Dagster service reality (`customer360-backend/*/dagster_defs.py`)
 
 Implemented and active:
 
@@ -83,7 +85,7 @@ Implication: this story must convert `campaign_activation` and `email_engine` to
 
 ### SUBTASK-01: Schema and Migration Foundation
 
-Component: `database-init/migrations`  
+Component: `customer360-database/migrations`
 Priority: P0 Blocker  
 Depends on: none  
 Blocks: SUBTASK-02..08  
@@ -95,11 +97,11 @@ Add missing relational structure so your target workflow can be implemented with
 
 Scope of Work
 
-- Create `crm_email_templates` with at least:
+- Create `crm_message_templates` with at least:
   - `template_id`, `tenant_id`, `name`, `subject`, `html_body`, `text_body`, `variables`, `status`, `created_by`, `approved_by`, `approved_at`, `metadata`.
 - Extend `crm_campaign` with:
   - `segment_id` FK -> `cdp_segments.segment_id`
-  - `template_id` FK -> `crm_email_templates.template_id`
+  - `template_id` FK -> `crm_message_templates.template_id`
   - `approval_status` (`Draft`, `InReview`, `Approved`, `Rejected`)
   - `approved_by`, `approved_at`
   - `strategy_summary` (text) and optional `ai_plan` (jsonb)
@@ -124,7 +126,7 @@ Schema supports direct implementation of your three goals with no missing column
 
 ### SUBTASK-02: Segment-ID Driven CRM Sync Engine
 
-Component: `customer360-api/core` + `backend-system/data_synch`  
+Component: `customer360-api/core` + `customer360-backend/data_synch`
 Priority: P0 Blocker  
 Depends on: SUBTASK-01  
 Blocks: SUBTASK-03, SUBTASK-05, SUBTASK-08  
@@ -171,7 +173,7 @@ Marketer can select a segment and synchronize profile subsets into the expected 
 
 ### SUBTASK-03: AI Email Template Authoring (Gemini/OpenAI)
 
-Component: `customer360-api/core` + `backend-system/email_engine`  
+Component: `customer360-api/core` + `customer360-backend/email_engine`
 Priority: P0 Blocker  
 Depends on: SUBTASK-01, SUBTASK-02  
 Blocks: SUBTASK-05, SUBTASK-08  
@@ -196,7 +198,7 @@ Scope of Work
   - html body
   - text body
   - required placeholders (`unsubscribe_url`, name fields)
-- Save templates in `crm_email_templates` with initial `Draft` status.
+- Save templates in `crm_message_templates` with initial `Draft` status.
 - Add review API:
   - approve/reject/edit template before campaign use.
 - Add basic prompt and output safety checks (length, forbidden claims, HTML safety).
@@ -213,7 +215,7 @@ AI template generation works with strict draft-and-review governance.
 
 ### SUBTASK-04: AI Campaign Strategy and Draft Creation
 
-Component: `customer360-api/core` + `backend-system/campaign_orchestration`  
+Component: `customer360-api/core` + `customer360-backend/campaign_orchestration`
 Priority: P0 Blocker  
 Depends on: SUBTASK-01, SUBTASK-02, SUBTASK-03  
 Blocks: SUBTASK-05, SUBTASK-08  
@@ -256,7 +258,7 @@ AI can prepare complete campaign drafts; human approval remains mandatory gate t
 
 ### SUBTASK-05: Dagster Execution Modernization (Campaign + Email)
 
-Component: `backend-system/campaign_activation` + `backend-system/email_engine`  
+Component: `customer360-backend/campaign_activation` + `customer360-backend/email_engine`
 Priority: P0 Blocker  
 Depends on: SUBTASK-02, SUBTASK-03, SUBTASK-04  
 Blocks: SUBTASK-06, SUBTASK-08  
@@ -294,7 +296,7 @@ Email campaign execution path is production-like and orchestrated through real D
 
 ### SUBTASK-06: Tracking, Webhooks, and Compliance Feedback
 
-Component: `customer360-api/core/routers` + `data-tracking-api`  
+Component: `customer360-api/core/routers` + `customer360-event-api`
 Priority: P0 Blocker  
 Depends on: SUBTASK-05  
 Blocks: SUBTASK-07, SUBTASK-08  
@@ -324,7 +326,7 @@ Closed-loop event capture and compliance suppression updates are operational.
 
 ### SUBTASK-07: Customer 360 Feedback and Performance Rollups
 
-Component: `backend-system` + `customer360-api` + `analytics`  
+Component: `customer360-backend` + `customer360-api` + `analytics`
 Priority: P0 Blocker  
 Depends on: SUBTASK-06  
 Blocks: SUBTASK-08  
@@ -353,7 +355,7 @@ Email engagement data becomes actionable in profile and campaign analytics.
 
 ### SUBTASK-08: End-to-End Automated Test Suite (Learn from Simulator)
 
-Component: cross-cutting (`all-data-simulator`, `backend-system`, `customer360-api`)  
+Component: cross-cutting (`customer360-seeding`, `customer360-backend`, `customer360-api`)
 Priority: P0 Blocker (Beta Gate)  
 Depends on: SUBTASK-01..07  
 Estimate: 8 pts
@@ -362,9 +364,9 @@ Description
 
 Build a full E2E suite based on already-proven test patterns from:
 
-- `all-data-simulator/web_user_simulator.py`
-- `all-data-simulator/test_web_user_simulator.py`
-- `all-data-simulator/run_tracking_analytics_e2e.sh`
+- `customer360-seeding/web_user_simulator.py`
+- `customer360-seeding/test_web_user_simulator.py`
+- `customer360-seeding/run_tracking_analytics_e2e.sh`
 
 Required E2E sequence
 
@@ -439,8 +441,10 @@ Use this checklist as the implementation tracker for all technical tasks in this
 
 ### B. PostgreSQL Data Tables Checklist
 
-- [ ] Create `crm_email_templates` table with subject, html/text body, variables, status, approvals, metadata, and `tenant_id`.
-- [ ] Alter `crm_campaign` to add `segment_id`, `template_id`, `approval_status`, `approved_by`, `approved_at`, and AI planning fields.
+- [ ] Create `crm_message_templates` table with message type, persona, context, subject, html/text body, variables, status, approvals, metadata, and `tenant_id`.
+- [ ] Alter `crm_campaign` to add `segment_id`, `workflow_id`,
+  `workflow_version`, `approval_status`, `approved_by`, `approved_at`, and AI
+  planning fields. Do not link campaigns to `crm_message_templates`.
 - [ ] Alter `crm_lead` to add `lead_source_id` FK to `crm_lead_source`.
 - [ ] Create `crm_campaign_content_items` relation table to map campaign-to-content (`cdp_content_items`).
 - [ ] Create `crm_segment_sync_runs` audit table for each segment sync run.

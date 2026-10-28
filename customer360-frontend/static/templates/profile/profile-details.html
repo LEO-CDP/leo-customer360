@@ -1,0 +1,283 @@
+<!-- 
+  =============================================================================
+  CUSTOMER 360 PROFILE DETAIL - 3-COLUMN DASHBOARD GRID LAYOUT
+  =============================================================================
+  Features:
+  - Responsive 12-column grid layout (automatically collapses to a single column on mobile screens)
+  - Balanced column spans: Left (3 cols), Center (6 cols), Right (3 cols)
+  - Consistent vertical rhythm (`space-y-6`) and gap spacing (`gap-6`) matching the modern card design system
+  - Centered max-width container wrapper for large screen layouts
+-->
+<div class="max-w-[1600px] mx-auto px-6 py-6">
+  <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+    <!-- LEFT COLUMN: Identity & Channels -->
+    <div class="lg:col-span-3 space-y-6">
+      {{> identity}}
+      {{> persona}}
+      {{> channels}}
+    </div>
+
+    <!-- CENTER COLUMN: Overview, Segments, Engagement, Activity & Timeline -->
+    <div class="lg:col-span-6 space-y-6">
+      {{> overview}}     
+      {{> data_source_analytics}}
+      {{> segments}}
+      {{> engagement}}
+      {{> activity}}
+      {{> domain-attributes}}
+      {{> [linked-raw-profiles]}}
+      {{> timeline}}
+    </div>
+
+    <!-- RIGHT COLUMN: Scoring & Personalized Items -->
+    <div class="lg:col-span-3 space-y-6">
+      {{> scoring}}
+
+      {{> [personalized-items]}}
+    </div>
+
+  </div>
+</div>
+
+<div id="master-profile-edit-modal" class="fixed inset-0 z-50 hidden bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-0 sm:p-2 md:p-3" role="dialog" aria-modal="true" aria-labelledby="master-profile-edit-title">
+  <div class="bg-white sm:rounded-2xl shadow-2xl w-screen h-screen sm:w-[98vw] sm:h-[96vh] max-w-none flex flex-col border border-slate-100 overflow-hidden">
+    <!-- Sticky Header -->
+    <div class="flex items-center justify-between gap-4 border-b border-slate-100 px-6 py-4 shrink-0 bg-white">
+      <div class="flex items-center gap-3">
+        <div class="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+          </svg>
+        </div>
+        <div>
+          <h2 id="master-profile-edit-title" class="text-base font-bold text-slate-900 tracking-tight">Edit Personal Information</h2>
+          <p class="mt-0.5 text-xs text-slate-400">Update the customer identity, CRM lifecycle attributes, and standardized IAB audience tags across Customer 360.</p>
+        </div>
+      </div>
+      <button type="button" class="btn-close-master-profile-edit rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors" title="Close edit profile" aria-label="Close">
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+      </button>
+    </div>
+
+    <form id="master-profile-edit-form" class="flex-1 flex flex-col overflow-hidden">
+      <!-- Scrollable Body -->
+      <div class="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+        <div id="master-profile-edit-error" class="hidden rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-medium text-red-700"></div>
+
+        <!-- Section 1: Core Identity & Demographics -->
+        <div class="rounded-xl border border-slate-200/80 bg-slate-50/40 p-4">
+          <div class="flex items-center gap-2 mb-3.5">
+            <span class="text-xs font-bold text-slate-800 uppercase tracking-wider">Identity &amp; Contact Information</span>
+            <span class="text-[11px] text-slate-400">Personal details, contact channels, and physical address</span>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+            <div>
+              <label class="block text-[11px] text-slate-500 uppercase tracking-wider font-semibold mb-1.5">Full name</label>
+              <input name="full_name" type="text" placeholder="e.g. Nguyen Van An" class="master-profile-edit-field w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-500 uppercase tracking-wider font-semibold mb-1.5">First name</label>
+              <input name="first_name" type="text" placeholder="First name" class="master-profile-edit-field w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-500 uppercase tracking-wider font-semibold mb-1.5">Last name</label>
+              <input name="last_name" type="text" placeholder="Last name" class="master-profile-edit-field w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-500 uppercase tracking-wider font-semibold mb-1.5">Gender</label>
+              <select name="gender" class="master-profile-edit-field w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                <option value="">Unknown</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-500 uppercase tracking-wider font-semibold mb-1.5">Email</label>
+              <input name="email" type="email" placeholder="customer@example.com" class="master-profile-edit-field w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-500 uppercase tracking-wider font-semibold mb-1.5">Phone</label>
+              <input name="phone_number" type="tel" placeholder="+84..." class="master-profile-edit-field w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-500 uppercase tracking-wider font-semibold mb-1.5">Date of birth</label>
+              <input name="date_of_birth" type="date" placeholder="YYYY-MM-DD" pattern="[0-9]{4}-[0-9]{2}-[0-9]{2}" title="Use YYYY-MM-DD" class="master-profile-edit-field w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-500 uppercase tracking-wider font-semibold mb-1.5">Company</label>
+              <input name="company_name" type="text" placeholder="Company or organization" class="master-profile-edit-field w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+            </div>
+            <div class="sm:col-span-2 lg:col-span-4">
+              <label class="block text-[11px] text-slate-500 uppercase tracking-wider font-semibold mb-1.5">Address</label>
+              <input name="address" type="text" placeholder="Street address, ward/district, city, country" class="master-profile-edit-field w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 2: Business Domain, Lifecycle & Relationship -->
+        <div class="rounded-xl border border-slate-200/80 bg-slate-50/40 p-4">
+          <div class="flex items-center gap-2 mb-3.5">
+            <span class="text-xs font-bold text-slate-800 uppercase tracking-wider">Domain, Lifecycle &amp; Account Status</span>
+            <span class="text-[11px] text-slate-400">Business vertical, acquisition channel, and tier classification</span>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+            <div>
+              <label class="block text-[11px] text-slate-500 uppercase tracking-wider font-semibold mb-1.5">Domain</label>
+              <select name="domain" class="master-profile-edit-field w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                <option value="_">Unclassified / Not set</option>
+                <option value="banking">Banking &amp; Financial Services</option>
+                <option value="education">Education</option>
+                <option value="healthcare">Healthcare</option>
+                <option value="hospitality">Hospitality &amp; Food Service</option>
+                <option value="insurance">Insurance</option>
+                <option value="manufacturing">Manufacturing</option>
+                <option value="media">Media &amp; Entertainment</option>
+                <option value="real_estate">Real Estate</option>
+                <option value="retail">Retail &amp; E-Commerce</option>
+                <option value="telecom">Telecommunications</option>
+                <option value="travel">Travel &amp; Hospitality</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-500 uppercase tracking-wider font-semibold mb-1.5">Lifecycle stage</label>
+              <select name="lifecycle_stage" class="master-profile-edit-field w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                <option value="">Not set</option>
+                <option value="prospect">Prospect</option>
+                <option value="lead">Lead</option>
+                <option value="customer">Customer</option>
+                <option value="vip">VIP</option>
+                <option value="dormant">Dormant</option>
+                <option value="churn_risk">Churn risk</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-500 uppercase tracking-wider font-semibold mb-1.5">Account Status</label>
+              <select name="status_code" class="master-profile-edit-field w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                <option value="1">Active</option>
+                <option value="0">Inactive</option>
+                <option value="-1">Deleted</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-500 uppercase tracking-wider font-semibold mb-1.5">KYC Status</label>
+              <select name="kyc_status" class="master-profile-edit-field w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                <option value="">Unknown</option>
+                <option value="verified">Verified</option>
+                <option value="pending">Pending</option>
+                <option value="unverified">Unverified</option>
+                <option value="rejected">Rejected</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-500 uppercase tracking-wider font-semibold mb-1.5">Customer Tier</label>
+              <input name="customer_tier" type="text" placeholder="e.g. Gold, Platinum, VIP" class="master-profile-edit-field w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-500 uppercase tracking-wider font-semibold mb-1.5">Acquisition Source</label>
+              <input name="acquisition_source" type="text" placeholder="e.g. Organic, Facebook Ads, Shopee" class="master-profile-edit-field w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-500 uppercase tracking-wider font-semibold mb-1.5">Preferred channel</label>
+              <input name="preferred_channel" type="text" placeholder="e.g. Mobile App, Website, Zalo, Email" class="master-profile-edit-field w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-500 uppercase tracking-wider font-semibold mb-1.5">Primary Relationship</label>
+              <input name="primary_relationship" type="text" placeholder="e.g. Retail Buyer, Account Holder" class="master-profile-edit-field w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 3: Explicit marketing-consent evidence -->
+        <fieldset id="master-profile-consent-section" class="rounded-xl border border-emerald-200/80 bg-emerald-50/20 p-4">
+          <legend class="px-1 text-xs font-bold uppercase tracking-wider text-slate-800">Recorded Marketing Consent</legend>
+          <p class="mb-3 text-[11px] leading-relaxed text-slate-600">
+            Only check a channel when explicit consent evidence has been verified. Missing or non-boolean consent is treated as not granted. Browser tracking consent is separate from these marketing permissions.
+          </p>
+          <div id="master-profile-consent-fields" class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3" data-dirty="false">
+            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+              <input class="master-profile-consent-field" data-consent-key="email_opt_in" type="checkbox" />
+              <span>Email marketing</span>
+            </label>
+            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+              <input class="master-profile-consent-field" data-consent-key="sms_opt_in" type="checkbox" />
+              <span>SMS</span>
+            </label>
+            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+              <input class="master-profile-consent-field" data-consent-key="push_opt_in" type="checkbox" />
+              <span>Push</span>
+            </label>
+            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+              <input class="master-profile-consent-field" data-consent-key="zalo_opt_in" type="checkbox" />
+              <span>Zalo</span>
+            </label>
+            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+              <input class="master-profile-consent-field" data-consent-key="whatsapp_opt_in" type="checkbox" />
+              <span>WhatsApp</span>
+            </label>
+            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+              <input class="master-profile-consent-field" data-consent-key="voice_opt_in" type="checkbox" />
+              <span>Voice</span>
+            </label>
+            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+              <input class="master-profile-consent-field" data-consent-key="meta_ads_opt_in" type="checkbox" />
+              <span>Meta Ads audience</span>
+            </label>
+            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+              <input class="master-profile-consent-field" data-consent-key="google_ads_opt_in" type="checkbox" />
+              <span>Google Ads audience</span>
+            </label>
+            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+              <input class="master-profile-consent-field" data-consent-key="tiktok_ads_opt_in" type="checkbox" />
+              <span>TikTok audience</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <!-- Section 4: IAB Audience Taxonomy Tags (cdp_master_profiles.audience_tags) -->
+        <div id="master-profile-edit-audience-tags-section" class="rounded-xl border border-teal-200/80 bg-teal-50/30 p-4">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-2.5">
+            <div>
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="text-xs font-bold text-slate-800 uppercase tracking-wider">IAB Audience Taxonomy Tags</span>
+                <span class="font-mono text-[11px] text-teal-700 bg-teal-100/80 px-2 py-0.5 rounded-md">cdp_master_profiles.audience_tags</span>
+                <span id="profile-edit-audience-tags-count" class="inline-flex items-center rounded-full bg-teal-600 px-2 py-0.5 text-[11px] font-semibold text-white">0 selected</span>
+              </div>
+              <p class="text-xs text-slate-500 mt-0.5">Search and select standardized IAB 1.1 <code class="font-mono text-[11px]">tag_name</code> values for analytics, personalization, and programmatic targeting.</p>
+            </div>
+            <button id="btn-profile-edit-audience-tags-clear" type="button" class="text-xs font-semibold text-slate-500 hover:text-rose-600 transition-colors">Clear all</button>
+          </div>
+
+          <!-- Selected audience_tags pills -->
+          <div id="profile-edit-selected-audience-tags" class="flex flex-wrap gap-1.5 min-h-[36px] p-2.5 rounded-lg border border-slate-200 bg-white mb-3"></div>
+
+          <!-- Filter & search bar -->
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-2 mb-2">
+            <select id="profile-edit-audience-tier1-filter" class="text-xs border border-slate-200 bg-white rounded-lg px-3 py-2 text-slate-700 outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-600">
+              <option value="">All IAB Categories (Tier 1)</option>
+              <option value="Demographic">Demographic</option>
+              <option value="Interest">Interest</option>
+              <option value="Purchase Intent*">Purchase Intent*</option>
+            </select>
+            <div class="md:col-span-2 flex gap-1.5">
+              <input id="profile-edit-audience-tag-search" type="search" autocomplete="off" placeholder="Search IAB tag_name, tier, or ID (e.g. demographic/age-range/25-29)..." class="flex-1 text-xs border border-slate-200 bg-white rounded-lg px-3 py-2 text-slate-700 outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-600" />
+              <button id="btn-profile-add-custom-audience-tag" type="button" class="shrink-0 rounded-lg border border-teal-300 bg-white px-3 py-2 text-xs font-semibold text-teal-700 hover:bg-teal-50" title="Add typed tag_name">+ Add tag</button>
+            </div>
+          </div>
+
+          <!-- Database options list -->
+          <div id="profile-edit-audience-tag-options" class="max-h-60 overflow-y-auto rounded-lg border border-slate-200 bg-white divide-y divide-slate-100 text-xs">
+            <div class="px-3 py-3 text-slate-400 text-center">Loading IAB Audience Taxonomy options...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sticky Footer -->
+      <div class="flex items-center justify-end gap-2 border-t border-slate-100 px-6 py-4 shrink-0 bg-white">
+        <button type="button" class="btn-close-master-profile-edit border border-slate-200 bg-white rounded-xl px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50">Cancel</button>
+        <button type="submit" class="btn-save-master-profile inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700 shadow-sm">Save changes</button>
+      </div>
+    </form>
+  </div>
+</div>

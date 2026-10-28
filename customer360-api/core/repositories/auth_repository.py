@@ -1,138 +1,211 @@
-"""Repository for auth-related database operations.
+"""API-layer authentication orchestration facade."""
 
-Encapsulates the sys_user / sys_userinfo SQL used during Keycloak login
-provisioning. This keeps database access out of core/auth.py and follows the
-same OOP repository pattern used throughout customer360-api/core/repositories.
-"""
-
+import json
 import logging
-import re
+import ssl
+import urllib.error
+import urllib.parse
+import urllib.request
 from typing import Any, Optional
+from uuid import UUID
 
+from fastapi import HTTPException, status
 from sqlalchemy import text
-from sqlalchemy.orm import Session
 
-from core.config import settings
+from core.utils.rate_limiter import RedisRateLimiter
+from leo_customer360_dao.config import settings
+from leo_customer360_dao.utils.security import create_dev_access_token
 
 logger = logging.getLogger(__name__)
 
-# settings.db_schema is operator-controlled config (.env), never request
-# input, so it isn't attacker-reachable -- but every other value in these
-# queries is still passed as a bound parameter, never string-interpolated.
-# This regex is defense-in-depth: it fails loudly if db_schema is ever
-# misconfigured to something that isn't a plain SQL identifier, instead of
-# silently building an invalid/unsafe query.
-_SCHEMA_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-
-
-def _validated_schema(schema: str) -> str:
-    if not _SCHEMA_IDENTIFIER_RE.match(schema):
-        raise ValueError(f"Unsafe db_schema configured: {schema!r}")
-    return schema
-
 
 class AuthRepository:
-    """Encapsulates all database operations for login provisioning and identity resolution."""
+    """Own token, login metadata, and external OAuth coordination."""
 
-    def __init__(self, db: Session):
+    def __init__(self, db=None, user_repository_cls=None):
+        """Create an auth facade with an optional session and user class."""
         self.db = db
-        self._schema = _validated_schema(settings.db_schema)
+        self.user_repository_cls = user_repository_cls
+        self.rate_limiter = RedisRateLimiter(
+            max_attempts=settings.auth_rate_limit_max_attempts,
+            window_seconds=settings.auth_rate_limit_window_seconds,
+        )
 
-    def get_existing_user_for_keycloak_login(
-        self, tenant_id: str, provider_subject_id: str
-    ) -> Optional[dict[str, Any]]:
-        """Return the existing sys_user/sys_userinfo identity for a Keycloak subject in a tenant."""
-        row = self.db.execute(
+    def login_rate_limit_key(self, request, username):
+        """Build the username and client-IP login throttle key."""
+        client_ip = request.client.host if request.client else "unknown"
+        return f"login:{client_ip}:{username}"
+
+    def issue_token(self, tenant_id: UUID, user_id: Optional[UUID], username: str, roles: list[str]) -> dict[str, Any]:
+        """Issue a development access token response payload."""
+        token, expires_in = create_dev_access_token(
+            tenant_id=str(tenant_id), user_id=str(user_id) if user_id else None, username=username, roles=roles
+        )
+        return {"access_token": token, "token_type": "Bearer", "expires_in": expires_in}
+
+    def token_endpoint(self):
+        """Return the Keycloak authorization-code token endpoint."""
+        return f"{settings.sso_login_url.rstrip('/')}/realms/{settings.keycloak_realm}/protocol/openid-connect/token"
+
+    def end_session_endpoint(self):
+        """Return the Keycloak logout endpoint."""
+        return f"{settings.sso_login_url.rstrip('/')}/realms/{settings.keycloak_realm}/protocol/openid-connect/logout"
+
+    def _token_grant(self, form: dict[str, str], failure_detail: str) -> dict[str, Any]:
+        """Run an OIDC grant against the Keycloak token endpoint.
+
+        The client secret is added here so it stays server-side -- neither the
+        authorization code nor the refresh token is usable without it.
+        """
+        body = urllib.parse.urlencode({**form, "client_id": settings.keycloak_client_id, "client_secret": settings.keycloak_client_secret}).encode("utf-8")
+        request = urllib.request.Request(self.token_endpoint(), data=body, headers={"Content-Type": "application/x-www-form-urlencoded"}, method="POST")
+        context = None if settings.keycloak_verify_ssl else ssl._create_unverified_context()
+        try:
+            with urllib.request.urlopen(request, timeout=10, context=context) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as exc:
+            logger.warning("Keycloak %s grant failed with HTTP %s", form.get("grant_type"), exc.code)
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=failure_detail) from exc
+        except Exception as exc:
+            logger.warning("Keycloak token endpoint request failed", exc_info=True)
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Keycloak token endpoint unreachable") from exc
+
+    def exchange_code(self, code: str, redirect_uri: str) -> dict[str, Any]:
+        """Exchange an authorization code with Keycloak."""
+        return self._token_grant(
+            {"grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri},
+            "Could not exchange authorization code with Keycloak",
+        )
+
+    def refresh_tokens(self, refresh_token: str) -> dict[str, Any]:
+        """Exchange a refresh token for a fresh access token.
+
+        This is what keeps an admin signed in past one access-token lifetime;
+        Keycloak refuses the grant once the SSO session hits its own idle or
+        max lifespan, at which point the caller must sign in again.
+        """
+        return self._token_grant(
+            {"grant_type": "refresh_token", "refresh_token": refresh_token},
+            "Refresh token is expired or invalid",
+        )
+
+    def user_repository(self, db):
+        """Create the configured DAO user repository for a session."""
+        if self.user_repository_cls is None:
+            from leo_customer360_dao.repositories.user_repository import UserRepository
+
+            self.user_repository_cls = UserRepository
+        return self.user_repository_cls(db)
+
+    def get_login_user(self, db, username: str, tenant_id: UUID, include_password: bool = True):
+        """Load a local-login user and optionally its password hash for a tenant."""
+        repository = self.user_repository(db)
+        user = repository.get_user_by_username(username, tenant_id)
+        password_hash = (
+            repository.get_local_password_hash(user.user_id, tenant_id)
+            if user and include_password
+            else None
+        )
+        return user, password_hash
+
+    def get_user_roles(self, db, user_id: UUID, tenant_id: UUID) -> list[str]:
+        """Return active tenant RBAC role codes for a user."""
+        rows = db.execute(
             text(
                 f"""
-                SELECT u.user_id, u.tenant_id
-                FROM {self._schema}.sys_userinfo ui
-                JOIN {self._schema}.sys_user u ON ui.user_id = u.user_id
-                WHERE ui.tenant_id = :tenant_id
-                  AND ui.auth_provider = 'KEYCLOAK'
-                  AND ui.provider_subject_id = :provider_subject_id
+                SELECT r.role_code
+                FROM {settings.db_schema}.sys_user_role ur
+                JOIN {settings.db_schema}.sys_role r
+                  ON r.role_id = ur.role_id
+                 AND r.tenant_id = ur.tenant_id
+                WHERE ur.tenant_id = :tenant_id
+                  AND ur.user_id = :user_id
+                  AND r.status = 'ACTIVE'
+                ORDER BY r.role_code
                 """
             ),
-            {"tenant_id": tenant_id, "provider_subject_id": provider_subject_id},
-        ).mappings().first()
-        return dict(row) if row is not None else None
+            {"tenant_id": str(tenant_id), "user_id": str(user_id)},
+        ).scalars().all()
+        return [str(role_code) for role_code in rows]
 
-    def refresh_login_metadata(self, user_id: str, tenant_id: str, provider_subject_id: str) -> None:
-        """Update last_login_at on both sys_user and the matching sys_userinfo row."""
-        self.db.execute(
-            text(f"UPDATE {self._schema}.sys_user SET last_login_at = now() WHERE user_id = :uid"),
+    def update_last_login(self, db, user_id: UUID) -> None:
+        """Stamp the last successful local login for a user."""
+        db.execute(
+            text(f"UPDATE {settings.db_schema}.sys_user SET last_login_at = now() WHERE user_id = :uid"),
             {"uid": user_id},
         )
-        self.db.execute(
-            text(
-                f"""
-                UPDATE {self._schema}.sys_userinfo
-                SET last_login_at = now()
-                WHERE tenant_id = :tenant_id
-                  AND auth_provider = 'KEYCLOAK'
-                  AND provider_subject_id = :provider_subject_id
-                """
-            ),
-            {"tenant_id": tenant_id, "provider_subject_id": provider_subject_id},
-        )
-
-    def provision_new_user_for_keycloak_login(
-        self, tenant_id: str, payload: dict[str, Any], provider_subject_id: str
-    ) -> Optional[dict[str, str]]:
-        """Create a new sys_user + sys_userinfo pair when the tenant-scoped Keycloak identity is new."""
-        username = payload.get("preferred_username") or payload.get("email") or provider_subject_id
-        email = payload.get("email")
-        full_name = payload.get("name")
-
-        inserted_user = self.db.execute(
-            text(
-                f"""
-                INSERT INTO {self._schema}.sys_user
-                    (tenant_id, username, email, full_name, last_login_at)
-                VALUES (:tenant_id, :username, :email, :full_name, now())
-                RETURNING user_id, tenant_id
-                """
-            ),
-            {
-                "tenant_id": tenant_id,
-                "username": username,
-                "email": email,
-                "full_name": full_name,
-            },
-        ).mappings().first()
-
-        if inserted_user is None:
-            return None
-
-        user_id = inserted_user["user_id"]
-        self.db.execute(
-            text(
-                f"""
-                INSERT INTO {self._schema}.sys_userinfo
-                    (tenant_id, user_id, auth_provider, provider_subject_id, last_login_at)
-                VALUES (:tenant_id, :user_id, 'KEYCLOAK', :provider_subject_id, now())
-                """
-            ),
-            {
-                "tenant_id": tenant_id,
-                "user_id": user_id,
-                "provider_subject_id": provider_subject_id,
-            },
-        )
-        return {"user_id": str(user_id), "tenant_id": str(inserted_user["tenant_id"])}
 
     def get_or_create_keycloak_user(
         self, tenant_id: str, payload: dict[str, Any], provider_subject_id: str
     ) -> Optional[dict[str, str]]:
-        """Single entry point for the Keycloak login flow: refreshes an
-        existing identity's last_login_at, or provisions a new sys_user +
-        sys_userinfo pair. Kept as one cohesive repository call so
-        core.auth only owns session/transaction lifecycle (commit/rollback),
-        not the lookup-vs-provision branching."""
-        row = self.get_existing_user_for_keycloak_login(tenant_id, provider_subject_id)
-        if row is not None:
-            self.refresh_login_metadata(str(row["user_id"]), tenant_id, provider_subject_id)
-            return {"user_id": str(row["user_id"]), "tenant_id": str(row["tenant_id"])}
+        """Resolve or provision a tenant-scoped Keycloak identity."""
+        username = payload.get("preferred_username") or payload.get("email") or provider_subject_id
+        email = payload.get("email")
+        full_name = payload.get("name")
+        schema = settings.db_schema
+        if self.db is None:
+            raise RuntimeError("A database session is required for Keycloak user resolution")
+        existing = self._mapping_first(
+            self.db.execute(
+                text(
+                    f"SELECT u.user_id, u.tenant_id FROM {schema}.sys_userinfo ui "
+                    f"JOIN {schema}.sys_user u ON u.user_id = ui.user_id "
+                    "WHERE ui.auth_provider = 'KEYCLOAK' "
+                    "AND ui.provider_subject_id = :provider_subject_id "
+                    "AND ui.tenant_id = :tenant_id AND ui.status = 'ACTIVE' LIMIT 1"
+                ),
+                {"provider_subject_id": provider_subject_id, "tenant_id": tenant_id},
+            )
+        )
+        if existing:
+            self.db.execute(
+                text(f"UPDATE {schema}.sys_user SET last_login_at = now() WHERE user_id = :uid"),
+                {"uid": existing["user_id"]},
+            )
+            self.db.execute(
+                text(
+                    f"UPDATE {schema}.sys_userinfo SET last_login_at = now() "
+                    "WHERE tenant_id = :tenant_id AND auth_provider = 'KEYCLOAK' "
+                    "AND provider_subject_id = :provider_subject_id"
+                ),
+                {"tenant_id": tenant_id, "provider_subject_id": provider_subject_id},
+            )
+            return {"user_id": str(existing["user_id"]), "tenant_id": str(existing["tenant_id"])}
 
-        return self.provision_new_user_for_keycloak_login(tenant_id, payload, provider_subject_id)
+        created = self._mapping_first(
+            self.db.execute(
+                text(
+                    f"INSERT INTO {schema}.sys_user "
+                    "(tenant_id, username, email, full_name, status, last_login_at) "
+                    "VALUES (:tenant_id, :username, :email, :full_name, 'ACTIVE', now()) "
+                    "RETURNING user_id, tenant_id"
+                ),
+                {
+                    "tenant_id": tenant_id,
+                    "username": username,
+                    "email": email,
+                    "full_name": full_name,
+                },
+            )
+        )
+        if not created:
+            return None
+        self.db.execute(
+            text(
+                f"INSERT INTO {schema}.sys_userinfo "
+                "(tenant_id, user_id, auth_provider, provider_subject_id, status, last_login_at) "
+                "VALUES (:tenant_id, :user_id, 'KEYCLOAK', :provider_subject_id, 'ACTIVE', now())"
+            ),
+            {
+                "tenant_id": tenant_id,
+                "user_id": created["user_id"],
+                "provider_subject_id": provider_subject_id,
+            },
+        )
+        return {"user_id": str(created["user_id"]), "tenant_id": str(created["tenant_id"])}
 
+    @staticmethod
+    def _mapping_first(result) -> Optional[dict[str, Any]]:
+        """Return the first mapping from a SQLAlchemy result-like object."""
+        row = result.mappings().first()
+        return dict(row) if row else None

@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from core.auth import _get_or_create_user_on_login, _resolve_tenant_and_user
-from tests.conftest import FakeDBSession, FakeQueryResult
+from conftest import FakeDBSession, FakeQueryResult
 
 
 class GetOrCreateUserOnLoginTests(unittest.TestCase):

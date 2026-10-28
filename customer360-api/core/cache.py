@@ -19,7 +19,7 @@ Customer 360 API. Design goals:
   ``invalidate_prefix(<entity prefix>)`` after a successful create/update/
   delete, which SCAN+DELETEs every cache key stored under that prefix.
 
-CAVEAT: backend-system/identity_resolution (the CIR worker) writes to
+CAVEAT: customer360-backend/identity_resolution (the CIR worker) writes to
 ``cdp_raw_profiles_stage`` / ``cdp_master_profiles`` / etc. directly via
 psycopg2, bypassing this API entirely -- those writes do NOT trigger cache
 invalidation here. Staleness from that path is bounded by ``CACHE_TTL_SECONDS``
@@ -29,50 +29,36 @@ than a source of truth.
 
 import functools
 import hashlib
+import inspect
 import json
 import logging
 import uuid
+from datetime import date, datetime
 from typing import Any, Callable, Optional
 
 import redis
 from fastapi.encoders import jsonable_encoder
+from starlette.requests import Request
 
-from core.config import settings
+from leo_customer360_dao.cache import get_redis_client
+from leo_customer360_dao.config import settings
 
 logger = logging.getLogger(__name__)
-
-_client: Optional["redis.Redis"] = None
-_client_initialized = False
 
 # Only these simple, JSON-friendly kwarg types are folded into the cache key.
 # This is also what lets the decorator transparently skip the injected
 # SQLAlchemy `Session` (and any other non-primitive dependency) without the
 # caller having to name it explicitly.
-_CACHEABLE_PARAM_TYPES = (str, int, float, bool, uuid.UUID, type(None))
-
-
-def get_redis_client() -> Optional["redis.Redis"]:
-    """Lazily creates a singleton Redis client, or None if caching is disabled
-    or the client failed to initialize."""
-    global _client, _client_initialized
-    if not settings.cache_enabled:
-        return None
-    if not _client_initialized:
-        _client_initialized = True
-        try:
-            _client = redis.Redis(
-                host=settings.redis_host,
-                port=settings.redis_port,
-                db=settings.redis_db,
-                password=settings.redis_password or None,
-                decode_responses=True,
-                socket_connect_timeout=2,
-                socket_timeout=2,
-            )
-        except Exception:
-            logger.warning("Failed to initialize Redis client; caching disabled.", exc_info=True)
-            _client = None
-    return _client
+_CACHEABLE_PARAM_TYPES = (
+    str,
+    int,
+    float,
+    bool,
+    uuid.UUID,
+    date,
+    datetime,
+    type(None),
+)
 
 
 def _build_cache_key(prefix: str, params: dict[str, Any]) -> str:
@@ -90,7 +76,13 @@ def cache_get(key: str) -> Optional[Any]:
     except redis.RedisError:
         logger.warning("Redis GET failed for key=%s; falling back to DB.", key, exc_info=True)
         return None
-    return json.loads(raw) if raw is not None else None
+    if raw is None:
+        return None
+    try:
+        return json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        logger.warning("Redis cache entry was invalid JSON for key=%s; ignoring it.", key)
+        return None
 
 
 def cache_set(key: str, value: Any, ttl: Optional[int] = None) -> None:
@@ -99,7 +91,7 @@ def cache_set(key: str, value: Any, ttl: Optional[int] = None) -> None:
         return
     try:
         client.set(key, json.dumps(value, default=str), ex=ttl or settings.cache_ttl_seconds)
-    except redis.RedisError:
+    except (redis.RedisError, TypeError, ValueError):
         logger.warning("Redis SET failed for key=%s.", key, exc_info=True)
 
 
@@ -122,8 +114,10 @@ def invalidate_prefix(prefix: str) -> None:
         logger.warning("Redis SCAN/DELETE failed for prefix=%s.", prefix, exc_info=True)
 
 
-def cache_response(prefix: str, ttl: Optional[int] = None) -> Callable:
+def cache_response(prefix: str, ttl: Optional[int] = None, *, enabled: bool = True) -> Callable:
     """Decorator: caches a GET route's JSON-encoded result in Redis.
+
+    ``enabled=False`` bypasses reads/writes for externally updated state.
 
     Must be applied UNDER the router decorator (i.e. listed after
     ``@router.get(...)`` in source order) so FastAPI registers the caching
@@ -135,9 +129,23 @@ def cache_response(prefix: str, ttl: Optional[int] = None) -> Callable:
     """
 
     def decorator(func: Callable) -> Callable:
+        if not enabled:
+            return func
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            cache_params = {k: v for k, v in kwargs.items() if isinstance(v, _CACHEABLE_PARAM_TYPES)}
+            bound = inspect.signature(func).bind_partial(*args, **kwargs)
+            cache_params = {
+                name: value
+                for name, value in bound.arguments.items()
+                if isinstance(value, _CACHEABLE_PARAM_TYPES)
+            }
+            request = next(
+                (value for value in (*args, *kwargs.values()) if isinstance(value, Request)),
+                None,
+            )
+            request_tenant_id = getattr(getattr(request, "state", None), "tenant_id", None)
+            if request_tenant_id:
+                cache_params["_tenant_id"] = str(request_tenant_id)
             key = _build_cache_key(prefix, cache_params)
 
             cached_value = cache_get(key)

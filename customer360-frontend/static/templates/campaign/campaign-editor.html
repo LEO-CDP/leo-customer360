@@ -1,0 +1,182 @@
+<main id="campaign-editor-view" class="space-y-6" aria-label="Campaign editor">
+	<header class="flex flex-wrap items-start justify-between gap-4">
+		<div>
+			<button id="btn-campaign-editor-back" type="button" class="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-indigo-700 mb-3">
+				<span aria-hidden="true">&larr;</span><span>Back to campaigns</span>
+			</button>
+			<p id="campaign-editor-eyebrow" class="text-xs uppercase tracking-wider font-semibold text-indigo-600">Campaign workspace</p>
+			<h1 id="campaign-editor-title" class="text-2xl font-bold text-slate-900 mt-1">Create campaign</h1>
+			<p class="text-sm text-slate-500 mt-1">Update campaign metadata through the governed campaign API.</p>
+		</div>
+		<div class="flex items-center gap-2">
+			<span id="campaign-editor-version" class="text-xs font-mono text-slate-500 bg-slate-100 border border-slate-200 rounded-md px-2.5 py-1.5">New campaign</span>
+			<span id="campaign-editor-approval" class="hidden text-xs font-semibold rounded-md px-2.5 py-1.5"></span>
+		</div>
+	</header>
+
+	<div id="campaign-editor-error" class="hidden rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" role="alert"></div>
+	<div id="campaign-editor-success" class="hidden rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700" role="status"></div>
+	<div id="campaign-editor-loading" class="hidden rounded-xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500">Loading campaign...</div>
+
+	<form id="campaign-editor-form" class="space-y-6" novalidate>
+		<input id="campaign-editor-id" type="hidden" />
+		<input id="campaign-editor-updated-at" type="hidden" />
+
+		<section class="bg-white border border-slate-200 rounded-2xl shadow-sm p-5 sm:p-6">
+			<div class="mb-4">
+				<h2 class="text-base font-bold text-slate-900">Campaign metadata</h2>
+				<p class="text-sm text-slate-500 mt-1">These fields set the campaign route, audience language, schedule, and budget. Channel and platform follow the workflow studio options.</p>
+			</div>
+			<div class="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2 xl:grid-cols-3">
+				<label class="block min-w-0 text-sm font-semibold text-slate-700">Name<span class="text-rose-600"> *</span><input id="campaign-field-name" name="name" required placeholder="Enter a clear campaign name" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors placeholder:text-slate-400 hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100" /></label>
+				<label class="block min-w-0 text-sm font-semibold text-slate-700">Campaign code<input id="campaign-field-code" name="campaign_code" maxlength="100" placeholder="Optional internal reference" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 font-mono text-sm text-slate-800 shadow-sm transition-colors placeholder:font-sans placeholder:text-slate-400 hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100" /></label>
+				<label class="block min-w-0 text-sm font-semibold text-slate-700">Operational status<select id="campaign-field-status" name="status" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100"><option value="Draft">Draft</option><option value="Active">Active</option><option value="Running" disabled>Running (set by activation)</option><option value="Paused">Paused</option><option value="Completed">Completed</option><option value="Failed" disabled>Failed (set by runtime)</option></select></label>
+				<label class="block min-w-0 text-sm font-semibold text-slate-700" for="campaign-field-channel">
+					Channel
+					<select id="campaign-field-channel" name="channel" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100" aria-describedby="campaign-channel-help">
+						<option value="">Select a workflow channel</option>
+						<option value="email">Email</option>
+						<option value="notification">Notification</option>
+						<option value="push">Web push</option>
+						<option value="audience_sync">Custom audience sync</option>
+					</select>
+					<span id="campaign-channel-help" class="mt-1 block text-xs font-normal text-slate-500">Matches the message or audience-sync actions available in the workflow studio.</span>
+				</label>
+				<label class="block min-w-0 text-sm font-semibold text-slate-700" for="campaign-field-platform">
+					Platform
+					<select id="campaign-field-platform" name="platform" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100" aria-describedby="campaign-platform-help">
+						<option value="">Select a platform</option>
+					</select>
+					<span id="campaign-platform-help" class="mt-1 block text-xs font-normal text-slate-500">Choose the provider used by the selected workflow channel.</span>
+				</label>
+				<label class="block min-w-0 text-sm font-semibold text-slate-700" for="campaign-field-lang">
+					Language
+					<select id="campaign-field-lang" name="lang" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100" aria-describedby="campaign-language-help">
+						<option value="en">English</option>
+						<option value="vi">Vietnamese</option>
+						<option value="th">Thai</option>
+						<option value="id">Indonesian</option>
+						<option value="zh-CN">Chinese (Simplified)</option>
+						<option value="ja">Japanese</option>
+						<option value="ko">Korean</option>
+					</select>
+					<span id="campaign-language-help" class="mt-1 block text-xs font-normal text-slate-500">Used by the planning agent and content templates.</span>
+				</label>
+				<label class="block min-w-0 text-sm font-semibold text-slate-700 md:col-span-2">Description<textarea id="campaign-field-description" name="description" rows="3" placeholder="Briefly describe the campaign and its purpose" class="campaign-field mt-2 block w-full min-w-0 resize-y rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors placeholder:text-slate-400 hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100"></textarea></label>
+				<label class="block min-w-0 text-sm font-semibold text-slate-700">Keywords<input id="campaign-field-keywords" name="keywords" placeholder="e.g. retention, launch, email" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors placeholder:text-slate-400 hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100" /><span class="mt-1 block text-xs font-normal text-slate-500">Separate keywords with commas.</span></label>
+				<div class="col-span-full grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_11rem]">
+					<label class="block min-w-0 text-sm font-semibold text-slate-700">Start date<input id="campaign-field-start-date" name="start_date" type="date" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100" /></label>
+					<label class="block min-w-0 text-sm font-semibold text-slate-700">End date<input id="campaign-field-end-date" name="end_date" type="date" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100" /></label>
+					<label class="block min-w-0 text-sm font-semibold text-slate-700">Budget amount<input id="campaign-field-budget" name="budget_amount" type="number" min="0" step="0.01" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100" /></label>
+					<label class="block min-w-0 text-sm font-semibold text-slate-700">Currency<select id="campaign-field-currency" name="currency" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm uppercase text-slate-800 shadow-sm transition-colors hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100">
+						<option value="USD">USD - US Dollar</option>
+						<option value="EUR">EUR - Euro</option>
+						<option value="GBP">GBP - Pound Sterling</option>
+						<option value="JPY">JPY - Japanese Yen</option>
+						<option value="CNY">CNY - Chinese Yuan</option>
+						<option value="INR">INR - Indian Rupee</option>
+						<option value="AUD">AUD - Australian Dollar</option>
+						<option value="CAD">CAD - Canadian Dollar</option>
+						<option value="SGD">SGD - Singapore Dollar</option>
+						<option value="HKD">HKD - Hong Kong Dollar</option>
+						<option value="KRW">KRW - South Korean Won</option>
+						<option value="THB">THB - Thai Baht</option>
+						<option value="VND">VND - Vietnamese Dong</option>
+						<option value="IDR">IDR - Indonesian Rupiah</option>
+						<option value="MYR">MYR - Malaysian Ringgit</option>
+						<option value="PHP">PHP - Philippine Peso</option>
+					</select></label>
+				</div>
+			</div>
+		</section>
+
+		<section class="bg-white border border-indigo-200 rounded-2xl shadow-sm p-6">
+			<div class="mb-5">
+				<div class="flex items-center gap-2"><h2 class="text-base font-bold text-slate-900">Governed campaign plan</h2><span class="text-[11px] uppercase tracking-wider font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded px-2 py-1">Review required</span></div>
+				<p class="text-sm text-slate-500 mt-1">Changes here are audited and may return an approved campaign to InReview.</p>
+			</div>
+			<div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+				<div class="text-sm font-semibold text-slate-700 md:col-span-2">
+					<span>Audience segment</span>
+					<div id="campaign-segment-picker" class="mt-2 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+						<input id="campaign-field-segment" name="segment_id" type="hidden" />
+						<div id="campaign-segment-empty" class="flex flex-wrap items-center justify-between gap-3">
+							<div class="flex items-center gap-3 text-slate-500"><span class="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700" aria-hidden="true"><i class="bi bi-people-fill"></i></span><span><span class="block text-sm font-semibold text-slate-700">No audience selected</span><span class="block text-xs font-normal text-slate-500">Choose a saved segment for this campaign.</span></span></div>
+							<button id="btn-campaign-select-segment" type="button" class="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700"><i class="bi bi-search" aria-hidden="true"></i><span>Find segment</span></button>
+						</div>
+						<div id="campaign-segment-selected" class="hidden flex flex-wrap items-center justify-between gap-3">
+							<div class="flex min-w-0 items-center gap-3"><span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700" aria-hidden="true"><i class="bi bi-check2-circle"></i></span><span class="min-w-0"><span id="campaign-segment-selected-name" class="block truncate text-sm font-semibold text-slate-800">Selected segment</span><span id="campaign-segment-selected-meta" class="block truncate text-xs font-normal text-slate-500"></span></span></div>
+							<div class="flex items-center gap-2"><button id="btn-campaign-change-segment" type="button" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Change</button><button id="btn-campaign-clear-segment" type="button" class="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700" title="Clear selected segment" aria-label="Clear selected segment"><i class="bi bi-x-lg" aria-hidden="true"></i></button></div>
+						</div>
+						<p id="campaign-segment-warning" class="hidden mt-2 text-xs font-normal text-amber-700"></p>
+					</div>
+				</div>
+
+				<div class="col-span-full grid grid-cols-1 gap-5 md:grid-cols-2">
+					<label for="campaign-field-journey-stage" class="block min-w-0 text-sm font-semibold text-slate-700">Targeted Journey Stage
+						<select id="campaign-field-journey-stage" name="journey_stage" aria-describedby="campaign-journey-stage-help" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100">
+							<option value="">Select a journey stage</option>
+							<option value="awareness">1. Awareness</option>
+							<option value="acquisition">2. Acquisition</option>
+							<option value="activation">3. Activation</option>
+							<option value="engagement">4. Engagement</option>
+							<option value="conversion">5. Conversion</option>
+							<option value="retention">6. Retention</option>
+							<option value="loyalty">7. Loyalty</option>
+							<option value="churned">8. Churned</option>
+						</select>
+						<span id="campaign-journey-stage-help" class="mt-1 block text-xs font-normal text-slate-500">Place this campaign on the eight-stage Customer Journey Map.</span>
+					</label>
+					<label for="campaign-field-objective" class="block min-w-0 text-sm font-semibold text-slate-700">Objective
+						<select id="campaign-field-objective" name="objective" data-objectives='["Awareness","Leads","Conversions","App Install","Visit Store"]' aria-describedby="campaign-objective-help" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100">
+							<option value="">Select a campaign objective</option>
+						</select>
+						<span id="campaign-objective-help" class="mt-1 block text-xs font-normal text-slate-500">Choose the primary outcome this campaign should achieve.</span>
+					</label>
+				</div>
+				<label for="campaign-field-strategy" class="block min-w-0 text-sm font-semibold text-slate-700 md:col-span-2">Strategy summary
+					<span id="campaign-strategy-help" class="mt-1 block text-xs font-normal text-slate-500">Describe how the customer journey should work: entry point, message sequence, timing, branches, and intended outcome.</span>
+					<textarea id="campaign-field-strategy" name="strategy_summary" rows="4" aria-describedby="campaign-strategy-help" placeholder="Example: When a customer abandons a cart, send a reminder, wait two days, then follow up only if they have not purchased." class="campaign-field mt-2 block w-full min-w-0 resize-y rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors placeholder:text-slate-400 hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100"></textarea>
+				</label>
+				<label for="campaign-field-constraints" class="block min-w-0 text-sm font-semibold text-slate-700 md:col-span-2">Planning constraints
+					<span id="campaign-constraints-help" class="mt-1 block text-xs font-normal text-slate-500">Give the marketing planning agent hard limits to respect, such as budget caps, date windows, or allowed channels.</span>
+					<textarea id="campaign-field-constraints" name="budget_time_constraints" rows="3" aria-describedby="campaign-constraints-help" placeholder="Example: Maximum budget, campaign dates, and channels to include or exclude." class="mt-2 block w-full min-w-0 resize-y rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors placeholder:text-slate-400 hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100"></textarea>
+				</label>
+			</div>
+			<div class="mt-5 rounded-lg bg-slate-50 border border-slate-200 p-4 text-xs text-slate-600">AI plan and agent provenance are read-only. Saving pins this workflow to the campaign; activation runs the approved version. Simulation uses virtual time and estimated outcomes. Without a configured provider, delivery and audience sync are logged only.</div>
+			<section class="mt-6 min-w-0 overflow-hidden rounded-2xl border border-indigo-100 bg-white shadow-sm" aria-labelledby="campaign-workflow-heading">
+				<div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-gradient-to-r from-indigo-50/80 to-white px-5 py-4">
+					<div class="flex min-w-0 items-start gap-3">
+						<span class="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700" aria-hidden="true"><i class="bi bi-diagram-3-fill"></i></span>
+						<div class="min-w-0">
+							<h3 id="campaign-workflow-heading" class="text-base font-bold text-slate-900">Customer journey workflow</h3>
+							<p class="mt-1 text-sm text-slate-500">Design and simulate the journey using profiles from the selected audience.</p>
+						</div>
+					</div>
+					<span id="campaign-workflow-audience-status" class="max-w-full truncate rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600" aria-live="polite">Select an audience</span>
+				</div>
+				<div id="campaign-workflow-studio" class="min-w-0 bg-slate-50"></div>
+			</section>
+		</section>
+
+		<footer class="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50/95 py-4 backdrop-blur">
+			<button id="btn-campaign-editor-cancel" type="button" class="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
+			<div class="flex items-center gap-2"><button id="btn-campaign-editor-save" type="submit" class="rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700">Save campaign</button></div>
+		</footer>
+	</form>
+
+	<div id="campaign-segment-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4" role="dialog" aria-modal="true" aria-labelledby="campaign-segment-modal-title">
+		<div class="flex max-h-[min(680px,calc(100vh-2rem))] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+			<header class="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
+				<div><h2 id="campaign-segment-modal-title" class="text-lg font-bold text-slate-900">Choose audience segment</h2><p class="mt-1 text-sm text-slate-500">Search by segment name or tag. Only active, computed audiences are available for campaigns.</p></div>
+				<button id="btn-campaign-segment-modal-close" type="button" class="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-800" aria-label="Close segment picker"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+			</header>
+			<div class="border-b border-slate-200 p-4"><label for="campaign-segment-search" class="sr-only">Search segments by name or tag</label><div class="relative"><i class="bi bi-search pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true"></i><input id="campaign-segment-search" type="search" autocomplete="off" placeholder="Search by segment name or tag..." class="w-full rounded-xl border border-slate-300 bg-slate-50 py-3 pl-10 pr-4 text-sm outline-none transition focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-500/20" /></div></div>
+			<div id="campaign-segment-modal-loading" class="hidden p-10 text-center text-sm text-slate-500"><i class="bi bi-arrow-repeat mr-2 animate-spin" aria-hidden="true"></i>Loading segments...</div>
+			<div id="campaign-segment-modal-error" class="hidden m-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert"></div>
+			<div id="campaign-segment-modal-empty" class="hidden p-10 text-center"><i class="bi bi-people text-2xl text-slate-300" aria-hidden="true"></i><p class="mt-2 text-sm font-semibold text-slate-700">No matching active segments</p><p class="mt-1 text-xs text-slate-500">Try another name or tag, or create the audience in Segments first.</p></div>
+			<div id="campaign-segment-results" class="min-h-0 flex-1 overflow-y-auto p-4" aria-live="polite"></div>
+			<footer class="flex justify-end border-t border-slate-200 bg-slate-50 p-4"><button id="btn-campaign-segment-modal-cancel" type="button" class="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100">Cancel</button></footer>
+		</div>
+	</div>
+</main>

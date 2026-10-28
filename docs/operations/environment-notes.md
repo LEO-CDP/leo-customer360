@@ -1,8 +1,8 @@
 # Environment configuration notes
 
 The root `.env` file is the shared configuration for the Customer 360
-services. Use `.env.example` as its template. The `ads-server` service is
-independent and uses `ads-server/.env` from `ads-server/.env.example`.
+services. Use `.env.example` as its template. The `customer360-promotions` service is
+independent and uses `customer360-promotions/.env` from `customer360-promotions/.env.example`.
 
 ## General guidance
 
@@ -61,7 +61,7 @@ independent and uses `ads-server/.env` from `ads-server/.env.example`.
 ## Identity resolution and background jobs
 
 - `CIR_BATCH_SIZE`: Batch size for identity resolution processing. Default: `5000`
-- `CIR_POLL_INTERVAL_SECONDS`: Interval between identity resolution worker polls. Default: `30`
+- `CIR_POLL_INTERVAL_SECONDS`: Interval between identity resolution worker polls. Default: `600` (10 minutes)
 - `ANALYTICS_DATA_SOURCE_LIMIT`: Data sources processed per analytics run. Default: `10`
 - `ANALYTICS_LOCK_TTL_SECONDS`: Analytics Redis lock lifetime. Default: `3600`
 - `DAGSTER_UI_HOST`: Host interface for the Dagster UI. Default: `127.0.0.1`
@@ -73,7 +73,7 @@ independent and uses `ads-server/.env` from `ads-server/.env.example`.
 - `DEFAULT_ROOT_USERNAME`: Local bootstrap admin username. Default: `admin`
 - `DEFAULT_ROOT_PASSWORD`: Local bootstrap admin password. Default: `change_me_root_password`
 - `DEV_JWT_SECRET`: Shared secret used for local JWT issuance when SSO is disabled. Default: `change_me_dev_jwt_secret_min_32_bytes_long`
-- `DEV_JWT_EXPIRES_MINUTES`: Token lifetime for local dev JWTs. Default: `480`
+- `DEV_JWT_EXPIRES_MINUTES`: Token lifetime for local dev JWTs. Default: `30`
 - `C360_AUTH_RATE_LIMIT_MAX_ATTEMPTS`: Failed login attempts per window. Default: `10`
 - `C360_AUTH_RATE_LIMIT_WINDOW_SECONDS`: Login rate-limit window. Default: `60`
 - `SSO_LOGIN_URL`: Base URL of the Keycloak server. Default: `https://c360.example.com/auth`
@@ -82,6 +82,7 @@ independent and uses `ads-server/.env` from `ads-server/.env.example`.
 - `KEYCLOAK_CLIENT_SECRET`: Keycloak client secret. Default: `change_me_keycloak_client_secret`
 - `KEYCLOAK_CALLBACK_URL`: OAuth callback URL. Default: `https://c360.example.com/`
 - `KEYCLOAK_VERIFY_SSL`: Whether to verify SSL certificates for Keycloak requests. Default: `false`
+- `KEYCLOAK_TOKEN_EXPIRES_MINUTES`: Maximum accepted Keycloak access-token lifetime in `customer360-api`. Default: `30`; valid values are `1` through `30`. The Keycloak realm bootstrap also issues tokens with a 30-minute lifetime.
 
 ## Keycloak container settings
 
@@ -120,10 +121,12 @@ independent and uses `ads-server/.env` from `ads-server/.env.example`.
 - `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY`: Optional explicit credentials; omit them in AWS when using IAM roles.
 - `S3_FORCE_PATH_STYLE`: Required for MinIO. Default: `false`
 - `S3_AUTO_CREATE_BUCKETS`: Create `data-tracking-[data_source_id]` on first write. Default: `true`
-- `TRACKING_REDIS_KEY_PREFIX`: Prefix for tracking session and rate-limit keys. Default: `data-tracking-api`
+- `PRODUCT_IMPORT_S3_BUCKET` / `CONTENT_IMPORT_S3_BUCKET`: Product TSV and content-import buckets (defaults: `c360-product-imports` / `c360-content-imports`). The Customer 360 API verifies them at startup and creates any missing bucket when `S3_AUTO_CREATE_BUCKETS=true`.
+- `TRACKING_REDIS_KEY_PREFIX`: Prefix for tracking session and rate-limit keys. Default: `customer360-event-api`
 - `TRACKING_SESSION_TTL_SECONDS`: Session metadata TTL. Default: `86400`
 - `TRACKING_RATE_LIMIT_REQUESTS` / `TRACKING_RATE_LIMIT_WINDOW_SECONDS`: Per-IP request window. Defaults: `1000` / `360`
 - `TRACKING_RATE_LIMIT_FAIL_OPEN`: Allow ingestion when Redis rate limiting is unavailable. Default: `true`; use `false` for strict enforcement.
+- `TRACKING_RATE_LIMIT_WHITELIST`: Comma-separated client IPs/CIDRs exempt from the Redis limiter. Keep empty in production; local Compose may use `127.0.0.1,::1,172.16.0.0/12`.
 - `TRACKING_BOT_FILTER_ENABLED`: Enable configured user-agent filtering. Default: `true`
 - `TRACKING_BOT_USER_AGENT_PATTERNS`: Comma-separated case-insensitive user-agent substrings to discard.
 
@@ -135,29 +138,29 @@ independent and uses `ads-server/.env` from `ads-server/.env.example`.
 - `LEO_OPENAI_MODEL_NAME`: OpenAI model. Default: `gpt-5.6-luna`
 - `LEO_OPENAI_BASE_URL`: OpenAI-compatible API URL. Default: `YOUR_OPENAI_BASE_URL`
 
-## Independent ads-server settings
+## Independent customer360-promotions settings
 
-These keys belong only to `ads-server/.env`. They are not part of the root
+These keys belong only to `customer360-promotions/.env`. They are not part of the root
 global `.env` file.
 
 ### Ad server API
 
-- `LEO_AD_API_HOST`: API listen address. Default: `localhost`
-- `LEO_AD_API_PORT`: API listen port. Default: `9009`
-- `LEO_AD_TRACKING_BASE_URL`: Customer 360 tracking API URL. Default: `http://localhost:8010`
+- `c360_PROMOTION_API_HOST`: API listen address. Default: `localhost`
+- `c360_PROMOTION_API_PORT`: API listen port. Default: `9009`
+- `c360_PROMOTION_TRACKING_BASE_URL`: Customer 360 tracking API URL. Default: `http://localhost:8010`
 
 ### Ad server PostgreSQL
 
-- `LEO_AD_DB_HOST`: PostgreSQL host. Default: `localhost`
-- `LEO_AD_DB_PORT`: PostgreSQL port. Default: `5432`
-- `LEO_AD_DB_USER`: PostgreSQL user. Default: `postgres`
-- `LEO_AD_DB_PASSWORD`: PostgreSQL password. Set a private value.
-- `LEO_AD_DB_NAME`: Database name. Default: `customer360`
-- `LEO_AD_DB_SCHEMA`: Ads schema. Default: `leo_ads`
+- `c360_PROMOTION_DB_HOST`: PostgreSQL host. Default: `localhost`
+- `c360_PROMOTION_DB_PORT`: PostgreSQL port. Default: `5432`
+- `c360_PROMOTION_DB_USER`: PostgreSQL user. Default: `postgres`
+- `c360_PROMOTION_DB_PASSWORD`: PostgreSQL password. Set a private value.
+- `c360_PROMOTION_DB_NAME`: Database name. Default: `customer360`
+- `c360_PROMOTION_DB_SCHEMA`: Ads schema. Default: `leo_ads`
 
 ### Ad server Redis
 
-- `LEO_AD_REDIS_HOST`: Redis host. Default: `localhost`
-- `LEO_AD_REDIS_PORT`: Redis port. Default: `6580`
-- `LEO_AD_REDIS_DB`: Redis database number. Default: `0`
-- `LEO_AD_REDIS_PASSWORD`: Redis password. Set a private value.
+- `c360_PROMOTION_REDIS_HOST`: Redis host. Default: `localhost`
+- `c360_PROMOTION_REDIS_PORT`: Redis port. Default: `6580`
+- `c360_PROMOTION_REDIS_DB`: Redis database number. Default: `0`
+- `c360_PROMOTION_REDIS_PASSWORD`: Redis password. Set a private value.

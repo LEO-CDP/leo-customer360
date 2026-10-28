@@ -25,8 +25,15 @@ set -euo pipefail
 cd "$(dirname "$0")"           # deployments/server
 REPO_ROOT="$(cd ../.. && pwd)" # repo root (contains docs/ and tools/docs-vector-search/)
 
+# ACTION:
+#   deploy  (default) pull the image, ship the corpus, enrich, (re)start the server.
+#   reindex docs-only refresh: ship the corpus and run enrich with the image the RUNNING
+#           container already uses — no pull, no restart (the server reads pgvector per
+#           request). Used by docs-vector-index.yml via the CD `docs-index` step.
+#   destroy remove the containers.
 ENV="${1:-}"; ACTION="${2:-deploy}"
-case "$ENV" in uat | prod) ;; *) echo "Usage: ./deploy-docs-search.sh <uat|prod> [deploy|destroy]"; exit 1 ;; esac
+case "$ENV" in uat | prod) ;; *) echo "Usage: ./deploy-docs-search.sh <uat|prod> [deploy|reindex|destroy]"; exit 1 ;; esac
+case "$ACTION" in deploy | reindex | destroy) ;; *) echo "Usage: ./deploy-docs-search.sh <uat|prod> [deploy|reindex|destroy]"; exit 1 ;; esac
 
 # Keep CI-injected provider secrets authoritative if a developer's optional local
 # deployments/server/.env also exists on the runner.
@@ -42,6 +49,7 @@ DOCS_PORT="${DOCS_PORT:-8001}"
 DOCS_PG_SCHEMA="${DOCS_PG_SCHEMA:-rag}"
 DOCS_EMBEDDING_PROVIDER="${DOCS_EMBEDDING_PROVIDER:-openai}"
 DOCS_RERANK_ENABLED="${DOCS_RERANK_ENABLED:-true}"
+DOCS_ENRICH_BATCH_SIZE="${DOCS_ENRICH_BATCH_SIZE:-128}"
 DOCS_RERANK_PROVIDER="${DOCS_RERANK_PROVIDER:-openai}"
 DOCS_RERANK_MODEL="${DOCS_RERANK_MODEL:-BAAI/bge-reranker-base}"
 DOCS_OPENAI_RERANK_TIMEOUT_SECONDS="${DOCS_OPENAI_RERANK_TIMEOUT_SECONDS:-8}"
@@ -100,7 +108,7 @@ DOCS_CORS_ORIGINS="${DOCS_CORS_ORIGINS:-https://leo-cdp.github.io}"
 # Per-IP /ask rate limit for public callers (via Caddy/XFF). Tune per env; 0 disables.
 DOCS_ASK_RATE_MAX="${DOCS_ASK_RATE_MAX:-10}"
 DOCS_ASK_RATE_WINDOW_SEC="${DOCS_ASK_RATE_WINDOW_SEC:-60}"
-# Shared secret that lets the docs service treat the frontend-admin /ai proxy as an internal
+# Shared secret that lets the docs service treat the customer360-frontend /ai proxy as an internal
 # caller (exempt from the public rate limit). The default is leoragbot; override it for production:
 # admin AI traffic is rate-limited like any client. Set the SAME value as the frontend deploy's
 # DOCS_INTERNAL_AUTH_SECRET — export it once before deploying, put it in both
@@ -111,20 +119,12 @@ DOCS_TRUSTED_PROXY_HOPS="${DOCS_TRUSTED_PROXY_HOPS:-1}"
 DOCS_GGUF_URL="${DOCS_GGUF_URL:-https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf}"
 GGUF_NAME="Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"
 
-# Read a tfvars value: quoted-string content, or a bare token with a trailing comment stripped.
-tfval() {
-  local line; line="$(grep -E "^[[:space:]]*$1[[:space:]]*=" "$2" 2>/dev/null | head -1)"
-  case "$line" in
-    *\"*\"*) line="${line#*\"}"; printf '%s' "${line%%\"*}" ;;
-    *) line="${line#*=}"; line="${line%%#*}"; printf '%s' "$(printf '%s' "$line" | tr -d '[:space:]')" ;;
-  esac
-}
+. "$(cd "$(dirname "$0")/.." && pwd)/lib/tfvars.sh"   # tfval + srv_ip
 
 # --- resolve the target VM by map key from THIS module's outputs ---
 terraform workspace select "$ENV" >/dev/null 2>&1 || { echo "ERROR: no '$ENV' server workspace — deploy the server first."; exit 1; }
 SERVERS_JSON="$(terraform output -json servers 2>/dev/null || true)"
 [[ -n "$SERVERS_JSON" ]] || { echo "ERROR: no servers output."; exit 1; }
-srv_ip() { printf '%s' "$SERVERS_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); s=d.get(sys.argv[1]) or {}; print(next((i.get(sys.argv[2]) for i in (s.get("internal_interfaces") or []) if i.get(sys.argv[2])), ""))' "$1" "$2"; }
 FIP="$(srv_ip "$DOCS_SERVER_KEY" floating_ip)"
 # The 'docs' box is provisioned by this module (overlays servers map). If it isn't there yet,
 # SKIP rather than fail — so CD stays green until the box is applied; the next run picks it up.
@@ -145,6 +145,47 @@ if [[ "$ACTION" == "destroy" ]]; then
   echo ">> Removing $CONTAINER and $REDIS_CONTAINER on $BASTION ..."
   ssh "${SSH_OPTS[@]}" "$BASTION" "sudo docker rm -f $CONTAINER $REDIS_CONTAINER >/dev/null 2>&1 || true; echo '   removed'"
   exit 0
+fi
+
+# --- ship the corpus so enrich can chunk + embed it on the box ---
+# Only *.md is indexed (src.corpus ignores every other file), so ship just the markdown:
+# docs/ is ~65 MB with images/PDFs/excalidraw but only ~1.3 MB of .md — shipping the
+# whole tree was ~1.5 min of every deploy. Paths stay relative to docs/, as before.
+ship_corpus() {
+  echo ">> Shipping docs/ corpus (*.md only) ..."
+  ( cd "$REPO_ROOT/docs" && find . -type f -name '*.md' -print0 | tar --null -T - -czf - ) \
+    | ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo mkdir -p /opt/c360/docs-vector-search && sudo chown -R "$(id -un)" /opt/c360/docs-vector-search && sudo rm -rf /opt/c360/docs-vector-search/corpus /opt/c360/docs-vector-search/docs && mkdir -p /opt/c360/docs-vector-search/corpus && tar -C /opt/c360/docs-vector-search/corpus -xzf -'
+  # .documentignore goes to the corpus root so the indexer skips what the public site does not publish
+  # (otherwise the assistant cites pages that 404 there).
+  ssh "${SSH_OPTS[@]}" "$BASTION" 'cat > /opt/c360/docs-vector-search/corpus/.documentignore' < "$REPO_ROOT/.documentignore"
+}
+
+# --- docs-only refresh: re-embed with the image already running, no pull / restart ---
+if [[ "$ACTION" == "reindex" ]]; then
+  ship_corpus
+  echo ">> Re-indexing with the running container's image (no pull, no restart) ..."
+  if ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$CONTAINER" <<'REMOTE'
+set -euo pipefail
+CONTAINER="$1"
+img="$(sudo docker inspect -f '{{.Config.Image}}' "$CONTAINER" 2>/dev/null || true)"
+if [ -z "$img" ] || [ ! -f /opt/c360/docs-vector-search.env ]; then
+  echo "   no running $CONTAINER (or no env file) on this box — a full deploy is needed" >&2
+  exit 3
+fi
+echo "   enrich with $img"
+sudo docker run --rm --network host --env-file /opt/c360/docs-vector-search.env \
+  -v /opt/c360/docs-vector-search/corpus:/app/corpus:ro -v /opt/c360/docs-models:/app/models \
+  "$img" python -m src.enrich
+REMOTE
+  then
+    echo ">> Done. Index refreshed (/health 'loaded_chunks' updates on the next restart)."
+    exit 0
+  else
+    rc=$?
+    [[ "$rc" -eq 3 ]] || exit "$rc"
+    echo ">> Falling back to a full deploy."
+    ACTION="deploy"
+  fi
 fi
 
 # --- DB connection from the postgres deployment (same vDB; dedicated 'rag' schema) ---
@@ -180,10 +221,7 @@ if [[ "$DEPLOY_MODE" == "ghcr" && "$DOCS_IMAGE_TARGET" == "local" ]]; then
   exit 1
 fi
 
-# --- ship the corpus (docs/**) so enrich can chunk + embed it on the box ---
-echo ">> Shipping docs/ corpus ..."
-tar -C "$REPO_ROOT" -czf - docs \
-  | ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo mkdir -p /opt/c360/docs-vector-search && sudo chown -R "$(id -un)" /opt/c360/docs-vector-search && sudo rm -rf /opt/c360/docs-vector-search/corpus /opt/c360/docs-vector-search/docs && sudo tar -C /opt/c360/docs-vector-search -xzf - && sudo mv /opt/c360/docs-vector-search/docs /opt/c360/docs-vector-search/corpus && sudo chown -R "$(id -un)" /opt/c360/docs-vector-search/corpus'
+ship_corpus
 
 # OpenTelemetry (OTLP -> Jaeger) zero-code tracing lines. The docs box is dedicated (Jaeger is
 # NOT co-located on it), so point OTLP at the monitoring/api box's private fixed IP. UAT defaults
@@ -246,6 +284,7 @@ ASK_RATE_MAX=$DOCS_ASK_RATE_MAX
 ASK_RATE_WINDOW_SEC=$DOCS_ASK_RATE_WINDOW_SEC
 INTERNAL_API_SECRET=$DOCS_INTERNAL_AUTH_SECRET
 TRUSTED_PROXY_HOPS=$DOCS_TRUSTED_PROXY_HOPS
+DOCS_ENRICH_BATCH_SIZE=$DOCS_ENRICH_BATCH_SIZE
 $OTEL_LINES" | base64 | tr -d '\n')"
 
 echo ">> Fetching the model, refreshing the index (enrich), and (re)starting the container ..."
@@ -271,17 +310,26 @@ if [ -z "$(swapon --show 2>/dev/null)" ] && [ ! -f /swapfile ]; then
   grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
 fi
 
-# Reclaim disk before model/image operations. Each deploy pulls a new SHA-pinned image
-# containing the fastembed model cache. Remove the old docs container first so its image
-# layers become reclaimable; this is a dedicated docs VM, so full unused-image cleanup is
-# appropriate and prevents pull/extract from failing with "No space left on device".
-if command -v docker >/dev/null 2>&1; then
+# Reclaim disk before model/image operations: drop stale images so pulls can't fail with
+# "No space left on device". The RUNNING docs container is kept: `image prune -a` spares
+# the image it uses, so the new image's unchanged layers (python base + deps — only src/
+# changes on most commits) are already on disk and the pull fetches only the delta.
+# Removing the container first (the previous behaviour) wiped every layer, so each deploy
+# re-downloaded the whole image (~1 min) with the chatbot down meanwhile. A failed pull
+# falls back to the full cleanup below.
+reclaim_disk() {
   echo "   reclaiming disk (df before): $(df -h --output=avail / | tail -1 | tr -d ' ') free"
-  sudo docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
   sudo docker container prune -f >/dev/null 2>&1 || true
   sudo docker image prune -a -f   >/dev/null 2>&1 || true
   sudo docker builder prune -a -f >/dev/null 2>&1 || true
   echo "   reclaiming disk (df after):  $(df -h --output=avail / | tail -1 | tr -d ' ') free"
+}
+if command -v docker >/dev/null 2>&1; then
+  reclaim_disk
+  if [ "$(df --output=avail / | tail -1 | tr -d ' ')" -lt 1572864 ]; then   # < 1.5 GiB
+    echo "   low disk — removing the running docs container before the pull"
+    sudo docker rm -f "$CONTAINER" >/dev/null 2>&1 || true; reclaim_disk
+  fi
 fi
 
 MODELS_DIR=/opt/c360/docs-models
@@ -296,12 +344,17 @@ redis_port="$(awk -F= '$1=="DOCS_REDIS_PORT"{print $2}' /opt/c360/docs-vector-se
 redis_host="${redis_host:-127.0.0.1}"
 redis_port="${redis_port:-6580}"
 if [ "$redis_host" = "127.0.0.1" ] || [ "$redis_host" = "localhost" ]; then
-  echo "   starting local Redis for rate limiting (${redis_host}:${redis_port}, no auth) ..."
-  sudo docker rm -f "$REDIS_CONTAINER" >/dev/null 2>&1 || true
-  sudo docker pull "$REDIS_IMAGE" >/dev/null
-  sudo docker run -d --name "$REDIS_CONTAINER" --restart unless-stopped \
-    --network host --log-opt max-size=10m --log-opt max-file=3 \
-    "$REDIS_IMAGE" redis-server --port "$redis_port" --save "" --appendonly no >/dev/null
+  # Already running with the same image + port? Leave it (it only holds rate-limit counters).
+  if [ "$(sudo docker inspect -f '{{.State.Running}} {{.Config.Image}} {{join .Args " "}}' "$REDIS_CONTAINER" 2>/dev/null)" = "true $REDIS_IMAGE redis-server --port $redis_port --save  --appendonly no" ]; then
+    echo "   local Redis for rate limiting already running (${redis_host}:${redis_port})"
+  else
+    echo "   starting local Redis for rate limiting (${redis_host}:${redis_port}, no auth) ..."
+    sudo docker rm -f "$REDIS_CONTAINER" >/dev/null 2>&1 || true
+    sudo docker pull "$REDIS_IMAGE" >/dev/null
+    sudo docker run -d --name "$REDIS_CONTAINER" --restart unless-stopped \
+      --network host --log-opt max-size=10m --log-opt max-file=3 \
+      "$REDIS_IMAGE" redis-server --port "$redis_port" --save "" --appendonly no >/dev/null
+  fi
 else
   echo "   using external Redis for rate limiting at ${redis_host}:${redis_port}"
 fi
@@ -323,7 +376,11 @@ fi
 if [ "$DEPLOY_MODE" = "ghcr" ]; then
   echo "   pulling $IMAGE ..."
   [ -n "$GHCR_TOKEN" ] && printf %s "$GHCR_TOKEN" | sudo docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
-  docker_pull_retry "$IMAGE"
+  if ! sudo docker pull "$IMAGE"; then
+    echo "   pull failed with the old container still up — freeing its layers and retrying"
+    sudo docker rm -f "$CONTAINER" >/dev/null 2>&1 || true; reclaim_disk
+    docker_pull_retry "$IMAGE"
+  fi
   RUN_IMG="$IMAGE"
 else
   sed -i 's/ --mount=[^ ]*//g' /opt/c360/tools/docs-vector-search/Dockerfile 2>/dev/null || true
@@ -335,7 +392,12 @@ fi
 VOLS=(-v "$CORPUS_DIR:/app/corpus:ro" -v "$MODELS_DIR:/app/models")
 
 # refresh the index first (chunk -> embed -> upsert into pgvector; creates the rag schema
-# idempotently). --rm so it never lingers holding RAM alongside the server.
+# idempotently). --rm so it never lingers holding RAM alongside the server. With hosted
+# providers enrich is light, so the old server keeps serving meanwhile and is swapped only
+# below; local models (~1.4 GB) can't fit twice on this box, so stop the old server first.
+if grep -Eq '^DOCS_(EMBEDDING|LLM|RERANK)_PROVIDER=local$' /opt/c360/docs-vector-search.env; then
+  sudo docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+fi
 echo "   enrich: building/refreshing the pgvector index ..."
 sudo docker run --rm --network host --env-file /opt/c360/docs-vector-search.env "${VOLS[@]}" "$RUN_IMG" python -m src.enrich
 
@@ -343,9 +405,16 @@ sudo docker run --rm --network host --env-file /opt/c360/docs-vector-search.env 
 sudo docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
 sudo docker run -d --name "$CONTAINER" --restart unless-stopped --network host \
   --env-file /opt/c360/docs-vector-search.env "${VOLS[@]}" "$RUN_IMG"
-sleep 5
-curl -fsS "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && echo "   health OK (:$PORT/health)" || echo "   WARN: health not ready yet (models load on first request)"
+echo "   waiting for health check (:$PORT/health, up to 30s) ..."
+for _i in $(seq 1 30); do
+  if curl -fsS "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
+    echo "   health OK (:$PORT/health) after ${_i}s"; break
+  fi
+  [ "$_i" -eq 30 ] && echo "   WARN: health not ready after 30s (models load on first request)" || sleep 1
+done
 sudo docker ps --filter name="$CONTAINER" --format '   running: {{.Names}} ({{.Status}})'
+# Drop the previous image now that nothing uses it (the next deploy's reclaim keeps this one).
+sudo docker image prune -a -f >/dev/null 2>&1 || true
 REMOTE
 )
 echo ">> Done. Expose via the LB (add a 'docs' backend -> <box-ip>:$DOCS_PORT) if it needs public access."

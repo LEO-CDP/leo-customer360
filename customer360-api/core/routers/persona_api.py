@@ -1,7 +1,7 @@
 
 """Routers for customer personas, features, scores, and history.
 
-Customer personas are "identity understanding" computed by the backend-system/
+Customer personas are "identity understanding" computed by the customer360-backend/
 identity_resolution PersonaResolutionEngine, representing resolved understanding
 of who a customer is based on their aggregated raw and domain profiles.
 
@@ -19,10 +19,10 @@ from sqlalchemy.orm import Session
 
 from core.auth import require_admin
 from core.cache import cache_response, invalidate_prefix
-from core.config import settings
-from core.crud.base import CRUDBase
+from leo_customer360_dao.config import settings
+from leo_customer360_dao.crud.base import CRUDBase
 from core.database import get_db
-from core.models.identity import (
+from leo_customer360_dao.models.identity import (
     CdpCustomerPersona,
     CdpPersonaArchetype,
     CdpPersonaFeature,
@@ -30,7 +30,7 @@ from core.models.identity import (
     CdpPersonaScoreDetail,
 )
 from core.repositories.persona_repository import PersonaRepository
-from core.schemas.identity import (
+from leo_customer360_dao.schemas.identity import (
     CustomerPersonaCreate,
     CustomerPersonaRead,
     CustomerPersonaUpdate,

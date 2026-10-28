@@ -4,6 +4,12 @@
 
 Data Source Type 1 represents client-side website tracking using the LEO Observer JavaScript SDK. It captures anonymous visitor behavior, browser fingerprints, navigation paths, form submissions, and identity-link events directly from user browsers.
 
+The SDK's `window.leoTrackingConsent` controls whether browser tracking events
+are collected and sent. It is not marketing consent and does not grant email,
+SMS, push, Zalo, or advertising-audience permission. Those channel/provider
+preferences are stored separately in the authenticated profile API's
+`communication_preferences`; missing or non-boolean opt-ins fail closed.
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -13,7 +19,7 @@ sequenceDiagram
     participant Iframe as /cdp-sdk/html/cdp-event-proxy.html
     participant Observer as leo.observer.js
     participant Log as LEO Log Domain
-    participant API as data-tracking-api
+    participant API as customer360-event-api
     participant Staging as S3/MinIO RAW event lake
 
     User->>Host: Load Page
@@ -30,6 +36,11 @@ sequenceDiagram
 ## 2. Complete LeoCDP v1.0 Tracking Script
 
 The tracking code below represents the production-standard integration snippet for LeoCDP v1.0. It initializes the observer proxy, handles UTM campaign attribution, exposes standard event tracking wrappers on `LeoObserver`, synchronizes visitor IDs across outbound cross-domain links (`&leosyn=`), and integrates with Google Analytics 4 (GA4):
+
+If a tracking event does not provide a reliable business domain, the ingestion
+envelope and downstream profile pipeline use domain `_` (`Unclassified / Not
+set`). This neutral value prevents anonymous web activity from being classified
+as retail by default.
 
 ```html
 <script>
@@ -54,7 +65,7 @@ The tracking code below represents the production-standard integration snippet f
     window.srcTouchpointUrl = encodeURIComponent(location.href);
 
     // Dynamic Loader for the Main Proxy CDP JS
-    var leoproxyJsPath = '/data-tracking-api/static/c360-web-sdk/observer/leo.proxy.js';
+    var leoproxyJsPath = '/customer360-event-api/static/c360-web-sdk/observer/leo.proxy.js';
     var src = location.protocol + '//' + window.leoObserverCdnJS + leoproxyJsPath;
     var jsNode = document.createElement('script');
     jsNode.async = true; 
@@ -369,4 +380,3 @@ When scanned by a mobile device, the tracking URL initiates a session with prede
 - **Origin Whitelisting (`data_source_hosts`)**: Enforces strict origin validation. Only domains declared in `data_source_hosts` (e.g. `["brand.com", "shop.brand.com"]`) are permitted to transmit telemetry for this `data_source_id`.
 - **First-Party Cookies (`first_party_data: true`)**: The SDK operates via a first-party partitioned cookie (`_leo_vid`) on the host domain, ensuring compliance with browser tracking prevention (ITP, Privacy Sandbox).
 - **Bot & Crawler Filtering**: Automatic filtering of headless browsers, bots, and crawlers via User-Agent inspection in the ingestion tier.
-

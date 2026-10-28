@@ -3,6 +3,7 @@ name: customer360
 # =============================================================================
 # this is clone of dev-docker-compose.yml, but without the SSO service 
 # (for local development of the API without SSO, if SSO_LOGIN=false in .env)
+# Mailpit is included in both variants for local SMTP capture.
 # =============================================================================
 
 x-logging: &default-logging
@@ -28,11 +29,13 @@ volumes:
     name: customer360-redisdata
   customer360-miniodata:
     name: customer360-miniodata
+  customer360-mailpitdata:
+    name: customer360-mailpitdata
 
 services:
   # ---------------------------------------------------------------------------
   # 1) PostgreSQL 16 + PostGIS + pgvector + contrib, auto-provisioned with
-  #    database-schema.sql on first start.
+  #    database-schema.sql and init-core-database.sql on first start.
   # ---------------------------------------------------------------------------
   postgres:
     build:
@@ -56,7 +59,7 @@ services:
       resources:
         limits:
           cpus: "2"
-          memory: 1g
+          memory: 3g
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-customer360}"]
       interval: 10s
@@ -96,16 +99,87 @@ services:
       retries: 5
       start_period: 10s
 
+  # ---------------------------------------------------------------------------
+  # 3) Mailpit - DEV ONLY SMTP capture for host-run email services.
+  # ---------------------------------------------------------------------------
+  mailpit:
+    image: axllent/mailpit:${MAILPIT_VERSION:-v1.27}
+    container_name: customer360-mailpit
+    restart: unless-stopped
+    <<: *default-hardening
+    environment:
+      MP_MAX_MESSAGES: ${MAILPIT_MAX_MESSAGES:-5000}
+      MP_DATABASE: /data/mailpit.db
+      TZ: ${MAILPIT_TIMEZONE:-UTC}
+    ports:
+      - "${MAILPIT_HOST_BIND:-127.0.0.1}:${MAILPIT_SMTP_HOST_PORT:-1025}:1025"
+      - "${MAILPIT_HOST_BIND:-127.0.0.1}:${MAILPIT_UI_HOST_PORT:-8025}:8025"
+    volumes:
+      - customer360-mailpitdata:/data
+    networks:
+      - customer360-network
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
 
   # ---------------------------------------------------------------------------
-  # 3) MinIO - local S3-compatible object storage, DEV ONLY. Lets you test
+  # 4) Customer 360 AI Agent - host-run customer360-api calls localhost:8009.
+  # ---------------------------------------------------------------------------
+  agent:
+    build:
+      context: ./customer360-agent
+      dockerfile: Dockerfile
+    image: customer360-agent:local
+    container_name: customer360-agent
+    restart: unless-stopped
+    init: true
+    <<: *default-hardening
+    env_file:
+      - .env
+    environment:
+      AGENT_DATABASE_URL: postgresql+psycopg2://${DB_USER:-postgres}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-customer360}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${C360_AGENT_HOST:-127.0.0.1}:${C360_AGENT_PORT:-8009}:8009"
+    networks:
+      - customer360-network
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 256m
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8009/health', timeout=3)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+
+  # ---------------------------------------------------------------------------
+  # 5) MinIO - local S3-compatible object storage, DEV ONLY. Lets you test
   #    file-based event ingestion (e.g. importing events from CSV/JSON dropped
   #    into a bucket, see docs/api-plans/PLAN-EVENTS-API-IMPROVEMENT.md "Import from S3")
   #    against a real S3 API without touching production S3. NOT present in
   #    docker-compose.yml -- production uses the real S3 bucket instead.
   # ---------------------------------------------------------------------------
   minio:
-    image: minio/minio:${MINIO_VERSION:-RELEASE.2025-09-07T16-13-09Z}
+    image: pgsty/silo:${MINIO_VERSION:-RELEASE.2026-09-16T00-00-00Z}
     container_name: customer360-minio
     restart: unless-stopped
     <<: *default-hardening
@@ -142,12 +216,12 @@ services:
       start_period: 10s
 
   # ---------------------------------------------------------------------------
-  # 4) MinIO bucket bootstrap - one-shot: creates the default dev bucket
+  # 6) MinIO bucket bootstrap - one-shot: creates the default dev bucket
   #    (MINIO_BUCKET) used for testing file-based event ingestion, so it
   #    exists as soon as the stack comes up.
   # ---------------------------------------------------------------------------
   minio-init:
-    image: minio/mc:${MINIO_MC_VERSION:-RELEASE.2025-08-13T08-35-41Z}
+    image: pgsty/silo:${MINIO_MC_VERSION:-RELEASE.2026-09-16T00-00-00Z}
     container_name: customer360-minio-init
     restart: "no"
     <<: *default-hardening
@@ -169,14 +243,14 @@ services:
         echo "Bucket $$MINIO_BUCKET ready."
 
   # ---------------------------------------------------------------------------
-  # 5) CDP data tracking API - DEV uses the in-network customer360-minio.
+  # 7) CDP event data tracking API - DEV uses the in-network customer360-minio.
   # ---------------------------------------------------------------------------
   tracking-api:
     build:
-      context: ./data-tracking-api
+      context: ./customer360-event-api
       dockerfile: Dockerfile
-    image: customer360-tracking-api:local
-    container_name: customer360-tracking-api
+    image: customer360-event-api:local
+    container_name: customer360-event-api
     restart: unless-stopped
     init: true
     <<: *default-hardening
@@ -218,4 +292,3 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
-

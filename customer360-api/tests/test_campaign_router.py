@@ -16,9 +16,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from core.database import get_db
-from core.models.crm import Campaign
+from leo_customer360_dao.models.crm import Campaign
 from core.routers._generic import build_crud_router
-from core.schemas.crm import CampaignCreate, CampaignRead, CampaignUpdate
+from leo_customer360_dao.schemas.crm import CampaignCreate, CampaignRead, CampaignUpdate
 
 DEMO_TENANT_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 

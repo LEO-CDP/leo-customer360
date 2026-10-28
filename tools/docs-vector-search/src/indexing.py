@@ -102,8 +102,11 @@ class IndexingService:
             )
 
 
-def build(*, dry_run: bool = False, batch: int = 64) -> IndexResult:
+def build(*, dry_run: bool = False, batch: int | None = None) -> IndexResult:
     """Compatibility entry point used by the CLI and existing deployment scripts."""
+    import os
+    if batch is None:
+        batch = int(os.getenv("DOCS_ENRICH_BATCH_SIZE", "64"))
     result = IndexingService().rebuild(dry_run=dry_run, batch=batch)
     print(
         f"{result.total_chunks} chunks — {result.unchanged_chunks} unchanged, "

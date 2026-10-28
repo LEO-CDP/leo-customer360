@@ -14,7 +14,7 @@ the attribute after import is picked up by every request.
 
 import unittest
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from typing import Any, Optional
 from unittest.mock import patch
@@ -180,6 +180,8 @@ def _fake_raw_profile(**overrides) -> SimpleNamespace:
         "cookie_id": None,
         "ga_client_id": None,
         "session_id": None,
+        "anonymous_id": None,
+        "device_fingerprint": None,
         "ip_address": None,
         "user_agent": None,
         "media_source": None,
@@ -439,6 +441,9 @@ class MasterProfileLinkedRawDetailEndpointTests(unittest.TestCase):
             raw_profile_id=link.raw_profile_id,
             tenant_id=self.master_profile.tenant_id,
             source_system="web_tracking",
+            external_customer_id="web-anonymous-1",
+            anonymous_id="web-anonymous-1",
+            device_fingerprint="web-fingerprint-1",
             event_name="checkout_started",
             event_payload={"cart_value": 129.9},
         )
@@ -456,6 +461,9 @@ class MasterProfileLinkedRawDetailEndpointTests(unittest.TestCase):
         self.assertEqual(body["link"]["link_id"], str(link.link_id))
         self.assertEqual(body["raw_profile"]["raw_profile_id"], str(raw_profile.raw_profile_id))
         self.assertEqual(body["raw_profile"]["source_system"], "web_tracking")
+        self.assertEqual(body["raw_profile"]["external_customer_id"], "web-anonymous-1")
+        self.assertEqual(body["raw_profile"]["anonymous_id"], "web-anonymous-1")
+        self.assertEqual(body["raw_profile"]["device_fingerprint"], "web-fingerprint-1")
 
     def test_returns_404_when_master_profile_not_found(self):
         session = SimpleNamespace(execute=lambda stmt: _FakeFirstResult(None))
@@ -550,15 +558,18 @@ class MasterProfilesPaginationEndpointTests(unittest.TestCase):
         }}) as mock_list:
             response = self.client.get(
                 "/master-profiles/?tenant_id=11111111-1111-1111-1111-111111111111"
+                "&data_source_id=22222222-2222-2222-2222-222222222222"
                 "&domain=healthcare&lifecycle_stage=customer&membership_tier=Gold"
                 "&churn_risk_tier=high&linked_raw_profile_count_min=2"
                 "&q=nguyen&page=3&page_size=15&days=30"
+                "&from_date=2026-09-01&to_date=2026-09-29"
             )
 
         self.assertEqual(response.status_code, 200)
         mock_list.assert_called_once_with(
             self.session,
             tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
+            data_source_id=uuid.UUID("22222222-2222-2222-2222-222222222222"),
             domain="healthcare",
             lifecycle_stage="customer",
             domain_attribute_key=None,
@@ -568,40 +579,46 @@ class MasterProfilesPaginationEndpointTests(unittest.TestCase):
             churn_risk_tier="high",
             linked_raw_profile_count_min=2,
             q="nguyen",
+            anonymous_id=None,
+            device_fingerprint=None,
+            from_date=date(2026, 9, 1),
+            to_date=date(2026, 9, 29),
             days=30,
             page=3,
             page_size=15,
         )
 
-    def test_master_profiles_page_supports_days_filter(self):
-        from core.crud import identity as identity_crud
-
-        class _ListPageSession:
-            def execute(self, stmt, params=None):
-                class _Rows:
-                    def all(self):
-                        return []
-
-                    def scalar_one(self):
-                        return 0
-
-                return _Rows()
-
-        result = identity_crud.list_master_profiles_page(
-            _ListPageSession(),
-            days=30,
-            page=1,
-            page_size=25,
-        )
-
-        self.assertEqual(result["items"], [])
-        self.assertEqual(result["pagination"]["total"], 0)
-        self.assertEqual(result["pagination"]["total_pages"], 1)
-
     def test_rejects_invalid_domain(self):
         response = self.client.get("/master-profiles/?domain=finance")
 
         self.assertEqual(response.status_code, 422)
+
+    def test_timeline_forwards_data_source_filter(self):
+        master_profile_id = uuid.uuid4()
+        data_source_id = uuid.uuid4()
+        with (
+            patch.object(identity_router._master_crud, "get", return_value=object()),
+            patch(
+                "core.routers.identity_api.profile360_crud.get_timeline",
+                return_value=[],
+            ) as mock_timeline,
+        ):
+            response = self.client.get(
+                f"/master-profiles/{master_profile_id}/timeline"
+                f"?data_source_id={data_source_id}&limit=8"
+                "&from_event_time=2026-09-20T05:29:18.766000%2B00:00"
+                "&to_event_time=2026-09-13T05:29:18.766000%2B00:00"
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_timeline.assert_called_once_with(
+            self.session,
+            master_profile_id,
+            limit=8,
+            data_source_id=data_source_id,
+            from_event_time=datetime(2026, 9, 20, 5, 29, 18, 766000, tzinfo=timezone.utc),
+            to_event_time=datetime(2026, 9, 13, 5, 29, 18, 766000, tzinfo=timezone.utc),
+        )
 
 
 class _ScalarsAllResult:

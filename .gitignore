@@ -1,3 +1,4 @@
+*.pid
 .env
 .env.*
 !.env.example
@@ -11,10 +12,15 @@ GEMINI.md
 
 .venv/
 __pycache__/
+*/__pycache__/*
 *.pyc
+*.egg-info/
+build/
+dist/
 .pytest_cache/
 .env
 logs/
+*.log
 /.idea
 docs/release-documents/
 
@@ -30,3 +36,10 @@ docs-site/node_modules/
 .claude/
 .specify/
 specs/
+
+.dagster_home
+*/.dagster_home/*
+# Consolidated credential inventory (deployments/docs) — never commit.
+deployments/docs/env-and-tfvars-values.txt
+deployments/kubeconfig-*.yaml
+k8s/overlays/.render.*

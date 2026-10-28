@@ -1,0 +1,69 @@
+<!--
+  =============================================================================
+  LEO Assistant (RAG CHATBOT) WIDGET
+  =============================================================================
+  Floating "Ask the Docs" launcher + panel, available on every tab. Rendered
+  into #docs-chatbot-root by main.js; behaviour lives in static/js/docs-chatbot-view.js.
+  Talks to the same-origin /ai/* proxy (app.py -> tools/docs-vector-search).
+  Custom .docs-chat-* classes are styled in static/css/app.css.
+-->
+
+<!-- Chat panel -->
+<div id="docs-chat-panel" role="dialog" aria-modal="false" aria-label="Documentation assistant"
+  class="hidden fixed bottom-5 right-5 z-40 w-[min(26rem,calc(100vw-2.5rem))] max-h-[min(38rem,calc(100vh-2.5rem))] flex flex-col rounded-2xl border shadow-2xl overflow-hidden">
+
+  <!-- Header -->
+  <div class="docs-chat-header-bar flex items-center justify-between gap-3 px-4 py-3 border-b bg-gradient-to-br from-indigo-600 to-indigo-700 text-white">
+    <div class="flex items-center gap-2.5 min-w-0">
+      <div class="p-1.5 bg-white/15 rounded-lg shrink-0">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+        </svg>
+      </div>
+      <div class="min-w-0">
+        <p class="text-sm font-bold leading-tight">LEO Assistant</p>
+        <p class="text-[11px] text-indigo-100 leading-tight">Grounded in the Customer 360 docs</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-3 shrink-0">
+      <button id="docs-chat-new" type="button" title="Start a new chat"
+        class="text-[11px] font-semibold text-indigo-100 hover:text-white underline-offset-2 hover:underline">New chat</button>
+      <button id="docs-chat-close" type="button" title="Close"
+        class="text-indigo-100 hover:text-white text-xl leading-none">&times;</button>
+    </div>
+  </div>
+
+  <!-- Conversation log -->
+  <div id="docs-chat-log" aria-live="polite"
+    class="flex-1 overflow-y-auto px-4 py-4 space-y-4 text-sm">
+    <div class="docs-chat-msg docs-chat-msg-bot">
+      <div class="docs-chat-bubble docs-chat-bubble-bot">
+        <div class="docs-chat-answer">
+          Hi! Ask me anything about the LEO Customer 360 documentation and I'll answer with links to the source pages.
+        </div>
+        <p id="docs-chat-context" class="docs-chat-context hidden mt-3"></p>
+        <div class="mt-3 flex flex-wrap gap-2">
+          <button type="button" class="docs-chat-suggestion" data-q="How does identity resolution merge two profiles?">Identity resolution</button>
+          <button type="button" class="docs-chat-suggestion" data-q="How is tenant isolation enforced?">Tenant isolation</button>
+          <button type="button" class="docs-chat-suggestion" data-q="What is a customer segment?">Segments</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Input -->
+  <form id="docs-chat-form" class="border-t p-3">
+    <div class="flex items-end gap-2">
+      <textarea id="docs-chat-input" rows="1" autocomplete="off"
+        placeholder="Ask a question…  (Enter to send)"
+        class="flex-1 resize-none max-h-28 rounded-xl border text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400"></textarea>
+      <button id="docs-chat-send" type="submit" title="Send"
+        class="shrink-0 inline-flex items-center justify-center rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white w-10 h-10 transition-colors">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+        </svg>
+      </button>
+    </div>
+    <p class="docs-chat-disclaimer mt-2 text-[10px] text-center">Answers are AI-generated from the docs and may be imperfect — verify with the linked sources.</p>
+  </form>
+</div>

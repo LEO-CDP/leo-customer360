@@ -31,7 +31,7 @@ spec:
           command:
             - sh
             - -c
-            - "python identity_resolution/scripts/init_sample_data.py && python identity_resolution/scripts/run_demo_resolution.py && python identity_resolution/scripts/seed_full_demo_data.py"
+            - "python /opt/customer360-seeding/init_sample_data.py && python identity_resolution/scripts/test_resolution_task.py && python /opt/customer360-seeding/seed_full_demo_data.py"
           envFrom:
             - configMapRef: { name: c360-config }
             - secretRef: { name: c360-secrets }

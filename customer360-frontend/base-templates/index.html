@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-50">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Customer 360 Platform</title>
+  
+  <meta name="description" content="Customer 360 Platform Admin"/>
+	<meta name="robots" content="noindex">
+	<meta name="msapplication-TileColor" content="#da532c">
+	<meta name="theme-color" content="#ffffff">	
+
+	<link rel="apple-touch-icon" sizes="180x180" href="//admin.leocdp.com/public/images/leocdp-icon/apple-touch-icon.png">
+	<link rel="icon" type="image/x-icon" sizes="32x32" href="//admin.leocdp.com/public/images/leocdp-icon/favicon-32x32.png">
+	<link rel="icon" type="image/png" sizes="32x32" href="//admin.leocdp.com/public/images/leocdp-icon/favicon-32x32.png">
+	<link rel="icon" type="image/png" sizes="16x16" href="//admin.leocdp.com/public/images/leocdp-icon/favicon-16x16.png">
+	<link rel="mask-icon" href="//admin.leocdp.com/public/images/leocdp-icon/safari-pinned-tab.svg" color="#5bbad5">
+
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Noto+Sans:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
+
+  <script>
+    window.tailwind = window.tailwind || {};
+    window.tailwind.config = {
+      darkMode: "class"
+    };
+  </script>
+
+  <!-- Tailwind CSS (CDN, per project requirement) -->
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+
+  <!-- Bootstrap Icons -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+
+  <!-- jQuery 3 (per project requirement) -->
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+
+  <!-- plugin that extends the native jQuery .extend() utility to allow deep merging (recursive) of JS objects. -->
+  <script src="https://cdn.jsdelivr.net/npm/jquery-extendext@1.0.0/jquery-extendext.min.js"></script>
+
+  <!-- Handlebars templates  -->
+  <script src="https://cdn.jsdelivr.net/npm/handlebars@latest/dist/handlebars.min.js"></script>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- Load the official Sankey chart plugin -->
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-sankey/dist/chartjs-chart-sankey.min.js"></script>
+
+  <!-- Load the official Matrix chart plugin -->
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@2.0.1/dist/chartjs-chart-matrix.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+
+  <!-- Moment.js for date manipulation -->
+  <script src="https://cdn.jsdelivr.net/npm/moment@2.31.0/moment.min.js"></script>
+
+ <!-- notifications -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/izitoast/1.4.0/js/iziToast.min.js" defer crossorigin="anonymous"
+    referrerpolicy="no-referrer"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/izitoast/1.4.0/css/iziToast.min.css"
+    crossorigin="anonymous" referrerpolicy="no-referrer" />
+
+  <!-- lscache : emulates memcache functions using HTML5 localStorage -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lscache/1.3.2/lscache.min.js" ></script>
+
+  <!-- tooltip, popover -->
+  <script src="https://unpkg.com/@popperjs/core@2"></script>
+  <script src="https://unpkg.com/tippy.js@6"></script>
+
+  <!-- Markdown rendering for the docs AI chatbot answer, sanitized before insertion (see docs-chatbot-view.js setAnswer) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"
+    integrity="sha384-/TQbtLCAerC3jgaim+N78RZSDYV7ryeoBCVqTuzRrFec2akfBkHS7ACQ3PQhvMVi"
+    crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"
+    integrity="sha384-+VfUPEb0PdtChMwmBcBmykRMDd+v6D/oFmB3rZM/puCMDYcIvF968OimRh4KQY9a"
+    crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+  <!-- App CSS -->
+  <link rel="stylesheet" href="{{ static_base }}/css/app.css" />
+</head>
+
+<body class="h-full text-slate-800 antialiased">
+  <div id="app" class="min-h-full flex flex-col">
+
+    <!-- Populated from static/templates/tabs.html by static/js/main.js -->
+    <div id="app-header"></div>
+
+    <main class="max-w-[1640px] w-full mx-auto px-4 py-4 flex-1">
+
+      <div id="alert-banner"
+        class="hidden mb-4 rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm px-4 py-3"></div>
+
+      <!-- Reporting overview dashboard (KPIs + Chart.js charts). Content rendered
+         from static/templates/overview-dashboard.html by static/js/overview-view.js -->
+      <section id="view-overview" class="hidden">
+        <div id="overview-loading" class="p-10 flex justify-center">
+          <div class="spinner"></div>
+        </div>
+        <div id="overview-content"></div>
+      </section>
+
+      <!-- Analytics dashboard (time-series + profile heatmap). Content rendered
+         from static/templates/analytics.html by static/js/analytics.js -->
+      <section id="view-analytics" class="hidden">
+        <div id="analytics-loading" class="p-10 flex justify-center">
+          <div class="spinner"></div>
+        </div>
+        <div id="analytics-content"></div>
+      </section>
+
+      <!-- Master Profiles list. Shell markup from static/templates/profiles-list.html,
+         rows rendered by the shared C360.DataTableView component (see
+         static/js/data-table-view.js) from static/js/list-view.js's column config. -->
+      <section id="view-list"></section>
+
+      <!-- Profile detail dashboard. Content rendered from static/templates/profile-details.html
+         (and its card partials) by static/js/profile-detail-view.js -->
+      <section id="view-detail" class="hidden">
+        <button id="btn-back-to-profiles" class="text-sm text-indigo-600 hover:text-indigo-800 font-medium mb-3">&larr;
+          Back to profiles</button>
+        <div id="detail-loading" class="p-10 flex justify-center">
+          <div class="spinner"></div>
+        </div>
+        <div id="detail-content"></div>
+      </section>
+
+      <!-- Segments (Audience Builder) tab: list + detail sub-views. List shell from
+         static/templates/segments-list.html (rows via the shared
+         C360.DataTableView component), detail content from segment-details.html,
+         all rendered by static/js/segments-view.js -->
+      <section id="view-segments" class="hidden">
+        <div id="segment-view-list"></div>
+        <div id="segment-view-detail" class="hidden">
+          <button id="btn-back-to-segments" class="text-sm text-indigo-600 hover:text-indigo-800 font-medium mb-3">&larr;
+            Back to segments</button>
+          <div id="segment-detail-loading" class="p-10 flex justify-center">
+            <div class="spinner"></div>
+          </div>
+          <div id="segment-detail-content"></div>
+        </div>
+        <div id="segment-form-modal-container"></div>
+      </section>
+
+      <!-- Attribute Catalog tab: shell from static/templates/attributes-list.html,
+         rendered by static/js/attributes-view.js (shares the same
+         C360.DataTableView component as the Profiles/Segments lists above). -->
+      <section id="view-attributes" class="hidden"></section>
+
+      <!-- Data Sources tab: shell from static/templates/metadata/data-source-list.html,
+        rendered by static/js/data-source-view.js. -->
+      <section id="view-datasources" class="hidden"></section>
+
+      <!-- AI Agents tab: shell from static/templates/ai-agent/agent-model-list.html,
+        rendered by static/js/ai-agent-view.js. -->
+      <section id="view-agent" class="hidden"></section>
+
+      <!-- Content and Product management: listing/create/import rendered by
+        static/js/item-view.js. -->
+      <section id="view-content-products" class="hidden"></section>
+
+      <!-- Campaign Performance Dashboard. Content rendered from
+         static/templates/campaign/campaign-dashboard.html by static/js/campaign-view.js -->
+      <section id="view-campaigns" class="hidden">
+        <div id="campaign-content"></div>
+      </section>
+
+      <!-- Persona Management tab: list + analytics dashboard rendered by
+         static/js/persona-list-view.js. Lists SHARED persona archetypes
+         (each with a real matched_profile_count), with a drill-down sub-view
+         showing every master profile currently matched to one archetype --
+         section, toggled the same way view-segments toggles list/detail. -->
+      <section id="view-personas" class="hidden">
+        <div id="persona-view-list">
+          <div id="persona-list-content"></div>
+        </div>
+        <div id="persona-details-container"></div>
+      </section>
+
+
+      <!-- System Users tab: shell from static/templates/admin/system-user-list.html,
+        rendered by static/js/system-user-view.js. -->
+      <section id="view-admin" class="hidden"></section>
+
+      <!-- Populated from static/templates/placeholder.html for nav tabs that aren't implemented -->
+      <section id="view-placeholder" class="hidden"></section>
+    </main>
+
+    <footer class="border-t border-slate-200 px-4 py-3 text-center text-xs text-slate-400">
+      <div class="flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
+        <span class="inline-flex items-center gap-1.5 font-medium text-slate-500 dark:text-slate-300">
+          <i class="bi bi-grid-1x2-fill text-indigo-600 dark:text-indigo-300 text-sm leading-none" aria-hidden="true"></i>
+          <span>Customer 360 Admin</span>
+        </span>
+        <span class="text-slate-300">&middot;</span>
+        <span>Build {{ build_version }}</span>
+        <span class="text-slate-300">&middot;</span>
+
+        <span class="inline-flex max-w-full items-center gap-1">
+          <span>Live:</span>
+          <code
+            id="footer-api-base"
+            title="API Base URL"
+            class="max-w-[320px] truncate rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-500"
+          ></code>
+        </span>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Docs Assistant (RAG chatbot) mount point; widget markup injected by main.js -->
+  <div id="docs-chatbot-root"></div>
+
+  <!-- Main configs for Customer 360 Admin -->
+  <script>
+    /* Customer 360 Admin -- Server-rendered config constants only */
+    window.C360_SERVER_CONFIG = Object.freeze({
+      // Injected server-rendered environment settings
+      apiBase: "{{ api_base }}",
+      tenantId: "{{ tenant_id }}",
+      leoObserverLogDomain: "{{ leo_observer_log_domain }}",
+      leoObserverTrackingUri: "{{ leo_observer_tracking_uri }}",
+      leoObserverTrackingEndpoint: "{{ leo_observer_tracking_endpoint }}",
+      leoObserverCdnJS: "{{ leo_observer_cdn_js }}",
+      docsAiBase: "{{ docs_ai_base }}",
+      docsSiteBase: "{{ docs_site_base }}",
+      cacheBust: "{{ cache_bust }}"
+    });
+  </script>
+  <script src="{{ static_base }}/js/common/config.js?cb={{ cache_bust }}"></script>
+  <!-- Common utility scripts -->
+  <script src="{{ static_base }}/js/common/formatters.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/common/templates.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/common/utils.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/common/matrix-heatmap.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/common/data-table-view.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/common/jquery.sql.builder.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/workflow/workflow-studio.js?cb={{ cache_bust }}"
+    data-workflow-frame="{{ static_base }}/js/workflow/workflow-studio-frame.html?cb={{ cache_bust }}"></script>
+
+  <!-- load router.js first -->
+  <script src="{{ static_base }}/js/common/router.js?cb={{ cache_bust }}"></script>
+
+  <!-- authentication gate (login screen + Keycloak/dev-credential flows) --
+       loaded after config.js/templates.js, before main.js -->
+  <script src="{{ static_base }}/js/auth-view.js?cb={{ cache_bust }}"></script>
+
+  <!-- load all view modules -->
+  <script src="{{ static_base }}/js/profile-list-view.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/profile-detail-view.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/overview-view.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/analytics.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/ai-agent-workflow.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/segments-view.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/campaign-view.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/persona-list-view.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/attributes-view.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/data-source-view.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/ai-agent-view.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/item-view.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/system-user-view.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/placeholder-view.js?cb={{ cache_bust }}"></script>
+
+  <!-- Docs Assistant (RAG chatbot) widget -->
+  <script src="{{ static_base }}/js/docs-chatbot-view.js?cb={{ cache_bust }}"></script>
+
+  <!-- load main.js last -->
+  <script src="{{ static_base }}/js/main.js?cb={{ cache_bust }}"></script>
+</body>
+
+</html>

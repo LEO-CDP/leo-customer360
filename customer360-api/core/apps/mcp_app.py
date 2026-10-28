@@ -6,7 +6,7 @@ from fastapi import Depends, FastAPI, Request
 from fastmcp import FastMCP
 from starlette.types import ASGIApp
 
-from core.config import settings
+from leo_customer360_dao.config import settings
 from core.mcptools import register_mcp_tools
 from core.mcptools.context import bind_tenant_context, clear_tenant_context, restore_tenant_context
 

@@ -1,0 +1,20 @@
+# Validated runtime: Python 3.12
+fastapi>=0.141.1,<1
+uvicorn[standard]>=0.30,<1
+boto3>=1.34,<2
+redis>=5.0,<6
+pydantic>=2.6,<3
+pydantic-settings>=2.2,<3
+python-dotenv>=1.0,<2
+ua-parser[regex]>=1.0.2,<2
+
+# OpenTelemetry zero-code request tracing (OTLP -> Jaeger), mirrors customer360-api.
+# The Dockerfile runs `opentelemetry-bootstrap -a install` to add the matching
+# FastAPI / Redis / boto3 instrumentors. No-op at runtime unless OTEL_SDK_DISABLED=false
+# (deployments/lib/otel.sh sets the OTEL_* env; the tracking box points it at the api-box Jaeger).
+opentelemetry-distro>=0.48b0,<1
+opentelemetry-exporter-otlp>=1.27,<2
+
+# Test-only dependency
+pytest>=7.4,<9
+httpx>=0.27,<1

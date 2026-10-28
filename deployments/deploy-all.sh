@@ -26,7 +26,7 @@
 #   2 db bootstrap      : db-schema           (needs server as bastion + DB up)
 #   3 data-plane        : cache · sso · backend
 #   4 front door        : load-balancer · proxy   (Caddy needs LB :80/:443 -> box)
-#   5 sso realm + apps  : sso-realm · api · frontend · ads · monitoring
+#   5 sso realm + apps  : sso-realm · api · frontend · promotions · monitoring
 #   6 demo data (opt.)  : seed                 (opt-in: --with seed / --only seed)
 #
 # The "sso-realm" step (bootstrap-realm.py) and everything that needs the PUBLIC
@@ -46,17 +46,17 @@ ROOT="$(pwd)"
 
 # ---------------------------------------------------------------- step registry
 # Ordered list of step ids. PHASE/TITLE give the --list view its structure.
-STEPS=(storage postgres server db-schema cache sso backend load-balancer proxy sso-realm api frontend ads tracking docs-search monitoring seed)
+STEPS=(storage postgres server vks db-schema cache sso backend load-balancer proxy sso-realm api frontend promotions agent event-api docs-search docs-index monitoring seed)
 
 # Steps NOT run by default (must be named via --with / --only / --from).
-OPTIONAL="seed"
+OPTIONAL="seed,docs-index"   # comma-separated (in_csv)
 
 phase_of() { case "$1" in
-  storage|postgres|server) echo "1 · infrastructure (Terraform)";;
+  storage|postgres|server|vks) echo "1 · infrastructure (Terraform)";;
   db-schema)               echo "2 · database bootstrap";;
   cache|sso|backend)       echo "3 · data-plane containers";;
   load-balancer|proxy)     echo "4 · front door (LB + Caddy)";;
-  sso-realm|api|frontend|ads|tracking|docs-search|monitoring) echo "5 · SSO realm + applications";;
+  sso-realm|api|frontend|promotions|agent|event-api|docs-search|docs-index|monitoring) echo "5 · SSO realm + applications";;
   seed)                    echo "6 · demo data (optional)";;
 esac; }
 
@@ -64,18 +64,21 @@ title_of() { case "$1" in
   storage)       echo "Object storage buckets (vStorage / S3)";;
   postgres)      echo "Managed PostgreSQL vDB (customer360 + db_keycloak)";;
   server)        echo "vServers / VMs (api box, backend box)";;
-  db-schema)     echo "SQL bootstrap: extensions, keycloak db, app schema";;
+  vks)           echo "VKS worker node group (capacity for event-api + promotions)";;
+  db-schema)     echo "SQL bootstrap: extensions, keycloak db, app schema, leo_ads";;
   cache)         echo "Redis (uat: container on api box; prod: MemStore)";;
   sso)           echo "Keycloak (SSO / OIDC) container";;
-  backend)       echo "backend-system (Dagster orchestrator)";;
+  backend)       echo "customer360-backend (Dagster orchestrator)";;
   load-balancer) echo "L4 NLB fronting Caddy / dagster / dashboards";;
   proxy)         echo "Caddy reverse proxy (TLS + path routing) — cutover";;
   sso-realm)     echo "Keycloak realm + confidential client (bootstrap-realm.py)";;
   api)           echo "customer360-api (FastAPI)";;
-  frontend)      echo "frontend-admin (admin UI)";;
-  ads)           echo "ads-server (LEO Ad Server, schema leo_ads)";;
-  tracking)      echo "data-tracking-api (event ingestion -> S3, /data)";;
+  frontend)      echo "customer360-frontend (admin UI)";;
+  promotions)    echo "customer360-promotions (c360 Promotions, schema leo_ads; on VKS)";;
+  agent)         echo "customer360-agent (AI Agent service, LiteLLM, :8009)";;
+  event-api)     echo "customer360-event-api (event ingestion -> S3, /data; on VKS)";;
   docs-search)   echo "docs-vector-search (local-model RAG, pgvector on the vDB)";;
+  docs-index)    echo "docs-vector-search re-index only: ship docs/*.md + enrich (no pull/restart)";;
   monitoring)    echo "Portainer + Netdata (+ oauth2-proxy SSO gate)";;
   seed)          echo "CIR demo data seed (~1000 profiles, demo tenant)";;
 esac; }
@@ -142,6 +145,14 @@ oneshot_step() {  # <dir> <script> <action>
   esac
 }
 
+# one-shot step with a fixed sub-action (e.g. docs-index -> deploy-docs-search.sh <env> reindex).
+oneshot_step_arg() {  # <dir> <script> <arg> <action>
+  case "$4" in
+    apply)   run bash "$ROOT/$1/$2" "$ENV" "$3" ;;
+    *)       info "'$CUR' only runs on 'apply' — skipped for '$4'" ;;
+  esac
+}
+
 # sso realm bootstrap: idempotently provision the realm + confidential client and
 # write KEYCLOAK_CLIENT_SECRET into sso/.env (consumed by deploy-api.sh).
 realm_step() {  # <action>
@@ -182,17 +193,28 @@ run_one() {  # <id> <action>
     storage)       tf_step storage        deploy.sh          "$2" ;;
     postgres)      tf_step postgres        deploy.sh          "$2" ;;
     server)        tf_step server          deploy.sh          "$2" ;;
+    vks)           tf_step vks             deploy.sh          "$2" ;;
     load-balancer) tf_step load_balancer   deploy.sh          "$2" ;;
     db-schema)     oneshot_step postgres   run-sql.sh         "$2" ;;
     cache)         ssh_step cache          deploy.sh   apply  "$2" ;;
     sso)           ssh_step sso            deploy-sso.sh deploy "$2" ;;
     proxy)         ssh_step proxy          deploy-caddy.sh deploy "$2" ;;
     frontend)      ssh_step frontend       deploy-frontend.sh deploy "$2" ;;
-    ads)           ssh_step ads-server     deploy-ads.sh deploy "$2" ;;
-    tracking)      ssh_step_env_only server deploy-tracking.sh "$2" ;;
+    # ssh_step is about the CALL SHAPE (this script takes a `destroy` subcommand), not
+    # the transport: like event-api below, `promotions` now applies manifests to the VKS cluster
+    # rather than shipping a container over SSH.
+    promotions)    ssh_step customer360-promotions     deploy-promotions.sh deploy "$2" ;;
+    agent)         ssh_step_env_only server deploy-agent.sh "$2" ;;
+    # ssh_step (not ssh_step_env_only): this one lives in Kubernetes, so the 'server'
+    # teardown no longer removes it — it needs a destroy of its own.
+    event-api)     ssh_step server deploy-event-api.sh deploy "$2" ;;
     docs-search)   ssh_step_env_only server deploy-docs-search.sh "$2" ;;
+    # Optional (not in the default set): the docs-only refresh docs-vector-index.yml dispatches.
+    docs-index)    oneshot_step_arg server deploy-docs-search.sh reindex "$2" ;;
     monitoring)    ssh_step monitoring     deploy-monitoring.sh deploy "$2" ;;
-    backend)       ssh_step_env_only server deploy-backend.sh "$2" ;;
+    # Dagster runs on VKS as a Deployment (the backend vServer is retired); ssh_step because the VKS
+    # script has its own `destroy`.
+    backend)       ssh_step customer360-backend deploy-backend-vks.sh deploy "$2" ;;
     api)           ssh_step_env_only server deploy-api.sh     "$2" ;;
     sso-realm)     realm_step "$2" ;;
     seed)          oneshot_step server     seed_data.sh       "$2" ;;
@@ -233,6 +255,24 @@ done
 if [ "$DO_LIST" != 1 ]; then
   case "$ENV" in uat|prod) ;; *) die "environment required: ./deploy-all.sh <uat|prod> [plan|apply|destroy] [flags] (see --help)";; esac
 fi
+
+# Legacy step ids, accepted as aliases so saved workflow_dispatch inputs and existing
+# scripts keep working:  `tracking` -> `event-api` (renamed when it moved to Kubernetes),
+# `ads` -> `promotions` (renamed to match the service, customer360-promotions).
+# Exact per-item match, not a substring replace: 'docs-search' must never be rewritten
+# just because some other id contains the word.
+remap_legacy_steps() {  # <csv> -> csv with legacy ids renamed
+  local out="" item IFS=,
+  for item in $1; do
+    [ "$item" = "tracking" ] && item="event-api"
+    [ "$item" = "ads" ] && item="promotions"
+    out="${out:+$out,}$item"
+  done
+  printf '%s' "$out"
+}
+for v in ONLY SKIP FROM WITH; do
+  [ -n "${!v}" ] && printf -v "$v" '%s' "$(remap_legacy_steps "${!v}")"
+done
 
 # ---------------------------------------------------------------- build the run list
 # Start from the full order (minus optional steps unless requested), then apply
@@ -285,7 +325,7 @@ if [ "$DO_LIST" = 1 ]; then
   printf '   ./deploy-all.sh uat                 # apply all (except optional)\n'
   printf '   ./deploy-all.sh uat --with seed     # apply all + demo data\n'
   printf '   ./deploy-all.sh uat --from proxy    # resume from the Caddy cutover onward\n'
-  printf '   ./deploy-all.sh uat --only api,frontend,ads   # just those, in order\n'
+  printf '   ./deploy-all.sh uat --only api,frontend,promotions   # just those, in order\n'
   printf '   ./deploy-all.sh uat destroy         # tear down (reverse order)\n'
   exit 0
 fi

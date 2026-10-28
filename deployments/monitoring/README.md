@@ -110,7 +110,7 @@ ssh -i ~/.ssh/c360-api_ed25519 \
 ## Jaeger — API request tracing (OpenTelemetry → OTLP)
 
 Lightweight, Jaeger-style request profiling for the three FastAPI services
-(`customer360-api`, `ads-server`, `frontend-admin`) via **OpenTelemetry zero-code
+(`customer360-api`, `customer360-promotions`, `customer360-frontend`) via **OpenTelemetry zero-code
 auto-instrumentation** exporting over **OTLP**.
 
 **How it works.** Each service image runs `opentelemetry-bootstrap -a install` (installs
@@ -131,6 +131,8 @@ tracing / Grafana Tempo / an OTel Collector) by changing one endpoint — no re-
 | **UAT** | **OFF** (`OTEL_SDK_DISABLED=true`) — the api box is a shared 1 vCPU / 2 GB host, so zero overhead until profiling | 100% when on | on-demand (`jaeger_enabled=false`) |
 | **PROD** | **ON** | 10% head sampling | always-on (`jaeger_enabled=true`) |
 
+> uat defaults to 10% head sampling when tracing is on (was 100%, which overran the 300m Jaeger cap); `jaeger_ttl` (uat 6h) bounds the badger store. Use `OTEL_SAMPLER_ARG=1.0` for a short profiling run.
+
 Override per deploy with `OTEL_ENABLED` / `OTEL_ENDPOINT` / `OTEL_SAMPLER_ARG` (read by
 `../lib/otel.sh`). Toggle the backend with `jaeger_enabled` in the overlay.
 
@@ -143,7 +145,7 @@ sed -i 's/^jaeger_enabled *=.*/jaeger_enabled = true/' overlays/uat.tfvars
 ./deploy-monitoring.sh uat            # starts c360-jaeger (badger, mem-capped)
 
 # 2) turn tracing on for the target service and redeploy
-(cd ../server && OTEL_ENABLED=true ./deploy-api.sh uat)     # or ../ads-server, ../frontend
+(cd ../server && OTEL_ENABLED=true ./deploy-api.sh uat)     # or ../customer360-promotions, ../frontend
 #    fast path (no full redeploy): flip the env-file on the box then RE-CREATE the container.
 #    NOTE: `docker restart` does NOT re-read --env-file (it's applied only at `docker run`), so a
 #    restart alone leaves tracing OFF — you must rm + run (reusing the same image):
@@ -234,8 +236,7 @@ credentials (pgAdmin only stores them if you tick "Save").
 ## Portainer agents — one Portainer, every box
 
 Portainer runs on the api box (`mon_server_key`) and by default sees only that box's Docker
-socket. The platform spans more than one vServer (the **backend** box, server key `1x2` /
-`10.100.1.4`, runs `backend-system`/Dagster) — so rather than stand up a **second** Portainer,
+socket. The platform spans more than one vServer (e.g. the **docs** and **agent** boxes) — so rather than stand up a **second** Portainer,
 run a lightweight **`portainer/agent`** on the other box and register it in the existing Portainer
 as another *Environment*. One login, one UI, every box in the list.
 

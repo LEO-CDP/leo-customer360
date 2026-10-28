@@ -19,12 +19,12 @@ servers = {
     name           = "sso" # -> c360-api-prod-sso
   }
   "frontend" = {
-    flavor_name    = "s2-general-2x4" # 2 vCPU / 4 GB — dedicated admin UI (frontend-admin); see deployments/frontend
+    flavor_name    = "s2-general-2x4" # 2 vCPU / 4 GB — dedicated admin UI (customer360-frontend); see deployments/frontend
     root_disk_size = 50
     name           = "frontend" # -> c360-api-prod-frontend
   }
   "ads" = {
-    flavor_name    = "s2-general-4x8" # 4 vCPU / 8 GB — dedicated ad-server (high-QPS); see deployments/ads-server
+    flavor_name    = "s2-general-4x8" # 4 vCPU / 8 GB — dedicated customer360-promotions (high-QPS); see deployments/customer360-promotions
     root_disk_size = 50
     name           = "ads" # -> c360-api-prod-ads
   }
@@ -37,16 +37,20 @@ servers = {
     root_disk_size = 50
     name           = "docs" # -> c360-api-prod-docs
   }
-  # Uncomment to give data-tracking-api its own prod box (see deployments/server/deploy-tracking.sh).
-  # PROD is the gen-2 (s2-general) family, whose smallest tier is 2x4 (no 1x2) — bump if beacon
-  # traffic needs it. After apply: set proxy/overlays/prod.tfvars data_upstream to this box's
-  # private ip, open 8010/6580/4318 on the secgroup, and add "tracking" to monitoring's
-  # portainer_agent_server_keys.
-  # "tracking" = {
-  #   flavor_name    = "s2-general-2x4" # 2 vCPU / 4 GB — data-tracking-api (smallest gen-2 tier)
-  #   root_disk_size = 50
-  #   name           = "tracking" # -> c360-api-prod-tracking
-  # }
+  "agent" = {
+    # customer360-agent (AI Agent service, FastAPI :8009 -> LiteLLM). Dedicated box.
+    # Requested 1 vCPU / 2 GB, but prod is the gen-2 (s2-general) family whose SMALLEST
+    # tier is 2x4 — there is no 1x2 in gen-2 (same constraint as the docs box). Deployed
+    # by deployments/agent/deploy-agent.sh.
+    flavor_name    = "s2-general-2x4" # 2 vCPU / 4 GB (smallest gen-2 tier)
+    root_disk_size = 50
+    name           = "agent" # -> c360-api-prod-agent
+  }
+  # customer360-event-api does NOT get a prod box: it runs on the GreenNode VKS cluster as an
+  # KEDA-autoscaled Deployment (prod profile 3-20 pods), deployed by deployments/server/deploy-event-api.sh.
+  # After that deploy: set proxy/overlays/prod.tfvars data_upstream to the Service
+  # LoadBalancer EXTERNAL-IP, and open 6580 (api-box Redis) + 4318 (Jaeger OTLP) on the
+  # secgroup to the VKS worker-node CIDR — see the extra_ingress note in uat.tfvars.
   # "8x16" = {
   #   flavor_name    = "s2-general-8x16" # 8 vCPU / 16 GB
   #   root_disk_size = 50
@@ -86,4 +90,10 @@ security_group = ["secg-7c1e85ec-8028-460a-8592-99463f198831"] # "Default"
 # to docs-vector-search on the docs box. Keep this in sync with docs_upstream.
 extra_ingress = [
   { port = 8001, cidr = "10.101.1.12/32" }, # docs-vector-search <- frontend/caddy box private IP
+  # customer360-agent wiring. VERIFY the box private IPs with `terraform output servers`
+  # after apply, then uncomment with the real /32s (api box = customer360-api "4x8";
+  # mon box = mon_server_key in ../monitoring/overlays/prod.tfvars, default "4x8"):
+  # { port = 8009, cidr = "10.101.1.X/32" }, # agent :8009  <- api box (customer360-api -> agent /plan/*)
+  # { port = 9001, cidr = "10.101.1.Y/32" }, # agent :9001  <- mon box (Portainer manages the agent box)
+  # { port = 4318, cidr = "10.101.1.Z/32" }, # mon-box Jaeger OTLP <- agent box (request traces)  [source = agent box IP]
 ]

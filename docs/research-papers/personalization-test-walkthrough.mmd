@@ -1,0 +1,17 @@
+%%{init: {"theme": "neutral", "themeVariables": {"fontFamily": "DejaVu Sans", "fontSize": "18px"}, "flowchart": {"nodeSpacing": 24, "rankSpacing": 26, "padding": 14, "curve": "linear"}}}%%
+flowchart TD
+    A["Select a segment"] --> B["Open Agent Workflow<br/>add an active ranking agent"]
+    B --> C["Set order and strategy<br/>select active content"]
+    C --> D{"Action"}
+    D -->|Save| E["PUT workflow<br/>save and submit run"]
+    D -->|Rerun| F["POST workflow/run"]
+    E --> G["customer360-api<br/>validate and submit through Dagster GraphQL"]
+    F --> G
+    G --> H["Dagster master job<br/>ai_agents_master_job"]
+    H --> I["Load profiles in batches<br/>prepare up to 100 query vectors"]
+    I --> J["RankingRecommendationPipeline.process_batch<br/>rank per profile against up to 1,000 candidates"]
+    J --> K["Bulk upsert ranked results<br/>page inserts in groups of 500 rows"]
+    K --> L{"Run outcome"}
+    L -->|success| M["Mark SUCCEEDED<br/>invalidate cache"]
+    L -->|failure| N["Mark FAILED<br/>remove partial results"]
+    M --> O["Verify run ID in Dagster<br/>read results from API"]

@@ -9,19 +9,15 @@ import smtplib
 import socket
 import ssl
 import uuid
-from datetime import datetime, timezone
 from typing import Any, Optional
-from urllib.parse import quote_plus
 
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from core.cache import get_redis_client
-from core.config import settings
-from core.crud.base import CRUDBase
+from leo_customer360_dao.config import settings
 from core.database import engine
-from core.models.identity import CdpScoringModel
-from core.models.system import SysDataSource, SysDomain, SysTenantDomain
+from leo_customer360_dao.models.system import SysDomain, SysTenantDomain
 from core.utils.dagster_client import DagsterClient
 
 logger = logging.getLogger(__name__)
@@ -30,7 +26,7 @@ logger = logging.getLogger(__name__)
 # is down; a slow dependency should not make this endpoint hang.
 CONNECTIVITY_TIMEOUT_SECONDS = 2
 
-# The default tenant seeded by database-init/init-core-database.sql.
+# The default tenant seeded by customer360-database/init-core-database.sql.
 DEFAULT_TENANT_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 
 
@@ -50,11 +46,11 @@ class MetadataRepository:
 	"""Encapsulates metadata queries and related business logic."""
 
 	def __init__(self, session: Optional[Session] = None):
+		"""Create a repository backed by the optional database session."""
 		self.session = session
-		self._data_source_crud = CRUDBase(SysDataSource)
-		self._scoring_model_crud = CRUDBase(CdpScoringModel)
 
 	def _require_session(self) -> Session:
+		"""Return the configured session or fail before executing a query."""
 		if self.session is None:
 			raise MetadataRepositoryError("Database session is required for this operation")
 		return self.session
@@ -117,7 +113,7 @@ class MetadataRepository:
 
 	def _check_smtp(self) -> dict[str, Any]:
 		"""Probe the system SMTP relay (the env config the email_engine falls back
-		to when a tenant has no crm_email_provider_config row).
+		to when a tenant has no active crm_connector_config EMAIL row).
 
 		'disabled' when dispatch is mock or no host is set (no real email is sent).
 		Otherwise it opens a connection, optionally STARTTLS + login, and NOOPs to
@@ -125,7 +121,11 @@ class MetadataRepository:
 		Brevo/SMTP key, not just TCP reachability. Deliberately NOT part of
 		_service_status(): it does a real login and must never run on the
 		unauthenticated login-screen /metadata call."""
-		result = {"service": "smtp", "status": "unknown", "provider": settings.email_dispatch_adapter}
+		result: dict[str, Any] = {
+			"service": "smtp",
+			"status": "unknown",
+			"provider": settings.email_dispatch_adapter,
+		}
 		if (settings.email_dispatch_adapter or "mock").strip().lower() != "smtp" or not settings.smtp_host:
 			result["status"] = "disabled"
 			result["note"] = "Email dispatch is 'mock' or no SMTP host is configured (no real email is sent)"
@@ -172,26 +172,15 @@ class MetadataRepository:
 		return self._check_smtp()
 
 	def _service_status(self) -> dict[str, Any]:
+		"""Collect connectivity status for the non-authenticated metadata probe."""
 		return {
 			"postgres": self._check_postgres(),
 			"redis": self._check_redis(),
 			"dagster": self._check_dagster(),
 		}
 
-	def _generate_qr_code_data(self, data_source_url: str, slug: str) -> dict[str, Any]:
-		tracking_url = (
-			f"{data_source_url}?utm_source={slug}&utm_medium=qr_code&utm_campaign=c360_datasource"
-			if "?" not in data_source_url
-			else f"{data_source_url}&utm_source={slug}&utm_medium=qr_code&utm_campaign=c360_datasource"
-		)
-		return {
-			"target_url": data_source_url,
-			"tracking_url": tracking_url,
-			"qr_code_url": f"https://api.qrserver.com/v1/create-qr-code/?size=250x250&data={quote_plus(tracking_url)}",
-			"generated_at": datetime.now(timezone.utc).isoformat(),
-		}
-
 	def get_system_metadata(self) -> dict[str, Any]:
+		"""Return API configuration and dependency health metadata."""
 		services = self._service_status()
 		overall = "healthy" if all(
 			service["status"] in ("reachable", "disabled") for service in services.values()
@@ -207,12 +196,14 @@ class MetadataRepository:
 				"login_url": settings.sso_login_url,
 				"realm": settings.keycloak_realm,
 				"client_id": settings.keycloak_client_id,
+				"token_expires_minutes": getattr(settings, "keycloak_token_expires_minutes", 60),
 			},
 			"overall_status": overall,
 			"services": services,
 		}
 
 	def get_dagster_metadata(self) -> dict[str, Any]:
+		"""Return Dagster connectivity and configured job metadata."""
 		connectivity = self._check_dagster()
 		client = DagsterClient()
 		services = []
@@ -240,6 +231,7 @@ class MetadataRepository:
 		}
 
 	def get_domains(self, tenant_id: uuid.UUID = DEFAULT_TENANT_ID) -> dict[str, str]:
+		"""Return active domains available to the requested tenant."""
 		session = self._require_session()
 		stmt = (
 			select(SysDomain.domain_code, SysDomain.domain_name)
@@ -257,96 +249,3 @@ class MetadataRepository:
 			logger.warning("Failed to load domain metadata from PostgreSQL", exc_info=True)
 			raise MetadataRepositoryError(f"Domain metadata unavailable: {exc}") from exc
 		return {domain_code: domain_name for domain_code, domain_name in rows}
-
-	def list_data_sources(
-		self,
-		tenant_id: uuid.UUID = DEFAULT_TENANT_ID,
-		status: int | None = None,
-		skip: int = 0,
-		limit: int = 100,
-	) -> list[SysDataSource]:
-		session = self._require_session()
-		try:
-			return self._data_source_crud.list(
-				session,
-				tenant_id=tenant_id,
-				status=status,
-				skip=skip,
-				limit=limit,
-			)
-		except Exception as exc:  # noqa: BLE001
-			logger.warning("Failed to load data-source metadata from PostgreSQL", exc_info=True)
-			raise MetadataRepositoryError(f"Data-source metadata unavailable: {exc}") from exc
-
-	def get_data_source(self, data_source_id: uuid.UUID) -> SysDataSource:
-		session = self._require_session()
-		obj = self._data_source_crud.get(session, data_source_id)
-		if obj is None:
-			raise MetadataNotFoundError(f"SysDataSource '{data_source_id}' not found")
-		return obj
-
-	def create_data_source(self, payload: dict[str, Any]) -> SysDataSource:
-		session = self._require_session()
-		data = dict(payload)
-		if data.get("data_source_url") and not data.get("qr_code_data"):
-			data["qr_code_data"] = self._generate_qr_code_data(
-				data["data_source_url"],
-				data.get("slug", "datasource"),
-			)
-		return self._data_source_crud.create(session, data)
-
-	def update_data_source(self, data_source_id: uuid.UUID, payload: dict[str, Any]) -> SysDataSource:
-		obj = self.get_data_source(data_source_id)
-		data = dict(payload)
-		if "data_source_url" in data and data["data_source_url"] and "qr_code_data" not in data:
-			slug = data.get("slug") or obj.slug or "datasource"
-			data["qr_code_data"] = self._generate_qr_code_data(data["data_source_url"], slug)
-		return self._data_source_crud.update(self._require_session(), obj, data)
-
-	def delete_data_source(self, data_source_id: uuid.UUID) -> None:
-		obj = self.get_data_source(data_source_id)
-		self._data_source_crud.delete(self._require_session(), obj)
-
-	def list_scoring_models(
-		self,
-		status: str | None = None,
-		model_type: str | None = None,
-		skip: int = 0,
-		limit: int = 100,
-	) -> list[CdpScoringModel]:
-		session = self._require_session()
-		try:
-			return self._scoring_model_crud.list(
-				session,
-				status=status,
-				model_type=model_type,
-				skip=skip,
-				limit=limit,
-				sort_by="updated_at DESC",
-			)
-		except Exception as exc:  # noqa: BLE001
-			logger.warning("Failed to load scoring model metadata from PostgreSQL", exc_info=True)
-			raise MetadataRepositoryError(f"Scoring model metadata unavailable: {exc}") from exc
-
-	def get_scoring_model(self, scoring_model_name: str) -> CdpScoringModel:
-		session = self._require_session()
-		obj = self._scoring_model_crud.get(session, scoring_model_name)
-		if obj is None:
-			raise MetadataNotFoundError(f"CdpScoringModel '{scoring_model_name}' not found")
-		return obj
-
-	def create_scoring_model(self, payload: dict[str, Any]) -> CdpScoringModel:
-		session = self._require_session()
-		if self._scoring_model_crud.get(session, payload["scoring_model_name"]) is not None:
-			raise MetadataConflictError(
-				f"CdpScoringModel '{payload['scoring_model_name']}' already exists"
-			)
-		return self._scoring_model_crud.create(session, payload)
-
-	def update_scoring_model(self, scoring_model_name: str, payload: dict[str, Any]) -> CdpScoringModel:
-		obj = self.get_scoring_model(scoring_model_name)
-		return self._scoring_model_crud.update(self._require_session(), obj, payload)
-
-	def delete_scoring_model(self, scoring_model_name: str) -> None:
-		obj = self.get_scoring_model(scoring_model_name)
-		self._scoring_model_crud.delete(self._require_session(), obj)

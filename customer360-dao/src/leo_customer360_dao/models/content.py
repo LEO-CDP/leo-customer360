@@ -1,0 +1,47 @@
+"""Tenant-scoped content items selected by segment ranking workflows."""
+
+import uuid
+from datetime import datetime
+from typing import Optional
+
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import ForeignKey, SmallInteger, String, Text, text
+from sqlalchemy.dialects.postgresql import ARRAY, TIMESTAMP
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from leo_customer360_dao.models.base import Base
+
+
+class CdpContentItem(Base):
+    __tablename__ = "cdp_content_items"
+
+    content_item_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False
+    )
+    domain: Mapped[str] = mapped_column(Text, nullable=False, server_default="all")
+    item_type: Mapped[str] = mapped_column(Text, nullable=False)  # news | video | product | article
+
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    summary: Mapped[Optional[str]] = mapped_column(Text)
+    image_url: Mapped[Optional[str]] = mapped_column(Text)
+    cta_label: Mapped[Optional[str]] = mapped_column(Text)
+    cta_url: Mapped[Optional[str]] = mapped_column(Text)
+
+    segment_tags: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), nullable=False, server_default=text("ARRAY[]::text[]")
+    )
+    embedding_text: Mapped[Optional[str]] = mapped_column(Text)
+    embedding: Mapped[Optional[list[float]]] = mapped_column(Vector())
+    embedding_model: Mapped[Optional[str]] = mapped_column(Text)
+    embedding_version: Mapped[Optional[str]] = mapped_column(String(50))
+    embedding_updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
+
+    published_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    status_code: Mapped[int] = mapped_column(SmallInteger, server_default="1")
+
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))

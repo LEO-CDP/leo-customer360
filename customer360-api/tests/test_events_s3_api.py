@@ -1,10 +1,12 @@
 """HTTP contract tests for the S3-backed `/events/` compatibility route."""
 
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import core.cache as cache_module
 from core.database import get_db
 from core.routers.events_s3_api import get_event_query_repository, router
 
@@ -34,11 +36,28 @@ class FakeRepository:
             }
         ]
 
+    def query_daily_totals(self, db, tenant_id, **kwargs):
+        self.calls.append((db, tenant_id, kwargs))
+        return [
+            {
+                "day": "2026-09-15",
+                "total": 42,
+            }
+        ]
 
-def test_events_route_queries_s3_with_authenticated_tenant_and_bounds():
+    def query_device_type_totals(self, db, tenant_id, **kwargs):
+        self.calls.append((db, tenant_id, kwargs))
+        return [
+            {"device_type": "desktop", "total": 12},
+            {"device_type": "mobile", "total": 5},
+        ]
+
+
+def test_events_route_queries_s3_with_authenticated_tenant_and_bounds(monkeypatch):
     app = FastAPI()
     app.include_router(router)
     fake_repository = FakeRepository()
+    monkeypatch.setattr(cache_module, "get_redis_client", lambda: None)
     app.dependency_overrides[get_db] = lambda: FakeDb()
     app.dependency_overrides[get_event_query_repository] = lambda: fake_repository
 
@@ -51,7 +70,6 @@ def test_events_route_queries_s3_with_authenticated_tenant_and_bounds():
             "/events/",
             params={
                 "event_time_from": "2026-06-17T17:49:58.434Z",
-                "limit": 1000,
                 "days": 90,
             },
         )
@@ -59,10 +77,58 @@ def test_events_route_queries_s3_with_authenticated_tenant_and_bounds():
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert response.json()[0]["event_name"] == "purchase"
+    assert response.json() == [{"day": "2026-09-15", "total": 42}]
     assert fake_repository.calls[0][1] == TENANT_ID
-    assert fake_repository.calls[0][2]["limit"] == 1000
     assert fake_repository.calls[0][2]["days"] == 90
+
+
+def test_events_route_does_not_expose_raw_event_rows(monkeypatch):
+    app = FastAPI()
+    app.include_router(router)
+    fake_repository = FakeRepository()
+    monkeypatch.setattr(cache_module, "get_redis_client", lambda: None)
+    app.dependency_overrides[get_db] = lambda: FakeDb()
+    app.dependency_overrides[get_event_query_repository] = lambda: fake_repository
+
+    @app.middleware("http")
+    async def tenant_middleware(request, call_next):
+        request.state.tenant_id = str(TENANT_ID)
+        return await call_next(request)
+
+    try:
+        response = TestClient(app).get("/events/raw", params={"limit": 1000})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+    assert fake_repository.calls == []
+
+
+def test_events_device_types_route_returns_aggregated_totals(monkeypatch):
+    app = FastAPI()
+    app.include_router(router)
+    fake_repository = FakeRepository()
+    monkeypatch.setattr(cache_module, "get_redis_client", lambda: None)
+    app.dependency_overrides[get_db] = lambda: FakeDb()
+    app.dependency_overrides[get_event_query_repository] = lambda: fake_repository
+
+    @app.middleware("http")
+    async def tenant_middleware(request, call_next):
+        request.state.tenant_id = str(TENANT_ID)
+        return await call_next(request)
+
+    try:
+        response = TestClient(app).get("/events/device-types", params={"days": 30})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {"device_type": "desktop", "total": 12},
+        {"device_type": "mobile", "total": 5},
+    ]
+    assert fake_repository.calls[0][1] == TENANT_ID
+    assert fake_repository.calls[0][2]["days"] == 30
 
 
 def test_events_route_rejects_days_above_configured_bound():
@@ -75,8 +141,103 @@ def test_events_route_rejects_days_above_configured_bound():
         request.state.tenant_id = str(TENANT_ID)
         return await call_next(request)
     try:
-        response = TestClient(app).get("/events/?days=91")
+        response = TestClient(app).get("/events/?days=181")
     finally:
         app.dependency_overrides.clear()
 
     assert response.status_code == 422
+
+
+def test_events_route_returns_not_found_for_invalid_or_inactive_source():
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_db] = lambda: FakeDb()
+
+    @app.middleware("http")
+    async def tenant_middleware(request, call_next):
+        request.state.tenant_id = str(TENANT_ID)
+        return await call_next(request)
+
+    class InvalidSourceRepository(FakeRepository):
+        @staticmethod
+        def _raise_invalid_source():
+            from leo_customer360_dao.repositories.event_query_repository import EventDataSourceError
+
+            raise EventDataSourceError(
+                "Data source is invalid, inactive, or not owned by the tenant"
+            )
+
+        def query(self, db, tenant_id, **kwargs):
+            self._raise_invalid_source()
+
+        def query_daily_totals(self, db, tenant_id, **kwargs):
+            self._raise_invalid_source()
+
+    invalid_repository = InvalidSourceRepository()
+    app.dependency_overrides[get_event_query_repository] = lambda: invalid_repository
+    try:
+        response = TestClient(app).get(
+            "/events/",
+            params={"data_source_id": str(uuid.uuid4())},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+    assert "invalid, inactive" in response.json()["detail"]
+
+
+def test_events_route_caches_per_tenant_and_event_time_filter(monkeypatch):
+    app = FastAPI()
+    app.include_router(router)
+    fake_repository = FakeRepository()
+    app.dependency_overrides[get_db] = lambda: FakeDb()
+    app.dependency_overrides[get_event_query_repository] = lambda: fake_repository
+    fake_redis = {}
+
+    class InMemoryRedis:
+        def get(self, key):
+            return fake_redis.get(key)
+
+        def set(self, key, value, ex=None):
+            fake_redis[key] = value
+
+    monkeypatch.setattr(cache_module, "get_redis_client", lambda: InMemoryRedis())
+
+    @app.middleware("http")
+    async def tenant_middleware(request, call_next):
+        request.state.tenant_id = request.headers["X-Tenant-Id"]
+        return await call_next(request)
+
+    first_filter = "2026-09-15T00:00:00Z"
+    second_filter = "2026-09-16T00:00:00Z"
+    try:
+        client = TestClient(app)
+        first = client.get(
+            "/events/",
+            headers={"X-Tenant-Id": str(TENANT_ID)},
+            params={"event_time_from": first_filter},
+        )
+        cached = client.get(
+            "/events/",
+            headers={"X-Tenant-Id": str(TENANT_ID)},
+            params={"event_time_from": first_filter},
+        )
+        different_filter = client.get(
+            "/events/",
+            headers={"X-Tenant-Id": str(TENANT_ID)},
+            params={"event_time_from": second_filter},
+        )
+        different_tenant = client.get(
+            "/events/",
+            headers={"X-Tenant-Id": str(uuid.UUID("33333333-3333-3333-3333-333333333333"))},
+            params={"event_time_from": first_filter},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert first.status_code == 200
+    assert cached.status_code == 200
+    assert different_filter.status_code == 200
+    assert different_tenant.status_code == 200
+    assert len(fake_repository.calls) == 3

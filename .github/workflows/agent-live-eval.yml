@@ -1,0 +1,54 @@
+name: Agent Live Eval
+
+# Runs the customer360-agent planner against a REAL LLM (OpenAI via LiteLLM),
+# using the CD-injected LEO_OPENAI_API_KEY secret — the only place that key is
+# readable. Captures the full response, token consumption, $ cost, and a scored
+# evaluation for both channels (email + Zalo ZNS), and uploads the JSON.
+#
+# Triggered by push to the feature branch (so it runs without touching main) and
+# by manual dispatch. NOT a deploy — CD only fires on main / v* tags.
+
+on:
+  push:
+    branches: ['feat/SCRUM-123/ai-agent-for-message-template']
+    paths:
+      - '.github/workflows/agent-live-eval.yml'
+      - 'customer360-agent/tools/live_eval.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install agent deps
+        run: pip install -r customer360-agent/requirements.txt
+
+      - name: Run live eval (real LLM via CD key)
+        env:
+          OPENAI_API_KEY: ${{ secrets.LEO_OPENAI_API_KEY }}   # CD secret; the script reads OPENAI_API_KEY
+          # Model from the CICD variable (LEO_OPENAI_MODEL_NAME, a bare name) + the
+          # openai/ provider prefix LiteLLM needs. Paired with the OpenAI base URL.
+          LLM_MODEL: openai/${{ vars.LEO_OPENAI_MODEL_NAME }}
+          PYTHONUTF8: '1'
+        run: |
+          python customer360-agent/tools/live_eval.py --json eval-live.json
+          {
+            echo '### customer360-agent — live eval'
+            echo '```json'
+            cat eval-live.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eval-live-json
+          path: eval-live.json

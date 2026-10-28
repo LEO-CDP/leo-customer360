@@ -1,0 +1,6 @@
+dagster==1.13.26
+psycopg2-binary>=2.9,<3
+python-dotenv>=1.0,<2
+redis>=5.0,<6
+pytest>=7.4,<9
+leo-customer360-dao

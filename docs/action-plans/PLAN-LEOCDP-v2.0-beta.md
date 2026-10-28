@@ -25,8 +25,8 @@ It is updated to be realistic and code-accurate against the current repository s
 
 - Target flow: `segment_id` selection -> lifecycle-based CRM routing -> AI template draft -> AI campaign draft -> human approval -> dispatch -> tracking -> feedback loop.
 - Data model direction:
-  - `crm_email_templates`
-  - campaign linkage (`segment_id`, `template_id`)
+  - `crm_message_templates`
+  - campaign linkage (`segment_id`, `workflow_id`, `workflow_version`)
   - run/audit tables for deterministic sync and dispatch tracking.
 - Orchestration direction:
   - convert `campaign_activation` and `email_engine` Dagster code locations from placeholders to real jobs.
@@ -42,7 +42,7 @@ It is updated to be realistic and code-accurate against the current repository s
   - `crm_segment_audience_exports`
   - ad sync run/audit tables.
 - Integration direction:
-  - bridge Customer 360 workflows into `ads-server` (`leo_ads` schema) with traceable external IDs.
+  - bridge Customer 360 workflows into `customer360-promotions` (`leo_ads` schema) with traceable external IDs.
 - Governance direction:
   - AI-created campaign stays `Draft`; human approval required for activation.
 
@@ -50,10 +50,9 @@ It is updated to be realistic and code-accurate against the current repository s
 
 - Target flow: `segment_id` selection -> CRM routing + phone eligibility -> AI Zalo template draft -> AI campaign draft -> human approval -> OA dispatch -> webhook ingestion -> feedback.
 - Data model direction:
-  - `crm_zalo_templates`
-  - `crm_zalo_oa_accounts`
-  - `crm_zalo_dispatch_logs`
-  - `crm_zalo_suppression`
+  - `crm_connector_config`
+  - `crm_message_templates`
+  - `cdp_campaign_dispatch_logs`
   - Zalo sync run/audit tables.
 - Orchestration direction:
   - convert `campaign_activation` and `notification_engine` placeholders to real Zalo execution jobs.
@@ -69,31 +68,31 @@ It is updated to be realistic and code-accurate against the current repository s
 | CRM campaign entities and analytics endpoints | DONE | `customer360-api/core/routers/crm_api.py` (CRUD + `/campaigns/analytics`) |
 | Segment matched profiles and recompute trigger | DONE | `customer360-api/core/routers/segment_api.py` (`/{segment_id}/matched-profiles`, `/{segment_id}/recompute`) |
 | Generic event ingestion with dedup and identity resolution hints | DONE | `customer360-api/core/routers/events_api.py` (`/events`, `/events/bulk`) |
-| Core CRM/CDP schema (campaign, lead, lead source, contact, transactions, content items) | DONE | `database-init/database-schema.sql` |
-| Active Dagster jobs for identity, segmentation, analytics | DONE | `backend-system/identity_resolution/dagster_defs.py`, `backend-system/segmentation/dagster_defs.py`, `backend-system/analytics/dagster_defs.py` |
-| Ad server runtime and data models (`leo_ads`) | DONE | `ads-server/core/application.py`, `ads-server/model/*.py`, `ads-server/tests/test_api.py` |
-| Tracking analytics E2E smoke script | DONE | `all-data-simulator/run_tracking_analytics_e2e.sh` (recent run succeeded) |
+| Core CRM/CDP schema (campaign, lead, lead source, contact, transactions, content items) | DONE | `customer360-database/database-schema.sql` |
+| Active Dagster jobs for identity, segmentation, analytics | DONE | `customer360-backend/identity_resolution/dagster_defs.py`, `customer360-backend/segmentation/dagster_defs.py`, `customer360-backend/analytics/dagster_defs.py` |
+| Ad server runtime and data models (`leo_ads`) | DONE | `customer360-promotions/core/application.py`, `customer360-promotions/model/*.py`, `customer360-promotions/tests/test_api.py` |
+| Tracking analytics E2E smoke script | DONE | `customer360-seeding/run_tracking_analytics_e2e.sh` (recent run succeeded) |
 
 ### 2.2 Critical Gaps (Not Implemented Yet)
 
 | Capability Gap | Status | Code Evidence |
 | :--- | :--- | :--- |
-| Email-specific template, suppression, and dispatch schema from plan | BLOCKER | Missing in `database-init/database-schema.sql` |
-| Ad-tech bridge tables (`crm_ad_creatives`, platform map, audience export, sync run) | BLOCKER | Missing in `database-init/database-schema.sql` |
-| Zalo-specific tables (`crm_zalo_templates`, `crm_zalo_dispatch_logs`, etc.) | BLOCKER | Missing in `database-init/database-schema.sql` |
+| Email-specific template, suppression, and dispatch schema from plan | BLOCKER | Missing in `customer360-database/database-schema.sql` |
+| Ad-tech bridge tables (`crm_ad_creatives`, platform map, audience export, sync run) | BLOCKER | Missing in `customer360-database/database-schema.sql` |
+| Zalo connector/template/dispatch storage | READY | Reuses `crm_connector_config`, `crm_message_templates`, and `cdp_campaign_dispatch_logs` |
 | Channel-specific sync endpoints (`/admin/crm/sync-segment/*`, `/admin/adtech/*`, `/admin/zalo/*`) | BLOCKER | Not present in `customer360-api/core/routers` |
 | Channel-specific webhooks (ESP callbacks, ad callbacks, Zalo OA callbacks) | BLOCKER | Not present in `customer360-api/core/routers` |
-| Campaign activation real orchestration | PARTIAL | `backend-system/campaign_activation/dagster_defs.py` is placeholder sleep job |
-| Email execution pipeline | PARTIAL | `backend-system/email_engine/dagster_defs.py` is placeholder sleep job |
-| Notification/Zalo execution pipeline | PARTIAL | `backend-system/notification_engine/dagster_defs.py` is placeholder sleep job |
-| Data sync execution pipeline | PARTIAL | `backend-system/data_synch/dagster_defs.py` is placeholder sleep job |
+| Campaign activation real orchestration | PARTIAL | `customer360-backend/campaign_activation/dagster_defs.py` is placeholder sleep job |
+| Email execution pipeline | PARTIAL | `customer360-backend/email_engine/dagster_defs.py` is placeholder sleep job |
+| Notification/Zalo execution pipeline | PARTIAL | `customer360-backend/notification_engine/dagster_defs.py` is placeholder sleep job |
+| Data sync execution pipeline | PARTIAL | `customer360-backend/data_synch/dagster_defs.py` is placeholder sleep job |
 | End-to-end channel suites (email, ad-tech, zalo) | BLOCKER | No channel-specific E2E suites yet in repo |
 
 ### 2.3 Accuracy Corrections Applied In This Consolidation
 
-- Uses `crm_email_templates` naming (not `cdp_email_templates`).
+- Uses `crm_message_templates` naming (not `cdp_email_templates`).
 - Treats channel-specific features as planned blockers, not implemented facts.
-- Distinguishes real `ads-server` runtime capabilities from missing Customer360-to-AdTech orchestration.
+- Distinguishes real `customer360-promotions` runtime capabilities from missing Customer360-to-AdTech orchestration.
 - Keeps current truth that only identity resolution, segmentation, and analytics are fully active Dagster pipelines.
 
 ## 3) Consolidated Readiness Matrix (By Channel)
@@ -117,9 +116,9 @@ The following sequence is realistic for current code state and aligns all three 
 ### SUBTASK-01: Shared Schema Foundation
 
 - Add missing channel tables and campaign linkage FKs:
-  - Email: `crm_email_templates`
+  - Email and other channels: `crm_message_templates`
   - Ad Tech: `crm_ad_creatives`, `crm_ad_campaign_platform_map`, `crm_segment_audience_exports`
-  - Zalo: `crm_zalo_templates`, `crm_zalo_oa_accounts`, `crm_zalo_dispatch_logs`, `crm_zalo_suppression`
+  - Zalo: `crm_connector_config`, `crm_message_templates`, `cdp_campaign_dispatch_logs`
 - Add shared mapping/audit tables where needed:
   - `crm_campaign_content_items`
   - per-channel sync run tables.
@@ -174,9 +173,9 @@ The following sequence is realistic for current code state and aligns all three 
 
 - Build deterministic E2E suites for all three channels.
 - Reuse established simulator testing patterns from:
-  - `all-data-simulator/web_user_simulator.py`
-  - `all-data-simulator/test_web_user_simulator.py`
-  - `all-data-simulator/run_tracking_analytics_e2e.sh`
+  - `customer360-seeding/web_user_simulator.py`
+  - `customer360-seeding/test_web_user_simulator.py`
+  - `customer360-seeding/run_tracking_analytics_e2e.sh`
 - Add PR smoke + nightly full scenarios.
 
 ## 5) Unified Technical Checklist
@@ -195,9 +194,9 @@ The following sequence is realistic for current code state and aligns all three 
 
 ### B. PostgreSQL Tables Checklist
 
-- [ ] Email tables are created (`crm_email_templates`, suppression, dispatch/audit where applicable).
+- [ ] Message tables are created (`crm_message_templates`, suppression, dispatch/audit where applicable).
 - [ ] Ad-tech tables are created (`crm_ad_creatives`, platform map, audience export, sync runs).
-- [ ] Zalo tables are created (`crm_zalo_templates`, accounts, dispatch logs, suppression, sync runs).
+- [ ] Zalo uses the existing connector, template, dispatch-ledger, and profile-consent tables.
 - [ ] `crm_campaign` is extended with channel linkage and approval metadata.
 - [ ] Cross-table FKs and unique constraints are added for idempotency.
 - [ ] Tenant indexes and RLS policies are updated for all new tables.
@@ -228,14 +227,9 @@ The following sequence is realistic for current code state and aligns all three 
   - `CRM_ADTECH_AI_PROVIDER`
   - `CRM_ADTECH_DEFAULT_PLATFORM`, `CRM_ADTECH_DEFAULT_OBJECTIVE`
   - `CRM_ADTECH_TRACKING_BASE_URL`, `CRM_ADTECH_WEBHOOK_SIGNING_SECRET`
-  - Existing ad server envs remain authoritative in `ads-server/.env.example` (`LEO_AD_*`).
-- [ ] Zalo execution keys:
-  - `CRM_ZALO_AI_PROVIDER`
-  - `CRM_ZALO_OA_APP_ID`, `CRM_ZALO_OA_APP_SECRET`
-  - `CRM_ZALO_OA_ACCESS_TOKEN`, `CRM_ZALO_OA_REFRESH_TOKEN`
-  - `CRM_ZALO_OA_API_BASE_URL`, `CRM_ZALO_WEBHOOK_SIGNING_SECRET`
-  - `CRM_ZALO_TRACKING_BASE_URL`, `CRM_ZALO_UNSUBSCRIBE_BASE_URL`
-- [ ] Keys are present in `.env.example` and runtime env files for each service.
+  - Existing ad server envs remain authoritative in `customer360-promotions/.env.example` (`c360_PROMOTION_*`).
+- [ ] Zalo execution settings are stored in the tenant's `crm_connector_config` row (`CHAT/ZALO`), split between `credentials` and `config` JSONB.
+- [ ] Tenant Zalo settings are managed through the admin connector-config API, not runtime env files.
 
 ### E. Definition of Ready and Done
 

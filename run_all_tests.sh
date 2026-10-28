@@ -35,13 +35,14 @@ run_suite() {
   echo "-------------------------------------------------------------------"
 }
 
+run_suite "Customer 360 DAO" "${SCRIPT_DIR}/customer360-dao/run_tests.sh" "$@"
 run_suite "Customer 360 API" "${SCRIPT_DIR}/customer360-api/run_unit_tests.sh" "$@"
-run_suite "Data Tracking API" "${SCRIPT_DIR}/data-tracking-api/run_unit_tests.sh" "$@"
-run_suite "Identity Resolution" "${SCRIPT_DIR}/backend-system/identity_resolution/run_tests.sh" "$@"
-run_suite "Segmentation" "${SCRIPT_DIR}/backend-system/segmentation/run_tests.sh" "$@"
-run_suite "Campaign Activation" "${SCRIPT_DIR}/backend-system/campaign_activation/run_tests.sh" "$@"
-run_suite "Email Engine" "${SCRIPT_DIR}/backend-system/email_engine/run_tests.sh" "$@"
-run_suite "LEO Ad Server" "${SCRIPT_DIR}/ads-server/run_unit_tests.sh" "$@"
+run_suite "Data Tracking API" "${SCRIPT_DIR}/customer360-event-api/run_unit_tests.sh" "$@"
+run_suite "Identity Resolution" "${SCRIPT_DIR}/customer360-backend/identity_resolution/run_tests.sh" "$@"
+run_suite "Segmentation" "${SCRIPT_DIR}/customer360-backend/segmentation/run_tests.sh" "$@"
+run_suite "Campaign Activation" "${SCRIPT_DIR}/customer360-backend/campaign_activation/run_tests.sh" "$@"
+run_suite "Email Engine" "${SCRIPT_DIR}/customer360-backend/email_engine/run_tests.sh" "$@"
+run_suite "c360 Promotions" "${SCRIPT_DIR}/customer360-promotions/run_unit_tests.sh" "$@"
 
 echo ""
 echo "==================================================================="

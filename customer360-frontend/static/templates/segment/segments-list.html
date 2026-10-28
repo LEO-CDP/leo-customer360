@@ -1,0 +1,111 @@
+<!-- 
+  =============================================================================
+  SEGMENTS / AUDIENCE BUILDER TABLE CARD
+  =============================================================================
+-->
+<div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden">
+  
+  <!-- Header Section -->
+  <div class="p-6 border-b border-slate-100 bg-white flex flex-wrap items-center justify-between gap-4">
+    
+    <!-- Title & Subtitle with Icon -->
+    <div class="flex items-start gap-3">
+      <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 ring-1 ring-indigo-100 mt-0.5">
+        <i class="bi bi-diagram-3 text-lg leading-none" aria-hidden="true"></i>
+      </div>
+      <div>
+        <h1 class="text-base font-bold text-slate-900 tracking-tight">Segments</h1>
+        <p class="text-xs text-slate-400 mt-0.5">Audience Builder — click a segment to see its matched profiles</p>
+      </div>
+    </div>
+   
+    <!-- Search & Action Buttons -->
+    <div class="flex flex-wrap items-center gap-2">
+      <!-- Search Input with Icon -->
+      <div class="relative">
+        <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+          <i class="bi bi-search text-sm leading-none" aria-hidden="true"></i>
+        </span>
+        <input id="segments-search-input" type="search" name="segment_search"
+          placeholder="Search segments by name…" autocomplete="off" autocorrect="off" spellcheck="false" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl pl-9 pr-3.5 py-2 w-64 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+      </div>
+
+      <select id="segments-domain-filter" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
+        <option value="">All domains</option>
+      </select>
+
+      <select id="segments-status-filter" aria-label="Filter by segment status" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
+        <option value="">All statuses</option>
+        <option value="active">Active</option>
+        <option value="inactive">Inactive</option>
+      </select>
+
+      <select id="segments-owner-filter" aria-label="Filter by segment creation source" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
+        <option value="">All sources</option>
+        <option value="human">Created by user</option>
+        <option value="ai_agent">Created by AI agent</option>
+      </select>
+
+      <select id="segments-members-filter" aria-label="Filter by audience size" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
+        <option value="">All audience sizes</option>
+        <option value="empty">No members</option>
+        <option value="populated">Has members</option>
+      </select>
+
+      <select id="segments-sort-filter" aria-label="Sort segments" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
+        <option value="created_desc" selected>Sort: Created On (Newest)</option>
+        <option value="created_asc">Sort: Created On (Oldest)</option>
+        <option value="members_desc">Sort: Matched Profiles (High-Low)</option>
+        <option value="members_asc">Sort: Matched Profiles (Low-High)</option>
+        <option value="name_asc">Sort: Segment Name (A-Z)</option>
+        <option value="name_desc">Sort: Segment Name (Z-A)</option>
+      </select>
+
+      <button id="btn-segments-clear-filters" type="button" title="Clear segment filters" aria-label="Clear segment filters" class="inline-flex items-center justify-center h-8 w-8 border border-slate-200/80 bg-white rounded-xl text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition-colors shadow-sm">
+        <i class="bi bi-arrow-counterclockwise text-sm leading-none" aria-hidden="true"></i>
+      </button>
+
+      <!-- Recompute segments with member data -->
+      <button id="btn-segments-refresh" type="button" title="Recompute all segment memberships" class="inline-flex items-center gap-1.5 bg-slate-50 border border-slate-200/80 text-slate-700 rounded-xl px-3.5 py-2 text-xs font-semibold hover:bg-slate-100 transition-colors shadow-sm">
+        <i class="bi bi-arrow-clockwise text-sm text-slate-400" aria-hidden="true"></i>
+        <span>Recompute segments</span>
+      </button>
+
+      <!-- Create new segment -->
+      <button id="btn-segments-create" type="button" title="Create audience segment" class="inline-flex items-center gap-1.5 bg-indigo-600 text-white rounded-xl px-4 py-2 text-xs font-semibold hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 transition-colors shadow-sm shadow-indigo-100">
+        <i class="bi bi-plus-lg text-sm leading-none" aria-hidden="true"></i>
+        <span>Create segment</span>
+      </button>
+    </div>
+
+  </div>
+
+  <!-- Table Container -->
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm text-left">
+      <thead id="segments-thead" class="bg-slate-50/80 text-slate-400 text-[11px] uppercase tracking-wider font-semibold border-b border-slate-100 sticky top-0 z-10"></thead>
+      <tbody id="segments-tbody" class="divide-y divide-slate-100"></tbody>
+    </table>
+  </div>
+
+  <!-- Loading State -->
+  <div id="segments-list-loading" class="p-12 flex justify-center">
+    <div class="spinner"></div>
+  </div>
+
+  <!-- Empty State -->
+  <div id="segments-list-empty" class="hidden p-12 text-center text-sm text-slate-400">
+    <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-slate-50 flex items-center justify-center text-slate-400">
+      <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5v10.5H3.75V6.75zm3-3h10.5v3H6.75v-3zM8.25 12h7.5" /></svg>
+    </div>
+    <div class="font-medium text-slate-600">No segments found</div>
+    <p class="text-xs text-slate-400 mt-1">Get started by creating an audience segment, or adjust your search query.</p>
+  </div>
+
+  <!-- Footer Pagination / Counts -->
+  <div class="p-4 px-6 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 bg-slate-50/30">
+    <span id="segments-count-label" class="font-medium"></span>
+    <button id="btn-segments-load-more" type="button" class="hidden border border-slate-200/80 bg-white rounded-lg px-3 py-1.5 font-semibold text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm">Load more</button>
+  </div>
+
+</div>

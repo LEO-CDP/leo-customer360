@@ -4,28 +4,31 @@
 # Customer 360 Platform - local DEV bootstrap
 #
 # Starts the development stack in dev-docker-compose.yml (postgres + redis +
-# keycloak + minio + tracking-api) and the local docs-vector-search service so
+# keycloak + customer360-agent + minio + Mailpit + tracking-api) and the local
+# docs-vector-search service so
 # customer360-api and
-# backend-system/identity_resolution (CIR) can be run directly on the host
+# customer360-backend/identity_resolution (CIR) can be run directly on the host
 # against dockerized Postgres/Redis -- see
-# customer360-api/start.sh and backend-system/identity_resolution/run-demo.sh, and
+# customer360-api/start.sh and customer360-backend/identity_resolution/run-demo.sh, and
 # "non-Docker local dev workflow" in DOCKER-COMPOSE-GUIDE.md section 10.
 #
 # What it does, in order:
 #   1. Ensures '.env' exists (created from '.env.example' if missing) and
 #      contains every key currently in '.env.example'.
-#   2. Starts (or resets) postgres/redis/keycloak/minio via
-#      `docker compose -f dev-docker-compose.yml`.
-#   3. Builds the docs-vector-search index against the local PostgreSQL service
+#   2. Starts (or resets) postgres/redis/keycloak/customer360-agent/minio/
+#      Mailpit via `docker compose -f dev-docker-compose.yml`.
+#   3. Waits for PostgreSQL, applies every SQL file in
+#      customer360-database/migrations in lexical order, then builds the
+#      docs-vector-search index against the local PostgreSQL service
 #      and starts the AI service on DOCS_SEARCH_HOST_PORT.
-#   4. Waits for postgres/redis/keycloak/minio/tracking-api/docs-vector-search containers to
-#      report healthy, then waits for the one-shot `minio-init` bucket-bootstrap
-#      job to complete.
+#   4. Waits for postgres/redis/keycloak/customer360-agent/minio/Mailpit/
+#      tracking-api/docs-vector-search containers to report healthy, then waits
+#      for the one-shot `minio-init` bucket-bootstrap job to complete.
 #   5. Checks whether the Keycloak 'leocdp' realm exists yet; there is no
 #      automated realm/client seed script in this repo, so it prints manual
 #      setup instructions (DOCKER-COMPOSE-GUIDE.md section 9) when missing.
 #   6. Checks whether core demo tables are empty; if empty, runs the
-#      seed-demo workflow via backend-system/identity_resolution/run-demo.sh.
+#      seed-demo workflow via customer360-backend/identity_resolution/run-demo.sh.
 #      If not empty, prints current DB row-count status for key tables.
 #
 # Usage:
@@ -33,13 +36,17 @@
 #                                    seed-demo only when DB is empty; otherwise
 #                                    print DB status counts.
 #   ./dev-c360.sh no-seed           Same, but skip the CIR demo data seed step.
+#   ./dev-c360.sh seed-new-data     Generate fresh synthetic traffic locally and
+#                                    POST it only to the running customer360-event-api;
+#                                    never starts Docker or touches DB/S3 directly.
 #   ./dev-c360.sh upgrade           Local DEV upgrade: refresh images/containers
 #                                    with current repo code and restart core
 #                                    host services (non-destructive).
-#   ./dev-c360.sh restart           Restart docs-vector-search,
-#                                    customer360-api, backend-system, and frontend-admin.
+#   ./dev-c360.sh restart           Ensure Mailpit is up, then restart
+#                                    docs-vector-search, customer360-agent,
+#                                    customer360-api, customer360-backend, and customer360-frontend.
 #   ./dev-c360.sh reset             DESTRUCTIVE: `docker compose down -v`
-#                                    (drops the postgres/redis/minio volumes
+#                                    (drops the postgres/redis/minio/Mailpit volumes
 #                                    -- this also wipes Keycloak's
 #                                    db_keycloak and the MinIO dev bucket)
 #                                    then starts fresh and reseeds.
@@ -56,10 +63,11 @@ cd "$SCRIPT_DIR"
 COMPOSE_FILE=""
 ENV_FILE=".env"
 ENV_EXAMPLE_FILE=".env.example"
-CIR_DIR="backend-system/identity_resolution"
-BACKEND_SYSTEM_DIR="backend-system"
+DEMO_TENANT_ID="${DEMO_TENANT_ID:-11111111-1111-1111-1111-111111111111}"
+CIR_DIR="customer360-backend/identity_resolution"
+BACKEND_SYSTEM_DIR="customer360-backend"
 CUSTOMER360_API_DIR="customer360-api"
-FRONTEND_ADMIN_DIR="frontend-admin"
+FRONTEND_ADMIN_DIR="customer360-frontend"
 DOCS_SEARCH_DIR="tools/docs-vector-search"
 DOCS_SEARCH_COMPOSE_FILE="$DOCS_SEARCH_DIR/docker-compose.yml"
 DOCS_SEARCH_ENV_FILE="$DOCS_SEARCH_DIR/.env"
@@ -68,8 +76,11 @@ POSTGRES_CONTAINER="customer360-postgres"
 REDIS_CONTAINER="customer360-redis"
 KEYCLOAK_CONTAINER="customer360-keycloak"
 MINIO_CONTAINER="customer360-minio"
+MAILPIT_CONTAINER="customer360-mailpit"
 MINIO_INIT_CONTAINER="customer360-minio-init"
-TRACKING_CONTAINER="customer360-tracking-api"
+TRACKING_CONTAINER="customer360-event-api"
+AGENT_CONTAINER="customer360-agent"
+AGENT_SERVICE="agent"
 
 # --- Parse args (order-independent) ---
 ACTION="up"
@@ -80,6 +91,7 @@ for arg in "$@"; do
     upgrade) ACTION="upgrade" ;;
     restart) ACTION="restart" ;;
     reset) ACTION="reset" ;;
+    seed-new-data) ACTION="seed-new-data" ;;
     stop-all) ACTION="stop-all" ;;
     -y|--yes) SKIP_CONFIRM="true" ;;
     no-seed) SKIP_SEED="true" ;;
@@ -97,6 +109,40 @@ done
 if [ "$ACTION" = "stop-all" ]; then
   bash "$SCRIPT_DIR/dev-stop-and-delete-all.sh"
   exit 0
+fi
+
+# API-only traffic seeding intentionally runs before any environment bootstrap,
+# Docker Compose command, database status query, or host-service restart.
+if [ "$ACTION" = "seed-new-data" ]; then
+  SIMULATOR_DIR="$SCRIPT_DIR/customer360-seeding"
+  SIMULATOR_VENV="$SIMULATOR_DIR/.venv"
+  SIMULATOR_PYTHON="$SIMULATOR_VENV/bin/python"
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "❌ Error: python3 is required for API-only seed-new-data." >&2
+    exit 1
+  fi
+  if [ ! -x "$SIMULATOR_PYTHON" ] || ! "$SIMULATOR_PYTHON" --version >/dev/null 2>&1; then
+    echo "📦 Creating customer360-seeding virtualenv for API-only seed-new-data..."
+    python3 -m venv "$SIMULATOR_VENV"
+  fi
+  if [ ! -x "$SIMULATOR_PYTHON" ] || ! "$SIMULATOR_PYTHON" --version >/dev/null 2>&1; then
+    echo "❌ Could not create '$SIMULATOR_PYTHON'." >&2
+    exit 1
+  fi
+
+  echo "📥 Ensuring customer360-seeding dependencies are installed..."
+  "$SIMULATOR_PYTHON" -m pip install -q -r "$SIMULATOR_DIR/requirements-api-seed.txt"
+  seed_tracking_url="${SEED_TRACKING_API_URL:-http://127.0.0.1:${C360_TRACKING_API_PORT:-8010}/api/v1/tracking/logs}"
+  seed_data_source_id="${SEED_TRACKING_DATA_SOURCE_ID:-${TRACKING_DATA_SOURCE_ID:-15dc39d4-ae42-5c60-9c77-66f05dcae448}}"
+  echo "🌐 Sending simulated traffic through customer360-event-api only..."
+  echo "   Endpoint: $seed_tracking_url"
+  echo "   Data source: $seed_data_source_id"
+  (cd "$SIMULATOR_DIR" && "$SIMULATOR_PYTHON" seed_api_data.py \
+    --tracking-url "$seed_tracking_url" \
+    --data-source-id "$seed_data_source_id" \
+    --verbose)
+  exit $?
 fi
 
 # 'upgrade' refreshes all dev containers/images and restarts host services
@@ -344,13 +390,13 @@ validate_docs_provider_credentials() {
 
 restart_host_services() {
   echo "🔁 Restarting host services..."
-  echo "   - backend-system: ./${BACKEND_SYSTEM_DIR}/restart.sh"
+  echo "   - customer360-backend: ./${BACKEND_SYSTEM_DIR}/restart.sh"
   (cd "$BACKEND_SYSTEM_DIR" && bash restart.sh)
 
   echo "   - customer360-api: ./${CUSTOMER360_API_DIR}/restart.sh"
   (cd "$CUSTOMER360_API_DIR" && bash restart.sh)
 
-  echo "   - frontend-admin: ./${FRONTEND_ADMIN_DIR}/restart.sh"
+  echo "   - customer360-frontend: ./${FRONTEND_ADMIN_DIR}/restart.sh"
   (cd "$FRONTEND_ADMIN_DIR" && bash restart.sh)
 }
 
@@ -388,6 +434,36 @@ reset_docs_service() {
   "${DOCS_DC_CMD[@]}" down -v --remove-orphans
 }
 
+wait_for_healthy() {
+  local container="$1"
+  local max_attempts="${2:-30}"
+  local attempt=1
+  echo "⏳ Waiting for '${container}' to become healthy (max ${max_attempts} attempts)..."
+
+  until docker inspect "$container" >/dev/null 2>&1; do
+    if [ "$attempt" -ge 10 ]; then
+      echo "❌ Error: Container '${container}' was not created after 10 attempts." >&2
+      "${DC_CMD[@]}" logs --tail=50 "$container" 2>/dev/null || echo "(logs unavailable)"
+      exit 1
+    fi
+    sleep 1
+    attempt=$((attempt + 1))
+  done
+
+  attempt=1
+  until [ "$(docker inspect -f '{{.State.Health.Status}}' "$container" 2>/dev/null)" = "healthy" ]; do
+    if [ "$attempt" -ge "$max_attempts" ]; then
+      echo "❌ Error: '${container}' did not become healthy after ${max_attempts} attempts." >&2
+      echo "Container status: $(docker inspect -f '{{.State.Status}}' "$container" 2>/dev/null || echo 'unknown')"
+      "${DC_CMD[@]}" logs --tail=50 "$container" 2>/dev/null || true
+      exit 1
+    fi
+    sleep 2
+    attempt=$((attempt + 1))
+  done
+  echo "🟢 '${container}' is healthy."
+}
+
 upgrade_docs_service() {
   ensure_docs_env_file
   load_docs_provider_env
@@ -413,14 +489,20 @@ wait_for_docs_healthy() {
 }
 
 if [ "$ACTION" = "restart" ]; then
+  echo "📨 Ensuring Mailpit is running for local SMTP capture..."
+  "${DC_CMD[@]}" up -d mailpit
+  wait_for_healthy "$MAILPIT_CONTAINER"
   restart_docs_service
   wait_for_docs_healthy
+  echo "🔁 Restarting customer360-agent..."
+  "${DC_CMD[@]}" up -d --build --force-recreate "$AGENT_SERVICE"
+  wait_for_healthy "$AGENT_CONTAINER"
   restart_host_services
   exit 0
 fi
 
 # DB_PORT/REDIS_PORT are what host-run apps (customer360-api/start.sh,
-# backend-system/identity_resolution/run-demo.sh) connect through; *_HOST_PORT is
+# customer360-backend/identity_resolution/run-demo.sh) connect through; *_HOST_PORT is
 # what docker-compose publishes. They must match when running against the
 # dockerized services from the host.
 if [ "${DB_PORT:-5432}" != "${POSTGRES_HOST_PORT:-5432}" ]; then
@@ -434,7 +516,7 @@ fi
 # 2) Start / reset postgres + redis + keycloak
 # =============================================================================
 if [ "$ACTION" = "reset" ]; then
-  echo "⚠️  This will run '${DC[*]} -f ${COMPOSE_FILE} down -v', PERMANENTLY DELETING the customer360-pgdata, customer360-redisdata and customer360-miniodata volumes (all Postgres + Redis + MinIO data, including Keycloak's db_keycloak)."
+  echo "⚠️  This will run '${DC[*]} -f ${COMPOSE_FILE} down -v', PERMANENTLY DELETING the customer360-pgdata, customer360-redisdata, customer360-miniodata and customer360-mailpitdata volumes (all Postgres + Redis + MinIO data, captured email, and Keycloak's db_keycloak)."
   if [ "$SKIP_CONFIRM" != "true" ]; then
     read -r -p "Type 'yes' to confirm: " CONFIRM_ANSWER
     if [ "$CONFIRM_ANSWER" != "yes" ]; then
@@ -453,7 +535,7 @@ if [ "$ACTION" = "upgrade" ]; then
   echo "   - Rebuilding and force-recreating containers without deleting volumes..."
   "${DC_CMD[@]}" up -d --build --force-recreate
 else
-  echo "🚀 Starting postgres + redis + keycloak + minio (${COMPOSE_FILE})..."
+  echo "🚀 Starting postgres + redis + keycloak + customer360-agent + minio + Mailpit (${COMPOSE_FILE})..."
   "${DC_CMD[@]}" up -d --build
 fi
 
@@ -461,38 +543,6 @@ fi
 # 3) Wait for the healthchecked services, then for the one-shot minio-init
 #    bucket-bootstrap job to finish.
 # =============================================================================
-wait_for_healthy() {
-  local container="$1"
-  local max_attempts="${2:-30}"
-  local attempt=1
-  echo "⏳ Waiting for '${container}' to become healthy (max ${max_attempts} attempts)..."
-
-  # First, wait for container to exist
-  until docker inspect "$container" >/dev/null 2>&1; do
-    if [ "$attempt" -ge 10 ]; then
-      echo "❌ Error: Container '${container}' was not created after 10 attempts." >&2
-      "${DC_CMD[@]}" logs --tail=50 "$container" 2>/dev/null || echo "(logs unavailable)"
-      exit 1
-    fi
-    sleep 1
-    attempt=$((attempt + 1))
-  done
-
-  # Then wait for health status
-  attempt=1
-  until [ "$(docker inspect -f '{{.State.Health.Status}}' "$container" 2>/dev/null)" = "healthy" ]; do
-    if [ "$attempt" -ge "$max_attempts" ]; then
-      echo "❌ Error: '${container}' did not become healthy after ${max_attempts} attempts." >&2
-      echo "Container status: $(docker inspect -f '{{.State.Status}}' "$container" 2>/dev/null || echo 'unknown')"
-      "${DC_CMD[@]}" logs --tail=50 "$container" 2>/dev/null || true
-      exit 1
-    fi
-    sleep 2
-    attempt=$((attempt + 1))
-  done
-  echo "🟢 '${container}' is healthy."
-}
-
 wait_for_completed() {
   local container="$1"
   local max_attempts=30
@@ -517,10 +567,92 @@ wait_for_completed() {
   echo "🟢 '${container}' completed successfully."
 }
 
+wait_for_database_relation() {
+  local relation="$1"
+  local max_attempts="${2:-60}"
+  local attempt=1
+  local present
+  echo "⏳ Waiting for PostgreSQL schema initialization to create '${relation}'..."
+  until present="$(docker exec -u postgres "$POSTGRES_CONTAINER" \
+    psql -U "${DB_USER:-postgres}" -d "${DB_NAME:-customer360}" -tAc \
+    "SELECT to_regclass('${DB_SCHEMA:-customer360}.${relation}') IS NOT NULL" 2>/dev/null || true)" && [ "$present" = "t" ]; do
+    if [ "$attempt" -ge "$max_attempts" ]; then
+      echo "❌ Error: PostgreSQL schema did not create '${relation}' after ${max_attempts} attempts." >&2
+      docker logs --tail=100 "$POSTGRES_CONTAINER" >&2 || true
+      exit 1
+    fi
+    sleep 2
+    attempt=$((attempt + 1))
+  done
+  echo "🟢 PostgreSQL schema initialization completed."
+}
+
+apply_database_migrations() {
+  local migration_dir="$SCRIPT_DIR/customer360-database/migrations"
+  local migration
+  local migrations=()
+
+  if [ ! -d "$migration_dir" ]; then
+    echo "ℹ️  No database migrations directory found at '$migration_dir'."
+    return 0
+  fi
+
+  while IFS= read -r migration; do
+    migrations+=("$migration")
+  done < <(find "$migration_dir" -maxdepth 1 -type f -name '*.sql' -print | sort)
+
+  if [ "${#migrations[@]}" -eq 0 ]; then
+    echo "ℹ️  No database migrations found in '$migration_dir'."
+    return 0
+  fi
+
+  echo "🗃️  Applying ${#migrations[@]} database migration(s) in lexical order..."
+  for migration in "${migrations[@]}"; do
+    echo "   ▶ $(basename "$migration")"
+    local attempt=1
+    local max_attempts=15
+    local migration_output=""
+    while true; do
+      if migration_output="$(docker exec -i -u postgres "$POSTGRES_CONTAINER" \
+        psql -v ON_ERROR_STOP=1 \
+          -U "${DB_USER:-postgres}" \
+          -d "${DB_NAME:-customer360}" < "$migration" 2>&1)"; then
+        printf '%s\n' "$migration_output"
+        break
+      fi
+
+      if [[ "$migration_output" =~ "database system is shutting down" ||
+            "$migration_output" =~ "the database system is starting up" ||
+            "$migration_output" =~ "could not connect to server" ]]; then
+        if (( attempt >= max_attempts )); then
+          printf '%s\n' "$migration_output" >&2
+          echo "❌ Migration '$(basename "$migration")' could not connect to PostgreSQL after ${max_attempts} attempts." >&2
+          exit 1
+        fi
+        echo "   ⏳ PostgreSQL is temporarily unavailable; retrying migration in 2s (${attempt}/${max_attempts})..."
+        sleep 2
+        attempt=$((attempt + 1))
+        continue
+      fi
+
+      printf '%s\n' "$migration_output" >&2
+      echo "❌ Migration '$(basename "$migration")' failed." >&2
+      exit 1
+    done
+  done
+  echo "🟢 Database migrations applied successfully."
+}
+
 wait_for_healthy "$POSTGRES_CONTAINER"
+if [ "$ACTION" = "reset" ]; then
+  wait_for_database_relation "crm_campaign_content_items"
+fi
+apply_database_migrations
 wait_for_healthy "$REDIS_CONTAINER"
+wait_for_healthy "$MAILPIT_CONTAINER"
 wait_for_healthy "$MINIO_CONTAINER"
 wait_for_healthy "$TRACKING_CONTAINER"
+wait_for_healthy "$AGENT_CONTAINER"
 wait_for_completed "$MINIO_INIT_CONTAINER"
 
 if [[ "${SSO_LOGIN:-true}" == "true" ]]; then
@@ -576,6 +708,27 @@ print_database_status() {
      SELECT 'cdp_content_items', COUNT(*) FROM ${db_schema}.cdp_content_items
      UNION ALL
      SELECT 'crm_transactions', COUNT(*) FROM ${db_schema}.crm_transactions;"
+  echo "📈 Data source statistics:"
+  docker exec -u postgres "$POSTGRES_CONTAINER" psql -U "${DB_USER:-postgres}" -d "$db_name" -P pager=off \
+    -c "SELECT
+          data_source_id,
+          name,
+          slug,
+          CASE status WHEN 1 THEN 'active' ELSE 'inactive' END AS status,
+          CASE source_type
+            WHEN 1 THEN 'web/sdk'
+            WHEN 2 THEN 'connector'
+            WHEN 3 THEN 'webhook'
+            WHEN 4 THEN 's3'
+            WHEN 5 THEN 'mobile/sdk'
+            ELSE 'type-' || source_type::text
+          END AS source_type,
+          total_tracked_event,
+          avg_daily_event,
+          avg_events_per_profile
+        FROM ${db_schema}.sys_data_source
+        WHERE tenant_id = '${DEMO_TENANT_ID}'
+        ORDER BY status DESC, name;"
 }
 
 seed_demo_if_empty() {
@@ -636,12 +789,14 @@ get_host_service_status() {
 restart_host_services
 
 print_final_service_table() {
-  local postgres_status redis_status minio_status tracking_status docs_status
-  local backend_status api_status frontend_status
+  local postgres_status redis_status minio_status mailpit_status tracking_status docs_status
+  local backend_status api_status frontend_status agent_status
   postgres_status="$(docker inspect -f '{{.State.Health.Status}}' "$POSTGRES_CONTAINER" 2>/dev/null || echo "unknown")"
   redis_status="$(docker inspect -f '{{.State.Health.Status}}' "$REDIS_CONTAINER" 2>/dev/null || echo "unknown")"
   minio_status="$(docker inspect -f '{{.State.Health.Status}}' "$MINIO_CONTAINER" 2>/dev/null || echo "unknown")"
+  mailpit_status="$(docker inspect -f '{{.State.Health.Status}}' "$MAILPIT_CONTAINER" 2>/dev/null || echo "unknown")"
   tracking_status="$(docker inspect -f '{{.State.Health.Status}}' "$TRACKING_CONTAINER" 2>/dev/null || echo "unknown")"
+  agent_status="$(docker inspect -f '{{.State.Health.Status}}' "$AGENT_CONTAINER" 2>/dev/null || echo "unknown")"
   docs_status="$(docker inspect -f '{{.State.Health.Status}}' "$DOCS_SEARCH_CONTAINER" 2>/dev/null || echo "unknown")"
   backend_status="$(get_host_service_status "$SCRIPT_DIR/$BACKEND_SYSTEM_DIR/.dagster.pid")"
   api_status="$(get_host_service_status "$SCRIPT_DIR/$CUSTOMER360_API_DIR/.uvicorn.pid")"
@@ -654,7 +809,9 @@ print_final_service_table() {
   printf '%-12s | %-10s | %-25s\n' "postgres" "$postgres_status" "localhost:${POSTGRES_HOST_PORT:-5432}"
   printf '%-12s | %-10s | %-25s\n' "redis" "$redis_status" "localhost:${REDIS_HOST_PORT:-6580}"
   printf '%-12s | %-10s | %-25s\n' "minio" "$minio_status" "localhost:${MINIO_API_HOST_PORT:-9000} (console ${MINIO_CONSOLE_HOST_PORT:-9001})"
+  printf '%-12s | %-10s | %-25s\n' "mailpit" "$mailpit_status" "localhost:${MAILPIT_UI_HOST_PORT:-8025} (SMTP ${MAILPIT_SMTP_HOST_PORT:-1025})"
   printf '%-12s | %-10s | %-25s\n' "tracking-api" "$tracking_status" "localhost:${C360_TRACKING_API_PORT:-8010}"
+  printf '%-12s | %-10s | %-25s\n' "ai-agent" "$agent_status" "localhost:${C360_AGENT_PORT:-8009}"
   printf '%-12s | %-10s | %-25s\n' "docs-ai" "$docs_status" "localhost:${DOCS_SEARCH_HOST_PORT} (/health)"
   printf '%-12s | %-10s | %-25s\n' "backend" "$backend_status" "localhost:${DAGSTER_UI_PORT:-3000}"
   printf '%-12s | %-10s | %-25s\n' "api" "$api_status" "localhost:${C360_API_PORT:-8008}"

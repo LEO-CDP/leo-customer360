@@ -6,15 +6,16 @@ suite behaves the same regardless of how/where it's run.
 """
 
 import json
+import time
 import unittest
 from unittest.mock import patch
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.testclient import TestClient
 
-from core.auth import auth_middleware
-from tests.conftest import FakeDBSession, FakeQueryResult, FakeRedis
+from core.auth import auth_middleware, get_current_roles, is_root_user, require_admin
+from conftest import FakeDBSession, FakeQueryResult, FakeRedis
 
 
 def _build_app():
@@ -78,6 +79,59 @@ def _build_app_with_root_path():
 
 
 class AuthMiddlewareTests(unittest.TestCase):
+    def test_root_equivalence_across_keycloak_claim_locations(self):
+        for payload in (
+            {"roles": ["platform_admin"]},
+            {"realm_access": {"roles": ["platform_admin"]}},
+            {"resource_access": {"c360": {"roles": ["platform_admin"]}}},
+            {"roles": [None, 12, " PLATFORM_ADMIN "]},
+        ):
+            request = Request({"type": "http", "headers": []})
+            request.state.user = payload
+            self.assertTrue(is_root_user(request))
+            with patch("core.auth.SSO_LOGIN", True):
+                require_admin(request)
+
+    def test_non_root_roles_are_not_promoted_to_root(self):
+        for role in ("admin", "tenant_admin", "super_admin", "system_admin", "viewer"):
+            request = Request({"type": "http", "headers": []})
+            request.state.user = {"roles": [role]}
+            self.assertFalse(is_root_user(request))
+
+    def test_admin_keeps_existing_access_and_unauthenticated_is_rejected(self):
+        request = Request({"type": "http", "headers": []})
+        with patch("core.auth.SSO_LOGIN", True):
+            with self.assertRaises(HTTPException) as caught:
+                require_admin(request)
+            self.assertEqual(caught.exception.status_code, 401)
+            request.state.user = {"roles": ["admin"]}
+            require_admin(request)
+            request.state.user = {"roles": ["viewer"]}
+            with self.assertRaises(HTTPException) as caught:
+                require_admin(request)
+            self.assertEqual(caught.exception.status_code, 403)
+
+    def test_malformed_roles_are_not_accepted_as_roles(self):
+        request = Request({"type": "http", "headers": []})
+        request.state.user = {"roles": "platform_admin", "realm_access": {"roles": [None, {}]}}
+        self.assertEqual(get_current_roles(request), [])
+        self.assertFalse(is_root_user(request))
+
+    def test_platform_admin_is_root_equivalent_for_admin_actions(self):
+        request = Request({
+            "type": "http",
+            "method": "GET",
+            "path": "/secure",
+            "headers": [],
+            "query_string": b"",
+            "server": ("localhost", 80),
+            "client": ("127.0.0.1", 1),
+            "scheme": "http",
+        })
+        request.state.user = {"roles": ["platform_admin"]}
+        with patch("core.auth.SSO_LOGIN", True):
+            require_admin(request)
+
     def test_rejects_requests_without_bearer_token(self):
         client = TestClient(_build_app())
 
@@ -185,6 +239,143 @@ class AuthMiddlewareTests(unittest.TestCase):
             response2 = client.get("/secure", headers={"Authorization": "Bearer newtoken"})
         self.assertEqual(response2.status_code, 200)
 
+    def test_caches_token_ttl_capped_at_configured_lifetime(self):
+        client = TestClient(_build_app())
+        fake_redis = FakeRedis()
+
+        introspect_payload = {
+            "active": True,
+            "sub": "user-ttl",
+            "preferred_username": "ttl-guy",
+            "tenant_id": "11111111-1111-1111-1111-111111111111",
+            "user_id": "22222222-2222-2222-2222-222222222222",
+            "exp": int(time.time()) + 7200,  # 2 hours in future
+        }
+
+        with patch("core.auth.SSO_LOGIN", True), patch(
+            "core.auth._token_lifetime_seconds", return_value=3600
+        ), patch("core.auth.get_redis_client", return_value=fake_redis), patch(
+            "core.auth._introspect_with_keycloak", return_value=introspect_payload
+        ):
+            response = client.get("/secure", headers={"Authorization": "Bearer captoken"})
+
+        self.assertEqual(response.status_code, 200)
+        # Cache must never outlive the lifetime the middleware itself enforces.
+        self.assertEqual(fake_redis.ttls.get("auth:token:captoken"), 3600)
+
+    def test_rejects_token_older_than_configured_lifetime(self):
+        client = TestClient(_build_app())
+        fake_redis = FakeRedis()
+
+        now = int(time.time())
+        expired_by_iat_payload = {
+            "active": True,
+            "sub": "user-expired-iat",
+            "preferred_username": "old-session",
+            "tenant_id": "11111111-1111-1111-1111-111111111111",
+            "user_id": "22222222-2222-2222-2222-222222222222",
+            "iat": now - 4000,  # issued well over the 60-minute lifetime ago
+            "exp": now + 3600,
+        }
+
+        with patch("core.auth.SSO_LOGIN", True), patch(
+            "core.auth._token_lifetime_seconds", return_value=3600
+        ), patch("core.auth.get_redis_client", return_value=fake_redis), patch(
+            "core.auth._introspect_with_keycloak", return_value=expired_by_iat_payload
+        ):
+            response = client.get("/secure", headers={"Authorization": "Bearer oldtoken"})
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["detail"], "Invalid or expired token")
+
+    def test_accepts_token_within_lifetime_at_60_minutes(self):
+        """A 60-minute session must survive its full hour -- the regression that
+        kicked SSO admins back to the login page was this bound sitting at 30
+        minutes while the realm still called the token valid."""
+        client = TestClient(_build_app())
+        fake_redis = FakeRedis()
+
+        now = int(time.time())
+        payload = {
+            "active": True,
+            "sub": "user-59min",
+            "tenant_id": "11111111-1111-1111-1111-111111111111",
+            "user_id": "22222222-2222-2222-2222-222222222222",
+            "iat": now - 3540,  # 59 minutes old
+            "exp": now + 60,
+        }
+
+        with patch("core.auth.SSO_LOGIN", True), patch(
+            "core.auth._token_lifetime_seconds", return_value=3600
+        ), patch("core.auth.get_redis_client", return_value=fake_redis), patch(
+            "core.auth._introspect_with_keycloak", return_value=payload
+        ):
+            response = client.get("/secure", headers={"Authorization": "Bearer hour-old"})
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_clock_skew_leeway_keeps_boundary_token_valid(self):
+        """A token a few seconds past the configured lifetime is still accepted;
+        without the leeway, a Keycloak clock running ahead makes freshly issued
+        tokens look already-expired."""
+        client = TestClient(_build_app())
+        fake_redis = FakeRedis()
+
+        now = int(time.time())
+        payload = {
+            "active": True,
+            "sub": "user-skew",
+            "tenant_id": "11111111-1111-1111-1111-111111111111",
+            "user_id": "22222222-2222-2222-2222-222222222222",
+            "iat": now - 3630,  # 30s past the lifetime, inside the 60s leeway
+            "exp": now + 600,
+        }
+
+        with patch("core.auth.SSO_LOGIN", True), patch(
+            "core.auth._token_lifetime_seconds", return_value=3600
+        ), patch("core.auth.get_redis_client", return_value=fake_redis), patch(
+            "core.auth._introspect_with_keycloak", return_value=payload
+        ):
+            response = client.get("/secure", headers={"Authorization": "Bearer skewed"})
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_refresh_endpoint_is_exempt_from_bearer_auth(self):
+        """The admin UI calls /auth/refresh precisely because its access token
+        expired, so the middleware must not demand one."""
+        client = TestClient(_build_app())
+
+        with patch("core.auth.SSO_LOGIN", True):
+            response = client.get("/api/v1/auth/refresh")
+
+        self.assertNotEqual(response.status_code, 401)
+
+    def test_expired_cached_token_is_evicted_and_rejected(self):
+        client = TestClient(_build_app())
+        fake_redis = FakeRedis()
+
+        now = int(time.time())
+        fake_redis.set(
+            "auth:token:stale123",
+            json.dumps(
+                {
+                    "sub": "user-stale",
+                    "tenant_id": "11111111-1111-1111-1111-111111111111",
+                    "user_id": "22222222-2222-2222-2222-222222222222",
+                    "iat": now - 4000,
+                    "exp": now + 1000,
+                }
+            ),
+        )
+
+        with patch("core.auth.SSO_LOGIN", True), patch(
+            "core.auth.get_redis_client", return_value=fake_redis
+        ), patch("core.auth._introspect_with_keycloak", return_value={"active": False}):
+            response = client.get("/secure", headers={"Authorization": "Bearer stale123"})
+
+        self.assertEqual(response.status_code, 401)
+        self.assertIsNone(fake_redis.get("auth:token:stale123"))
+
     def test_health_endpoint_is_exempt_even_without_token(self):
         client = TestClient(_build_app())
 
@@ -254,7 +445,7 @@ class AuthMiddlewareTests(unittest.TestCase):
         self.assertEqual(response.json()["detail"], "Invalid or expired dev token")
 
     def test_dev_mode_accepts_valid_dev_token(self):
-        from core.utils.security import create_dev_access_token
+        from leo_customer360_dao.utils.security import create_dev_access_token
 
         client = TestClient(_build_app())
         token, _ = create_dev_access_token(
@@ -442,4 +633,3 @@ class AuthMiddlewareSysUserInfoProvisioningTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -1,5 +1,5 @@
 # Dagster orchestrator (webserver + daemon via `dagster dev`, 9 code locations
-# from backend-system/workspace.yaml). Serves the GraphQL endpoint the API calls
+# from customer360-backend/workspace.yaml). Serves the GraphQL endpoint the API calls
 # to submit jobs.
 #
 # Phase 0 (deployments/docs/dagster-scaling-analysis.md §4): storage is ADAPTIVE.

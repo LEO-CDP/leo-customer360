@@ -1,0 +1,165 @@
+<!-- 
+  =============================================================================
+  MODERN DASHBOARD HEADER & NAVIGATION
+  =============================================================================
+  Features:
+  - Sticky top layout with backdrop blur for a modern SaaS header feel
+  - Clean brand logo with indigo theme and typography
+  - Modernized period selector dropdown and action buttons with crisp icons
+  - Styled navigation tabs with active states, hover transitions, and padding
+-->
+<header class="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-slate-200/80 shadow-sm">
+  
+  <!-- Top Brand & Actions Bar -->
+  <div class="max-w-[1600px] mx-auto px-6 py-3.5 flex items-center justify-between gap-4">
+    
+    <!-- Brand / Logo Area -->
+    <div class="flex items-center gap-3.5">
+      <a href="#/overview"
+        class="w-10 h-10 shrink-0 rounded-xl bg-gradient-to-br from-indigo-600 to-indigo-700
+              text-white flex items-center justify-center font-bold text-sm
+              shadow-md shadow-indigo-200 ring-2 ring-indigo-50
+              hover:shadow-lg hover:shadow-indigo-200 transition-all duration-200"
+        aria-label="Customer 360" > C360
+      </a>
+
+      <div class="min-w-0">
+        <a href="#/overview"
+          class="block text-sm font-bold text-slate-900 leading-tight tracking-tight
+                hover:text-indigo-600 transition-colors"
+        > Customer 360
+        </a>
+
+        <div class="text-xs text-slate-400 font-medium leading-tight mt-1">
+          AI-powered Customer 360
+        </div>
+      </div>
+    </div>
+
+    <!-- Actions Area -->
+    <div class="flex items-center gap-3">
+
+      <!-- Persistent assistant and settings actions share one responsive fixed group. -->
+      <div class="fixed top-3.5 right-6 z-50 flex items-center gap-2">
+        <button id="docs-chat-launcher" type="button"
+          aria-expanded="false" aria-controls="docs-chat-panel"
+          aria-label="Ask the Docs"
+          title="Ask the Docs - documentation assistant"
+          class="inline-flex h-9 items-center gap-2 border border-slate-200/80 bg-white hover:bg-slate-50 rounded-xl px-3.5 text-xs font-semibold text-slate-700 transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30">
+          <i class="bi bi-chat-dots text-lg leading-none" aria-hidden="true"></i>
+          <span class="hidden sm:inline">Ask LEO</span>
+        </button>
+
+        <!-- Admin / Settings Button -->
+        <button id="btn-settings" type="button" aria-label="Settings" title="API connection settings"
+          class="inline-flex h-9 items-center gap-2 border border-slate-200/80 bg-white hover:bg-slate-50 rounded-xl px-3.5 text-xs font-semibold text-slate-700 transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30">
+          <i class="bi bi-gear text-lg leading-none" aria-hidden="true"></i>
+          <span id="api-status-dot" class="w-3 h-3 shrink-0 rounded-full bg-slate-300 ring-2 ring-slate-100" aria-hidden="true"></span>
+          <span class="hidden sm:inline">Settings</span>
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Navigation Bar -->
+  <nav aria-label="Primary navigation" class="max-w-[1600px] mx-auto px-6 flex gap-1.5 text-sm font-semibold overflow-x-auto scrollbar-none border-t border-slate-100">
+
+    <!-- Overview -->
+    <a href="#/overview"
+      title="System health, recent activities, and key performance metrics"
+      data-tab="overview"
+      class="tab-btn inline-flex min-h-11 items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500">
+      <i class="bi bi-grid-1x2" aria-hidden="true"></i>
+      <span>Overview</span>
+    </a>
+
+    <!-- Analytics -->
+    <a href="#/analytics"
+      title="Analyze customer behavior, events, and performance"
+      data-tab="analytics"
+      class="tab-btn inline-flex min-h-11 items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500">
+      <i class="bi bi-graph-up-arrow" aria-hidden="true"></i>
+      <span>Analytics</span>
+    </a>
+
+    <!-- Customer Intelligence -->
+    <a href="#/profiles"
+      title="Manage customer profiles"
+      data-tab="profiles"
+      class="tab-btn inline-flex min-h-11 items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500">
+      <i class="bi bi-people" aria-hidden="true"></i>
+      <span>Profiles</span>
+    </a>
+
+    <a href="#/segments"
+      title="Manage customer segments"
+      data-tab="segments"
+      class="tab-btn inline-flex min-h-11 items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500">
+      <i class="bi bi-diagram-3" aria-hidden="true"></i>
+      <span>Segments</span>
+    </a>
+
+    <a href="#/personas"
+      title="Manage customer personas"
+      data-tab="personas"
+      class="hidden tab-btn inline-flex min-h-11 items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500">
+      <i class="bi bi-person-badge" aria-hidden="true"></i>
+      <span>Personas</span>
+    </a>
+
+    <a href="#/attributes"
+      title="Manage customer attributes and profile properties"
+      data-tab="attributes"
+      class="tab-btn inline-flex min-h-11 items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500">
+      <i class="bi bi-sliders" aria-hidden="true"></i>
+      <span>Attributes</span>
+    </a>
+
+    <!-- Data Management -->
+    <a href="#/datasources"
+      title="Manage data sources and integrations"
+      data-tab="datasources"
+      class="tab-btn inline-flex min-h-11 items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500">
+      <i class="bi bi-database" aria-hidden="true"></i>
+      <span>Data Sources</span>
+    </a>
+
+    <!-- Content & Product Management -->
+    <a href="#/content-products"
+      title="Manage content and product items"
+      data-tab="content-products"
+      class="tab-btn inline-flex min-h-11 items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500">
+      <i class="bi bi-box-seam" aria-hidden="true"></i>
+      <span>Content &amp; Products</span>
+    </a>
+
+    <!-- Activation -->
+    <a href="#/campaigns"
+      title="Manage marketing campaigns"
+      data-tab="campaigns"
+      class="tab-btn inline-flex min-h-11 items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500">
+      <i class="bi bi-megaphone" aria-hidden="true"></i>
+      <span>Campaigns</span>
+    </a>
+
+    <!-- AI & Administration -->
+    <a href="#/agent"
+      title="Manage models, rules, and AI agents"
+      data-tab="agent"
+      class="tab-btn inline-flex min-h-11 items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500">
+      <i class="bi bi-robot" aria-hidden="true"></i>
+      <span>AI Agents</span>
+    </a>
+
+    <a href="#/admin"
+      title="Administer system settings, permissions, and configurations"
+      data-tab="admin"
+      class="tab-btn inline-flex min-h-11 items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500">
+      <i class="bi bi-gear" aria-hidden="true"></i>
+      <span>Admin</span>
+    </a>
+
+  </nav>
+
+</header>

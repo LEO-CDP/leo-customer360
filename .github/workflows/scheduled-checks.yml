@@ -41,11 +41,11 @@ jobs:
         id: unit
         run: |
           set +e
-          runners="ads-server/run_unit_tests.sh \
+          runners="customer360-promotions/run_unit_tests.sh \
                    customer360-api/run_unit_tests.sh \
-                   data-tracking-api/run_unit_tests.sh \
-                   backend-system/identity_resolution/run_tests.sh \
-                   backend-system/segmentation/run_tests.sh \
+                   customer360-event-api/run_unit_tests.sh \
+                   customer360-backend/identity_resolution/run_tests.sh \
+                   customer360-backend/segmentation/run_tests.sh \
                    tools/docs-vector-search/run_unit_tests.sh"
           mkdir -p logs
           fail=0
@@ -101,6 +101,7 @@ jobs:
                         https://beta.leocdp.com/data/health \
                         https://beta.leocdp.com/ads/health \
                         https://beta.leocdp.com/ai/health \
+                        https://beta.leocdp.com/agent/health \
                         https://beta.leocdp.com/auth/realms/customer360"
           urls="${URLS:-$default_urls}"
           fail=0

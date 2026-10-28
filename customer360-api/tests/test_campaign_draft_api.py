@@ -23,10 +23,11 @@ from core.repositories.campaign_draft_repository import (
     APPROVAL_STATUS_IN_REVIEW,
     APPROVAL_STATUS_REJECTED,
     CampaignDraftApprovalBlockedError,
+    CampaignDraftActorNotFoundError,
     CampaignDraftNotFoundError,
     CampaignDraftValidationError,
     CampaignSegmentNotFoundError,
-    CampaignTemplateNotFoundError,
+    SEGMENT_UNSET,
 )
 from core.routers.campaign_draft_api import router
 
@@ -43,7 +44,6 @@ def _campaign(**overrides) -> SimpleNamespace:
         status="Draft",
         approval_status=APPROVAL_STATUS_IN_REVIEW,
         segment_id=uuid.uuid4(),
-        template_id=uuid.uuid4(),
         name="Q4 Win-Back",
         objective="Win back lapsed customers",
         strategy_summary="Re-engage with a targeted offer",
@@ -78,6 +78,7 @@ class FakeCampaignDraftRepository:
     reviews: dict[uuid.UUID, list[dict]] = {}
     create_side_effect: Optional[Exception] = None
     approve_side_effect: Optional[Exception] = None
+    edit_side_effect: Optional[Exception] = None
     last_create_kwargs: dict[str, Any] = {}
 
     def __init__(self, session):
@@ -90,6 +91,7 @@ class FakeCampaignDraftRepository:
         cls.reviews = {}
         cls.create_side_effect = None
         cls.approve_side_effect = None
+        cls.edit_side_effect = None
         cls.last_create_kwargs = {}
 
     def create_draft(self, **kwargs):
@@ -97,7 +99,11 @@ class FakeCampaignDraftRepository:
         if FakeCampaignDraftRepository.create_side_effect is not None:
             raise FakeCampaignDraftRepository.create_side_effect
 
-        campaign = _campaign(tenant_id=kwargs["tenant_id"], segment_id=kwargs["segment_id"], template_id=kwargs["template_id"])
+        campaign = _campaign(
+            tenant_id=kwargs["tenant_id"],
+            segment_id=kwargs["segment_id"],
+            journey_stage=kwargs.get("journey_stage"),
+        )
         FakeCampaignDraftRepository.campaigns[campaign.campaign_id] = campaign
         FakeCampaignDraftRepository.content_items[campaign.campaign_id] = [
             _content_item_row(uuid.uuid4(), position=1, role="primary")
@@ -114,8 +120,12 @@ class FakeCampaignDraftRepository:
         return FakeCampaignDraftRepository.content_items.get(campaign_id, [])
 
     def edit_draft(self, tenant_id, campaign_id, editor_id, **fields):
+        if FakeCampaignDraftRepository.edit_side_effect is not None:
+            raise FakeCampaignDraftRepository.edit_side_effect
         campaign = self.get_campaign(tenant_id, campaign_id)
-        for key in ("objective", "strategy_summary", "start_date", "end_date"):
+        if fields.get("segment_id", SEGMENT_UNSET) is not SEGMENT_UNSET and fields.get("segment_id") is not None:
+            campaign.segment_id = fields["segment_id"]
+        for key in ("objective", "journey_stage", "strategy_summary", "start_date", "end_date"):
             if fields.get(key) is not None:
                 setattr(campaign, key, fields[key])
         if fields.get("content_items") is not None:
@@ -125,6 +135,13 @@ class FakeCampaignDraftRepository:
             ]
         if campaign.approval_status in (APPROVAL_STATUS_APPROVED, APPROVAL_STATUS_REJECTED):
             campaign.approval_status = APPROVAL_STATUS_IN_REVIEW
+        return campaign
+
+    def submit_for_review(self, tenant_id, campaign_id, submitter_id):
+        campaign = self.get_campaign(tenant_id, campaign_id)
+        if campaign.approval_status != "Draft":
+            raise CampaignDraftValidationError("Only Draft campaigns can be submitted")
+        campaign.approval_status = APPROVAL_STATUS_IN_REVIEW
         return campaign
 
     def approve(self, tenant_id, campaign_id, reviewer_id):
@@ -174,7 +191,6 @@ class GenerateCampaignDraftTests(unittest.TestCase):
     def _payload(self, **overrides) -> dict[str, Any]:
         payload = {
             "segment_id": str(uuid.uuid4()),
-            "template_id": str(uuid.uuid4()),
             "objective": "Drive Q4 repeat purchases among lapsed VIP customers",
             "budget_time_constraints": "Launch within 2 weeks",
         }
@@ -189,6 +205,19 @@ class GenerateCampaignDraftTests(unittest.TestCase):
         self.assertEqual(body["status"], "Draft")
         self.assertEqual(body["approval_status"], "InReview")
         self.assertTrue(len(body["content_items"]) > 0)
+
+    def test_generate_preserves_targeted_journey_stage(self):
+        response = self.client.post(
+            "/campaigns/draft",
+            json=self._payload(journey_stage="retention"),
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["journey_stage"], "retention")
+        self.assertEqual(
+            FakeCampaignDraftRepository.last_create_kwargs["journey_stage"],
+            "retention",
+        )
 
     def test_generate_missing_required_objective_returns_422(self):
         payload = self._payload()
@@ -221,13 +250,6 @@ class GenerateCampaignDraftTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 409)
 
-    def test_generate_refused_for_missing_template_returns_404(self):
-        FakeCampaignDraftRepository.create_side_effect = CampaignTemplateNotFoundError("Template not found")
-
-        response = self.client.post("/campaigns/draft", json=self._payload())
-
-        self.assertEqual(response.status_code, 404)
-
     def test_list_campaign_content_items(self):
         created = self.client.post("/campaigns/draft", json=self._payload()).json()
 
@@ -256,7 +278,6 @@ class ReviewCampaignDraftTests(unittest.TestCase):
             "/campaigns/draft",
             json={
                 "segment_id": str(uuid.uuid4()),
-                "template_id": str(uuid.uuid4()),
                 "objective": "Win back lapsed customers",
             },
         ).json()
@@ -271,6 +292,23 @@ class ReviewCampaignDraftTests(unittest.TestCase):
         self.assertEqual(body["approved_by"], str(DEMO_USER_ID))
         self.assertIsNotNone(body["approved_at"])
 
+    def test_submit_for_approval_moves_draft_to_in_review(self):
+        campaign = FakeCampaignDraftRepository.campaigns[uuid.UUID(self.campaign_id)]
+        campaign.approval_status = "Draft"
+        campaign.workflow_id = uuid.uuid4()
+        campaign.workflow_version = 1
+
+        response = self.client.post(f"/campaigns/{self.campaign_id}/submit-for-approval")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["approval_status"], "InReview")
+
+    def test_submit_for_approval_requires_a_draft(self):
+        response = self.client.post(f"/campaigns/{self.campaign_id}/submit-for-approval")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("Draft", response.json()["detail"])
+
     def test_edit_then_approve_reflects_edited_values(self):
         self.client.patch(f"/campaigns/{self.campaign_id}/draft", json={"objective": "Revised objective"})
         response = self.client.post(f"/campaigns/{self.campaign_id}/approve")
@@ -279,6 +317,30 @@ class ReviewCampaignDraftTests(unittest.TestCase):
         body = response.json()
         self.assertEqual(body["objective"], "Revised objective")
         self.assertEqual(body["approval_status"], "Approved")
+
+    def test_edit_campaign_changes_target_segment(self):
+        replacement_segment_id = str(uuid.uuid4())
+
+        response = self.client.patch(
+            f"/campaigns/{self.campaign_id}/draft",
+            json={"segment_id": replacement_segment_id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["segment_id"], replacement_segment_id)
+
+    def test_edit_rejects_user_missing_from_active_tenant_with_401(self):
+        FakeCampaignDraftRepository.edit_side_effect = CampaignDraftActorNotFoundError(
+            "Authenticated user is not a member of the active tenant; sign in again"
+        )
+
+        response = self.client.patch(
+            f"/campaigns/{self.campaign_id}/draft",
+            json={"objective": "Updated objective"},
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("sign in again", response.json()["detail"])
 
     def test_reject_sets_approval_status_rejected(self):
         response = self.client.post(f"/campaigns/{self.campaign_id}/reject", json={"reason": "Budget too aggressive"})
@@ -371,7 +433,6 @@ class CampaignDraftTenantIsolationTests(unittest.TestCase):
             "/campaigns/draft",
             json={
                 "segment_id": str(uuid.uuid4()),
-                "template_id": str(uuid.uuid4()),
                 "objective": "Tenant A's campaign",
             },
             headers={"X-Tenant-Id": self.TENANT_A},

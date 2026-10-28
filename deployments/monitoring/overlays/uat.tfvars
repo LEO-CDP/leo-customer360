@@ -3,7 +3,7 @@
 # Portainer admin password lives in .env, not in this file).
 
 mon_server_key = "api"    # SHARE c360-api-uat-api (10.100.1.5): the box that runs
-                          # api + ads + frontend + keycloak + redis.
+                          # api + frontend + keycloak + redis.
 
 # Portainer — container-ops UI (status/logs/exec/restart). HTTPS, bridge net.
 portainer_enabled = true
@@ -55,6 +55,7 @@ jaeger_ui_bind        = "127.0.0.1"   # loopback only; view via `ssh -L 16686:lo
 jaeger_otlp_http_port = 4318
 jaeger_otlp_grpc_port = 4317
 jaeger_mem            = "300m"         # docker --memory cap (protect the shared box)
+jaeger_ttl            = "6h"           # badger span retention (default 24h); short so the 20 GB api-box disk and the 300m cap are not outgrown
 # Gate the Jaeger UI behind oauth2-proxy / Keycloak (Jaeger has no native auth). Served over
 # TLS at https://<domain>/jaeger via Caddy (deployments/proxy) -> oauth2-proxy on
 # :jaeger_proxy_port -> Jaeger. (No dedicated LB port; the old :16686 listener was retired.)
@@ -83,13 +84,35 @@ pgadmin_proxy_port = 4050                       # (unused while pgadmin_sso = fa
 
 # --- Portainer agents on OTHER boxes (one Portainer manages every box) --------
 # Portainer runs on the api box and by default only sees the api box's containers. To manage the
-# BACKEND box (server key "backend" = 10.100.1.4, runs backend-system/Dagster) from the SAME Portainer,
+# other boxes (e.g. docs, agent) from the SAME Portainer,
 # run portainer/agent there and register it as an environment (no second Portainer). Comma-separate
 # for more boxes. Portainer reaches the agent over the private VPC at <box-private-ip>:9001.
 # PREREQUISITE (infra, one-time): open tcp/9001 on the Default secgroup from the api box's private
 # IP — set in ../server/overlays/uat.tfvars (agent_ports) and apply with
 # `cd ../server && ./deploy.sh uat apply`. deploy-monitoring auto-registers the env via the
 # Portainer API (needs PORTAINER_ADMIN_PASSWORD in .env; else it prints the one-click UI step).
-portainer_agent_server_keys = "backend,tracking,docs"   # backend box (10.100.1.4) + data-tracking box (10.100.1.8) + docs-vector-search box (10.100.1.7)
+# "tracking" is gone: customer360-event-api moved to the VKS cluster, so it has no vServer to
+# run a Portainer agent on — inspect those pods with kubectl (or the VKS console) instead.
+portainer_agent_server_keys = "docs,agent"   # docs (10.100.1.7) + customer360-agent box (the backend box was retired; Dagster runs on VKS). 9001 from the api box is already open on the shared secgroup.
 portainer_agent_image       = "portainer/agent:lts"
 portainer_agent_port        = 9001
+
+# The VKS cluster as one more Portainer environment — this is how customer360-promotions
+# and customer360-event-api become visible, since they are pods and no Docker agent above
+# can see them. ONE agent covers the whole cluster; there is no per-service agent.
+#
+# Nothing is installed by setting this. The Kubernetes agent is a cluster add-on applied
+# once by hand (../customer360-event-api/cluster-addons/portainer-agent/); this only
+# registers it. Leave empty to skip — prod has no cluster yet.
+#
+# <node-ip>:<agent NodePort>. Any node works (kube-proxy forwards to whichever node the
+# agent pod runs on), but it IS a node ip, so it goes stale if the node group is replaced —
+# re-read it with `kubectl get nodes -o wide`. If registration times out, suspect the VKS
+# node security group rather than the manifest: 30778 must be open from the api box.
+#
+# The NAME is the identity: registration matches on name, NOT url, so a second name
+# pointing at this same agent silently creates a duplicate environment for one cluster.
+# Keep it "c360-vks-uat" — the c360- prefix every other environment uses. (An earlier
+# hand-registered "leocdp-uat" pointed at this same agent and was removed as redundant.)
+portainer_k8s_agent_url     = "10.100.1.11:30778"
+portainer_k8s_agent_name    = "c360-vks-uat"

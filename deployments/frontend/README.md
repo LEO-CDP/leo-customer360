@@ -1,6 +1,6 @@
-# deployments/frontend — admin UI (frontend-admin)
+# deployments/frontend — admin UI (customer360-frontend)
 
-Deploys `frontend-admin` (FastAPI/uvicorn, port **8890**) — the Customer 360 admin
+Deploys `customer360-frontend` (FastAPI/uvicorn, port **8890**) — the Customer 360 admin
 UI. It serves HTML/JS and injects runtime config; **the browser**, not this server,
 calls the API and Keycloak. So its only dependency is that both are reachable from
 the client via the LB (they are).
@@ -20,7 +20,7 @@ No secrets — all config is non-secret and lives in `overlays/<env>.tfvars`.
 ```
 
 `deploy-frontend.sh` discovers the target VM from `../server` (by `frontend_server_key`),
-ships `frontend-admin/`, builds the image (stripping the BuildKit `--mount`), and runs
+ships `customer360-frontend/`, builds the image (stripping the BuildKit `--mount`), and runs
 it `--network host` with an env file built locally and shipped base64-encoded.
 
 Key env (from the overlay):

@@ -1,4 +1,4 @@
-# docs-vector-search — LOCAL DEVELOPMENT only. 1 CPU / 2 GB RAM.
+# docs-vector-search — LOCAL DEVELOPMENT only. Memory limit: 2 GiB.
 #
 # OpenAI is the default; Gemini and local fastembed/Qwen are selected independently
 # through the provider environment variables. Vectors
@@ -81,7 +81,7 @@ x-docs-vector-search: &docs-vector-search
     resources:
       limits:
         cpus: "2.0"
-        memory: 4g
+        memory: 3g
   logging:
     driver: json-file
     options:
@@ -105,6 +105,10 @@ services:
     restart: unless-stopped
     networks:
       - customer360-network
+    deploy:
+      resources:
+        limits:
+          memory: 120MiB
     command:
       - redis-server
       - --port

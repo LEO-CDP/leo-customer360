@@ -135,10 +135,11 @@ variable "zone_id" {
 # ---------------------------------------------------------------------------
 variable "backends" {
   type = map(object({
-    member_ip   = string           # backend server's PRIVATE ip (must be in the LB subnet)
-    member_port = number           # port the app listens on, on the backend
-    listen_port = number           # public port exposed on the LB
-    health_path = optional(string) # HTTP health-check path (e.g. /health); null -> plain TCP health check
+    member_ip    = string           # backend server's PRIVATE ip (must be in the LB subnet)
+    member_port  = number           # port the app listens on, on the backend
+    listen_port  = number           # public port exposed on the LB
+    health_path  = optional(string) # HTTP health-check path (e.g. /health); null -> plain TCP health check
+    ingress_cidr = optional(string) # source CIDR for THIS backend's SG rule; null -> var.backend_ingress_cidr
   }))
   default     = {}
   description = "Services to expose through the LB: key -> { member_ip, member_port, listen_port, health_path }."

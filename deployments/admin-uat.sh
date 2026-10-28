@@ -15,10 +15,15 @@
 #   db-status        Row counts for key CDP tables            (print_database_status)
 #   seed-demo        Seed CIR/demo data — idempotent          (seed_demo_if_empty)
 #   bootstrap-realm  Re-run idempotent Keycloak realm/roles/client bootstrap
-#   restart-apps     Restart api + ads + frontend containers  (restart_host_services)
-#   restart-backend  Restart backend-system (Dagster)
-#   redeploy-apps    Pull latest images + recreate api/ads/frontend/backend
+#   restart-apps     Restart the api + frontend containers on the api box
+#                    (promotions moved to VKS — this prints the kubectl command for it)
+#   restart-backend  Restart customer360-backend (Dagster)
+#   redeploy-apps    Pull latest images + recreate api/promotions/frontend/backend
 #   flush-cache      FLUSHDB the Redis cache (needs CONFIRM=flush-cache)
+#   disk-report      READ-ONLY disk usage of the api box (df, docker system df, volume sizes, journal)
+#   disk-cleanup     Reclaim api-box disk: remove the orphaned jaeger_data volume, dangling images,
+#                    build cache, old journal logs (needs CONFIRM=disk-cleanup). Never prunes named
+#                    volumes in general and never touches jaeger_data2 / redis / pgadmin / portainer data.
 #
 # NOTE: intentionally NO destructive data reset (dev-c360's `reset -v` wipes the
 # DB) — that must never be a click on uat. flush-cache only clears the fail-open
@@ -58,16 +63,21 @@ case "$ACTION" in
   # --- actions that map cleanly onto existing deploy-all steps ---------------
   seed-demo)       exec bash deploy-all.sh "$ENV" --only seed -y ;;
   bootstrap-realm) exec bash deploy-all.sh "$ENV" --only sso-realm -y ;;
-  redeploy-apps)   exec bash deploy-all.sh "$ENV" --only api,ads,frontend,backend -y ;;
+  redeploy-apps)   exec bash deploy-all.sh "$ENV" --only api,promotions,frontend,backend -y ;;
 
   # --- lightweight container restarts (no image pull) -----------------------
   restart-apps)
-    echo ">> Restarting api/ads/frontend on the api box ..."
-    run_on "$(srv_ip api)" 'sudo docker restart customer360-api customer360-ads customer360-frontend >/dev/null && sudo docker ps --filter name=customer360- --format "   {{.Names}} {{.Status}}"'
+    # customer360-promotions is NOT in this list any more: it runs as a Deployment on
+    # VKS, so there is no container to restart here and `docker restart` on a missing
+    # name fails the whole && chain (taking the status output with it).
+    echo ">> Restarting api/frontend on the api box ..."
+    run_on "$(srv_ip api)" 'sudo docker restart customer360-api customer360-frontend >/dev/null && sudo docker ps --filter name=customer360- --format "   {{.Names}} {{.Status}}"'
+    echo "   promotions (customer360-promotions) runs on VKS — restart it with:"
+    echo "     kubectl -n customer360 rollout restart deploy/promotions"
     ;;
   restart-backend)
-    echo ">> Restarting backend-system (Dagster) on the backend box ..."
-    run_on "$(srv_ip backend)" 'sudo docker restart backend-system >/dev/null && sudo docker ps --filter name=backend-system --format "   {{.Names}} {{.Status}}"'
+    echo ">> Restarting Dagster on VKS ..."
+    kubectl -n customer360 rollout restart deploy/dagster && kubectl -n customer360 rollout status deploy/dagster --timeout=6m
     ;;
 
   # --- read-only DB status (catalog live-row estimates: RLS-immune) ----------
@@ -117,9 +127,38 @@ echo "   DBSIZE before=$b after=$a (fail-open cache — repopulates on demand)"
 RC
     ;;
 
+  # --- api-box disk (the 20 GB root volume has hit 100%) ----------------------
+  disk-report)
+    run_on "$(srv_ip api)" 'bash -s' <<'DR'
+echo "== df /"; df -h / | tail -1
+echo "== docker system df"; sudo docker system df
+echo "== docker volumes (size, in-use by N containers)"
+# the glob must expand as root: /var/lib/docker is not readable by the ssh user
+sudo sh -c 'du -sm /var/lib/docker/volumes/*/_data 2>/dev/null' | sort -rn | head -30 | while read -r mb path; do
+  v="${path#/var/lib/docker/volumes/}"; v="${v%/_data}"
+  printf '%6s MB  used-by=%s  %s\n' "$mb" "$(sudo docker ps -a -q --filter volume="$v" | wc -l)" "$v"
+done
+echo "== top dirs under /var"; sudo du -xsh /var/lib/docker /var/log /var/lib/containerd /var/cache 2>/dev/null | sort -rh
+echo "== journal"; sudo journalctl --disk-usage 2>/dev/null || true
+DR
+    ;;
+  disk-cleanup)
+    [ "${CONFIRM:-}" = "disk-cleanup" ] || { echo "ERROR: disk-cleanup deletes data on the api box — re-run with CONFIRM=disk-cleanup (the workflow's 'confirm' input). Run disk-report first."; exit 1; }
+    run_on "$(srv_ip api)" 'bash -s' <<'DC'
+echo "before:"; df -h / | tail -1
+# orphaned pre-v2 Jaeger badger volume; `docker volume rm` refuses while any container references it
+if sudo docker volume inspect jaeger_data >/dev/null 2>&1; then sudo docker volume rm jaeger_data && echo "removed volume jaeger_data" || echo "jaeger_data in use - left alone"; fi
+sudo docker image prune -f | tail -1
+sudo docker builder prune -f | tail -1
+sudo journalctl --vacuum-size=200M 2>&1 | tail -1
+sudo apt-get clean
+echo "after:"; df -h / | tail -1
+DC
+    ;;
+
   *)
     echo "ERROR: unknown/empty action '$ACTION'."
-    echo "Supported: db-status | seed-demo | bootstrap-realm | restart-apps | restart-backend | redeploy-apps | flush-cache"
+    echo "Supported: db-status | seed-demo | bootstrap-realm | restart-apps | restart-backend | redeploy-apps | flush-cache | disk-report | disk-cleanup"
     exit 1
     ;;
 esac

@@ -3,9 +3,7 @@
 .env*
 
 # Large directories not needed by the postgres image build context.
-backend-system/
-customer360-api/
-frontend-admin/
+customer360-frontend/
 docs/
 ui-wireframes/
 logs/
@@ -15,7 +13,9 @@ logs/
 **/*.pyc
 **/.pytest_cache/
 **/.venv/
+**/tests/
 
 # Exclude documentation from Docker build context.
 **/*.md
 **/README.md
+!customer360-dao/README.md

@@ -1,0 +1,600 @@
+"""CRM-style entity models: Campaign, Lead, Contact, Account, Opportunity, Industry.
+
+These mirror the ``ENTITY TABLES`` section of core-customer360/database-schema.sql.
+The ``embedding vector(1536)`` columns are mapped via pgvector's SQLAlchemy
+``Vector`` type for completeness, but are excluded from the default API
+response schemas (see core/schemas/crm.py) to keep responses lightweight.
+"""
+
+import uuid
+from datetime import date, datetime
+from decimal import Decimal
+from typing import Optional
+
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Date,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TIMESTAMP
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from leo_customer360_dao.models.base import Base
+
+
+class Campaign(Base):
+    __tablename__ = "crm_campaign"
+
+    campaign_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False)
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id"))
+    campaign_code: Mapped[Optional[str]] = mapped_column(String(100))
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[Optional[str]] = mapped_column(String(50), server_default="Draft")
+    channel: Mapped[Optional[str]] = mapped_column(String(100))
+    platform: Mapped[Optional[str]] = mapped_column(String(100))
+    objective: Mapped[Optional[str]] = mapped_column(String(100))
+    journey_stage: Mapped[Optional[str]] = mapped_column(String(30))
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    keywords: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text))
+    lang: Mapped[Optional[str]] = mapped_column(Text, server_default="en")
+    embedding: Mapped[Optional[list[float]]] = mapped_column(Vector(1536))
+    start_date: Mapped[Optional[date]] = mapped_column(Date)
+    end_date: Mapped[Optional[date]] = mapped_column(Date)
+    budget_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 2))
+    currency: Mapped[Optional[str]] = mapped_column(String(3), server_default="VND")
+    # Workflow ownership + human-approval gate: governance state machine,
+    # independent of the free-text `status` column above.
+    segment_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("cdp_segments.segment_id", ondelete="SET NULL")
+    )
+    workflow_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True))
+    workflow_version: Mapped[Optional[int]] = mapped_column(Integer)
+    workflow_execution_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True))
+    approval_status: Mapped[Optional[str]] = mapped_column(String(50), server_default="Draft")
+    approved_by: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id"))
+    approved_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
+    strategy_summary: Mapped[Optional[str]] = mapped_column(Text)
+    planning_constraints: Mapped[Optional[str]] = mapped_column(Text)
+    ai_plan: Mapped[Optional[dict]] = mapped_column(JSONB)
+    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    # Bumped on every campaign-draft write; used by CampaignDraftRepository's
+    # optimistic-concurrency guard (see database-schema.sql's crm_campaign
+    # updated_at column, added alongside crm_campaign_reviews).
+    updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+class CampaignReview(Base):
+    __tablename__ = "crm_campaign_reviews"
+
+    review_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False)
+    campaign_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("crm_campaign.campaign_id", ondelete="CASCADE"), nullable=False
+    )
+    reviewer_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id"), nullable=False
+    )
+    decision: Mapped[str] = mapped_column(String(10), nullable=False)
+    reason: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+class CampaignExperiment(Base):
+    """Tenant-scoped A/B experiment definition for one campaign."""
+
+    __tablename__ = "crm_campaign_experiments"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "experiment_id", name="ux_campaign_experiment_tenant_id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "experiment_id", "winning_variant_id"],
+            ["crm_campaign_experiment_variants.tenant_id", "crm_campaign_experiment_variants.experiment_id", "crm_campaign_experiment_variants.variant_id"],
+            name="fk_campaign_experiment_winner",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+    )
+
+    experiment_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False)
+    campaign_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("crm_campaign.campaign_id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="Draft")
+    primary_metric: Mapped[str] = mapped_column(String(50), nullable=False, server_default="conversions")
+    start_date: Mapped[Optional[date]] = mapped_column(Date)
+    end_date: Mapped[Optional[date]] = mapped_column(Date)
+    winning_variant_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True))
+    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id"))
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+class CampaignAgent(Base):
+    """Agents assigned to a campaign with a role, autonomy level, guardrails, and pinned prompt revision."""
+
+    __tablename__ = "crm_campaign_agent"
+    __table_args__ = (
+        UniqueConstraint("campaign_id", "agent_code", "role", name="uq_crm_campaign_agent"),
+        ForeignKeyConstraint(
+            ["tenant_id", "campaign_id"],
+            ["crm_campaign.tenant_id", "crm_campaign.campaign_id"],
+            name="fk_crm_campaign_agent_tenant_campaign",
+            ondelete="CASCADE",
+        ),
+    )
+
+    campaign_agent_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id", ondelete="CASCADE"), nullable=False
+    )
+    campaign_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    agent_code: Mapped[str] = mapped_column(
+        String(100), ForeignKey("cdp_ai_agents.agent_code", ondelete="RESTRICT"), nullable=False
+    )
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    autonomy: Mapped[str] = mapped_column(String(20), nullable=False, server_default="approve")
+    pinned_instruction_version: Mapped[Optional[int]] = mapped_column(Integer)
+    guardrails: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+class CampaignExperimentVariant(Base):
+    """One audience/template arm in a campaign experiment."""
+
+    __tablename__ = "crm_campaign_experiment_variants"
+    __table_args__ = (
+        UniqueConstraint("experiment_id", "variant_key", name="uq_campaign_experiment_variant_key"),
+        UniqueConstraint("tenant_id", "variant_id", name="ux_campaign_experiment_variant_tenant_variant"),
+        UniqueConstraint("tenant_id", "experiment_id", "variant_id", name="ux_campaign_experiment_variant_tenant_id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "experiment_id"],
+            ["crm_campaign_experiments.tenant_id", "crm_campaign_experiments.experiment_id"],
+            name="fk_campaign_experiment_variant_tenant_experiment",
+            ondelete="CASCADE",
+        ),
+    )
+
+    variant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False)
+    experiment_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    variant_key: Mapped[str] = mapped_column(String(50), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    segment_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("cdp_segments.segment_id"), nullable=False
+    )
+    template_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("crm_message_templates.template_id", ondelete="SET NULL")
+    )
+    allocation_percentage: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    is_control: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="Draft")
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+class CRMCampaignPerformanceDaily(Base):
+    __tablename__ = "crm_campaign_performance_daily"
+    __table_args__ = (
+        Index(
+            "ux_campaign_daily_performance_base",
+            "tenant_id",
+            "campaign_id",
+            "report_date",
+            unique=True,
+            postgresql_where=text("experiment_variant_id IS NULL"),
+        ),
+        Index(
+            "ux_campaign_daily_performance_variant",
+            "tenant_id",
+            "campaign_id",
+            "report_date",
+            "experiment_variant_id",
+            unique=True,
+            postgresql_where=text("experiment_variant_id IS NOT NULL"),
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "experiment_variant_id"],
+            ["crm_campaign_experiment_variants.tenant_id", "crm_campaign_experiment_variants.variant_id"],
+            name="fk_campaign_performance_experiment_variant_tenant",
+            ondelete="SET NULL",
+        ),
+    )
+
+    performance_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False)
+    campaign_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("crm_campaign.campaign_id", ondelete="CASCADE"), nullable=False
+    )
+    experiment_variant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True)
+    )
+    report_date: Mapped[date] = mapped_column(Date, nullable=False)
+    spend: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 2), server_default=text("0.00"))
+    impressions: Mapped[Optional[int]] = mapped_column(BigInteger, server_default=text("0"))
+    clicks: Mapped[Optional[int]] = mapped_column(BigInteger, server_default=text("0"))
+    conversions: Mapped[Optional[int]] = mapped_column(BigInteger, server_default=text("0"))
+    revenue_estimated: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 2), server_default=text("0.00"))
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+class VwCampaignPerformanceMetrics(Base):
+    """Read-only mapped class for customer360.vw_campaign_performance_metrics."""
+
+    __tablename__ = "vw_campaign_performance_metrics"
+    __table_args__ = {"info": {"is_view": True}}
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True))
+    campaign_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    campaign_code: Mapped[Optional[str]] = mapped_column(String(100))
+    name: Mapped[str] = mapped_column(Text)
+    status: Mapped[Optional[str]] = mapped_column(String(50))
+    channel: Mapped[Optional[str]] = mapped_column(String(100))
+    platform: Mapped[Optional[str]] = mapped_column(String(100))
+    objective: Mapped[Optional[str]] = mapped_column(String(100))
+    total_spend: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    total_impressions: Mapped[int] = mapped_column(BigInteger)
+    total_clicks: Mapped[int] = mapped_column(BigInteger)
+    total_conversions: Mapped[int] = mapped_column(BigInteger)
+    total_revenue: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    ctr_percentage: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    cvr_percentage: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    cpa: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    roas: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+
+
+class CampaignMember(Base):
+    __tablename__ = "crm_campaign_member"
+
+    campaign_member_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False)
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id"))
+    campaign_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("crm_campaign.campaign_id")
+    )
+    contact_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True))
+    status: Mapped[Optional[str]] = mapped_column(Text)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    keywords: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text))
+    lang: Mapped[Optional[str]] = mapped_column(Text, server_default="en")
+    embedding: Mapped[Optional[list[float]]] = mapped_column(Vector(1536))
+    joined_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
+
+
+class Lead(Base):
+    __tablename__ = "crm_lead"
+
+    lead_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False)
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id"))
+    lead_source_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("crm_lead_source.lead_source_id", ondelete="SET NULL")
+    )
+    first_name: Mapped[Optional[str]] = mapped_column(Text)
+    last_name: Mapped[Optional[str]] = mapped_column(Text)
+    email: Mapped[Optional[str]] = mapped_column(Text)
+    phone: Mapped[Optional[str]] = mapped_column(Text)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    keywords: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text))
+    lang: Mapped[Optional[str]] = mapped_column(Text, server_default="en")
+    embedding: Mapped[Optional[list[float]]] = mapped_column(Vector(1536))
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
+
+
+class LeadSource(Base):
+    __tablename__ = "crm_lead_source"
+
+    lead_source_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False)
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id"))
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    keywords: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text))
+    lang: Mapped[Optional[str]] = mapped_column(Text, server_default="en")
+    embedding: Mapped[Optional[list[float]]] = mapped_column(Vector(1536))
+    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
+
+
+class Contact(Base):
+    __tablename__ = "crm_contact"
+
+    contact_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False)
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id"))
+    first_name: Mapped[Optional[str]] = mapped_column(Text)
+    last_name: Mapped[Optional[str]] = mapped_column(Text)
+    email: Mapped[Optional[str]] = mapped_column(Text)
+    phone: Mapped[Optional[str]] = mapped_column(Text)
+    account_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True))
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    keywords: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text))
+    lang: Mapped[Optional[str]] = mapped_column(Text, server_default="en")
+    embedding: Mapped[Optional[list[float]]] = mapped_column(Vector(1536))
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
+
+
+class Account(Base):
+    __tablename__ = "crm_account"
+
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False)
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id"))
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    industry_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True))
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    keywords: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text))
+    lang: Mapped[Optional[str]] = mapped_column(Text, server_default="en")
+    embedding: Mapped[Optional[list[float]]] = mapped_column(Vector(1536))
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
+
+
+class Opportunity(Base):
+    __tablename__ = "crm_opportunity"
+
+    opportunity_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False)
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id"))
+    account_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("crm_account.account_id")
+    )
+    name: Mapped[Optional[str]] = mapped_column(Text)
+    value: Mapped[Optional[float]] = mapped_column(Numeric)
+    stage: Mapped[Optional[str]] = mapped_column(Text)
+    close_date: Mapped[Optional[date]] = mapped_column(Date)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    keywords: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text))
+    lang: Mapped[Optional[str]] = mapped_column(Text, server_default="en")
+    embedding: Mapped[Optional[list[float]]] = mapped_column(Vector(1536))
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
+
+
+class Industry(Base):
+    __tablename__ = "crm_industry"
+
+    industry_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False)
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id"))
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    keywords: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text))
+    lang: Mapped[Optional[str]] = mapped_column(Text, server_default="en")
+    embedding: Mapped[Optional[list[float]]] = mapped_column(Vector(1536))
+    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
+
+
+# ---------------------------------------------------------------------------
+# Agentic CRM messaging entities.
+# Mirror the "Agentic CRM Messaging Schema" section of database-schema.sql.
+# ---------------------------------------------------------------------------
+
+
+class MessageTemplate(Base):
+    __tablename__ = "crm_message_templates"
+
+    template_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    message_type: Mapped[str] = mapped_column(Text, nullable=False, server_default="EMAIL")
+    persona_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("cdp_persona_archetypes.persona_archetype_id", ondelete="SET NULL")
+    )
+    context: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    message_body: Mapped[Optional[str]] = mapped_column(Text)
+    subject: Mapped[Optional[str]] = mapped_column(Text)
+    html_body: Mapped[Optional[str]] = mapped_column(Text)
+    text_body: Mapped[Optional[str]] = mapped_column(Text)
+    variables: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    status: Mapped[str] = mapped_column(String(50), nullable=False, server_default="Draft")
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id"))
+    approved_by: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id"))
+    approved_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
+    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+class CampaignContentItem(Base):
+    __tablename__ = "crm_campaign_content_items"
+
+    campaign_content_item_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False)
+    campaign_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("crm_campaign.campaign_id", ondelete="CASCADE"), nullable=False
+    )
+    content_item_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("cdp_content_items.content_item_id", ondelete="CASCADE"), nullable=False
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    role: Mapped[Optional[str]] = mapped_column(String(50))
+    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+class SegmentSyncRun(Base):
+    __tablename__ = "crm_segment_sync_runs"
+
+    sync_run_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False)
+    segment_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("cdp_segments.segment_id", ondelete="CASCADE"), nullable=False
+    )
+    triggered_by: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id"))
+    status: Mapped[str] = mapped_column(String(50), nullable=False, server_default="Pending")
+    dry_run: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    matched_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    customer_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    lead_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    contact_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    skipped_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    error_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    error_message: Mapped[Optional[str]] = mapped_column(Text)
+    started_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    finished_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
+    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
+
+
+class CampaignDispatchLog(Base):
+    """Per-recipient email send ledger written by the email_engine job
+. UNIQUE(campaign_id, master_profile_id) makes re-runs
+    idempotent. Read-only from the API (dispatch-log evidence endpoint)."""
+
+    __tablename__ = "cdp_campaign_dispatch_logs"
+
+    dispatch_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False)
+    campaign_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("crm_campaign.campaign_id", ondelete="CASCADE"), nullable=False
+    )
+    master_profile_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("cdp_master_profiles.master_profile_id", ondelete="CASCADE"), nullable=False
+    )
+    template_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("crm_message_templates.template_id", ondelete="SET NULL")
+    )
+    recipient_email: Mapped[Optional[str]] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, server_default="Pending")
+    provider: Mapped[Optional[str]] = mapped_column(String(100))
+    provider_message_id: Mapped[Optional[str]] = mapped_column(Text)
+    rendered_subject: Mapped[Optional[str]] = mapped_column(Text)
+    error_message: Mapped[Optional[str]] = mapped_column(Text)
+    run_id: Mapped[Optional[str]] = mapped_column(Text)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    dispatched_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
+    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+class ConnectorConfig(Base):
+    """Per-tenant outbound CRM activation connector configuration."""
+
+    __tablename__ = "crm_connector_config"
+
+    connector_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id", ondelete="SET NULL")
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False, server_default="default")
+    connector_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    provider: Mapped[str] = mapped_column(String(100), nullable=False)
+    direction: Mapped[str] = mapped_column(String(20), nullable=False, server_default="OUTBOUND")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="ACTIVE")
+    endpoint_url: Mapped[Optional[str]] = mapped_column(Text)
+    region: Mapped[Optional[str]] = mapped_column(String(100))
+    auth_type: Mapped[Optional[str]] = mapped_column(String(50))
+    credentials_ref: Mapped[Optional[str]] = mapped_column(Text)
+    credentials: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    config: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    capabilities: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    last_tested_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
+    last_test_status: Mapped[Optional[str]] = mapped_column(String(20))
+    last_error: Mapped[Optional[str]] = mapped_column(Text)
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+# Compatibility alias for callers that still import the old email-specific name.
+EmailProviderConfig = ConnectorConfig
+
+
+class SuppressionList(Base):
+    """Tenant-scoped omnichannel activation suppression record."""
+
+    __tablename__ = "crm_suppression_list"
+
+    suppression_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id", ondelete="CASCADE"), nullable=False
+    )
+    master_profile_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("cdp_master_profiles.master_profile_id", ondelete="SET NULL")
+    )
+    channel: Mapped[str] = mapped_column(String(30), nullable=False)
+    identifier_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    identifier: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str] = mapped_column(String(50), nullable=False)
+    scope: Mapped[str] = mapped_column(String(20), nullable=False, server_default="GLOBAL")
+    campaign_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("crm_campaign.campaign_id", ondelete="SET NULL")
+    )
+    source: Mapped[Optional[str]] = mapped_column(String(100))
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="ACTIVE")
+    expires_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
+    removed_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
+    removed_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id", ondelete="SET NULL")
+    )
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
+    )

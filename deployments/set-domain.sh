@@ -6,7 +6,7 @@
 # This script reads the CURRENT domain from there, then rewrites every place the
 # domain literal appears in the env overlays: the functional values in
 # proxy/sso/frontend/monitoring, plus the comment-only mentions in
-# ads-server/load_balancer (kept in sync so nothing reads stale). The /auth,
+# customer360-promotions/load_balancer (kept in sync so nothing reads stale). The /auth,
 # /c360api, /ads suffixes and the https:// scheme are preserved.
 #
 #   ./set-domain.sh <new-domain> [env]     # env defaults to uat
@@ -45,7 +45,7 @@ FILES=(
   "frontend/overlays/${ENV}.tfvars"
   "monitoring/overlays/${ENV}.tfvars"
   # comment-only mentions (no functional value, kept in sync so nothing reads stale):
-  "ads-server/overlays/${ENV}.tfvars"
+  "customer360-promotions/overlays/${ENV}.tfvars"
   "load_balancer/overlays/${ENV}.tfvars"
 )
 

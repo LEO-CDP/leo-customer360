@@ -1,7 +1,7 @@
 # Event Ingestion Migration Note
 
 The legacy `customer360-api` `/events` and `/events/bulk` write API has been
-removed. New behavioral-event writers must use `data-tracking-api`:
+removed. New behavioral-event writers must use `customer360-event-api`:
 
 - `POST /api/v1/tracking/logs` for public SDK/webhook ingestion.
 - The authenticated internal compatibility endpoint only when a trusted
@@ -24,7 +24,7 @@ never connects to PostgreSQL.
 - Backfill historical PostgreSQL events month by month, reconcile counts and
   checksums, and make replay resumable before the retention/rollback window
   expires.
-- Remove the `cdp_raw_events` table only through the Phase 6 archive,
+- Remove the retired PostgreSQL event ledger only through the Phase 6 archive,
   reconciliation, dependency-scan, and replay gates in
   `FULL-ANALYTICS-WITH-S3.md`.
 

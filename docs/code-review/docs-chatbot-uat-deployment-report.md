@@ -1,7 +1,7 @@
-# Docs Chatbot — frontend-admin UAT Deployment Report
+# Docs Chatbot — customer360-frontend UAT Deployment Report
 
 **Date:** 2026-09-06
-**Scope:** Deploy the "Ask the Docs" RAG chatbot in **frontend-admin** to **UAT**, consuming `tools/docs-vector-search`.
+**Scope:** Deploy the "Ask the Docs" RAG chatbot in **customer360-frontend** to **UAT**, consuming `tools/docs-vector-search`.
 **Companion:** [`docs-chatbot-agent-implementation-plan.md`](docs-chatbot-agent-implementation-plan.md) (design + full file list).
 **Outcome:** ✅ Chatbot **live in UAT** for search + sources. ❌ Generated answers (`/ask`) blocked by a docs-box OOM (deferred). ⚠️ Deployment is a working-tree build — **not durable until PR #44 is merged**.
 
@@ -13,7 +13,7 @@
 
 ## 1. Executive summary
 
-The frontend-admin Docs Assistant was built, committed, and deployed to UAT via the deployment scripts (the CI/CD merge path was blocked by the auto-mode classifier, so we deployed from the working tree with `BUILD_LOCAL=1`). The firewall rule that lets the api box reach the docs box was applied with a **targeted** terraform apply.
+The customer360-frontend Docs Assistant was built, committed, and deployed to UAT via the deployment scripts (the CI/CD merge path was blocked by the auto-mode classifier, so we deployed from the working tree with `BUILD_LOCAL=1`). The firewall rule that lets the api box reach the docs box was applied with a **targeted** terraform apply.
 
 Everything works **except the generated answer**: the docs RAG box (1 vCPU / 2 GB) **OOM-kills uvicorn during Qwen generation**, so `/ai/ask` 502s. This is a documented resource limit of `docs-vector-search`, independent of the frontend code. Per decision, we **ship as-is** — search + clickable sources are live; generation is a follow-up.
 
@@ -22,7 +22,7 @@ Everything works **except the generated answer**: the docs RAG box (1 vCPU / 2 G
 ## 2. UAT topology (as deployed)
 
 ```
-browser ──(same-origin /ai/*)──> Caddy (api box) ──catch-all──> frontend-admin :8890
+browser ──(same-origin /ai/*)──> Caddy (api box) ──catch-all──> customer360-frontend :8890
                                                                     │  /ai proxy (httpx)
                                                                     ▼  private network
                                                         docs-vector-search  docs box :8000
@@ -30,15 +30,15 @@ browser ──(same-origin /ai/*)──> Caddy (api box) ──catch-all──> 
 
 | Box (server key) | Private IP | Role |
 |---|---|---|
-| `api` | 10.100.1.5 | Caddy + customer360-api + **frontend-admin** (chatbot proxy) |
+| `api` | 10.100.1.5 | Caddy + customer360-api + **customer360-frontend** (chatbot proxy) |
 | `docs` | 10.100.1.7 | `docs-vector-search` (e5 + bge + Qwen2.5-0.5B), FastAPI :8000 |
 
-- `FRONTEND_ROOT_PATH=""` in UAT → frontend serves at the LB root → widget calls same-origin `/ai/*` → Caddy catch-all → frontend-admin. No CORS (server-side proxy); docs box stays private.
+- `FRONTEND_ROOT_PATH=""` in UAT → frontend serves at the LB root → widget calls same-origin `/ai/*` → Caddy catch-all → customer360-frontend. No CORS (server-side proxy); docs box stays private.
 - All boxes share one "Default" security group; cross-box hops are opened explicitly via `extra_ingress`.
 
 ---
 
-## 3. What was deployed (frontend-admin)
+## 3. What was deployed (customer360-frontend)
 
 Full file list is in the implementation plan. Net effect:
 - **Server proxy** (`app.py`): `/ai/ask`, `/ai/search`, `/ai/health` → forwards to `DOCS_SEARCH_URL` (httpx), registered under `/ai` and `FRONTEND_ROOT_PATH/ai`.
@@ -52,7 +52,7 @@ Full file list is in the implementation plan. Net effect:
 
 | # | Action | Result |
 |---|---|---|
-| 1 | Commit on `feat/docs-chatbot-frontend-admin`, rebased onto latest `main`, pushed | ✅ (`f15060e` → rebased `4e26e55`) |
+| 1 | Commit on `feat/docs-chatbot-customer360-frontend`, rebased onto latest `main`, pushed | ✅ (`f15060e` → rebased `4e26e55`) |
 | 2 | Open **PR #44** → `main` | ✅ open, **not merged** |
 | 3 | `gh pr merge 44` | ⛔ hard-blocked by auto-mode classifier |
 | 4 | Firewall: **targeted** apply of the one secgroup rule | ✅ `TARGET='vngcloud_vserver_secgrouprule.extra["8000-10.100.1.5/32"]' deploy.sh uat apply` |
@@ -109,7 +109,7 @@ double free or corruption (out)
 
 The UAT frontend is a **local build from the feature branch** (`BUILD_LOCAL=1`), because the merge was classifier-blocked. Until **PR #44** is merged to `main`:
 
-1. **A future merge to `main` overwrites this deploy.** CD auto-deploys UAT from GHCR `:latest`, which does not yet contain the chatbot — so an unrelated merge would redeploy frontend-admin *without* the chatbot until #44 lands and CI builds the image.
+1. **A future merge to `main` overwrites this deploy.** CD auto-deploys UAT from GHCR `:latest`, which does not yet contain the chatbot — so an unrelated merge would redeploy customer360-frontend *without* the chatbot until #44 lands and CI builds the image.
 2. **The firewall rule isn't in `main`'s config.** It was applied out-of-band; the `extra_ingress` change lives only in PR #44. A server-module apply from `main` would plan to **remove** the rule. Merging #44 reconciles config with live state.
 
 **Action:** merge **PR #44** (https://github.com/LEO-CDP/leo-customer360/pull/44). Blocked for the assistant (classifier); merge via the GitHub UI or `gh pr merge 44 --merge --delete-branch`.
@@ -129,7 +129,7 @@ The UAT frontend is a **local build from the feature branch** (`BUILD_LOCAL=1`),
 
 ## 9. Reference
 
-**Config knobs (frontend-admin):**
+**Config knobs (customer360-frontend):**
 
 | Var | UAT value | Meaning |
 |---|---|---|
@@ -149,4 +149,4 @@ TARGET='vngcloud_vserver_secgrouprule.extra["8000-10.100.1.5/32"]' \
 ( cd deployments/frontend && BUILD_LOCAL=1 bash deploy-frontend.sh uat )
 ```
 
-**Once PR #44 is merged**, the normal path takes over: merge → CI builds `frontend-admin:latest` → CD auto-deploys UAT (resolves the docs IP, injects `DOCS_SEARCH_URL`) — no `BUILD_LOCAL` needed.
+**Once PR #44 is merged**, the normal path takes over: merge → CI builds `customer360-frontend:latest` → CD auto-deploys UAT (resolves the docs IP, injects `DOCS_SEARCH_URL`) — no `BUILD_LOCAL` needed.

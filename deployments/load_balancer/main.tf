@@ -144,6 +144,6 @@ resource "vngcloud_vserver_secgrouprule" "backend" {
   protocol          = "TCP"
   port_range_min    = each.value.member_port
   port_range_max    = each.value.member_port
-  remote_ip_prefix  = var.backend_ingress_cidr
+  remote_ip_prefix  = coalesce(each.value.ingress_cidr, var.backend_ingress_cidr)
   description       = "LB backend ${each.key} port ${each.value.member_port}"
 }

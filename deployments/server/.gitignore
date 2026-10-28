@@ -5,6 +5,10 @@ terraform.tfvars
 .env
 smtp.*.local.env
 
+# VKS kubeconfig (cluster credentials). The overlay deploy-event-api.sh renders is
+# gitignored next to the manifests, in ../customer360-event-api/.gitignore.
+kubeconfig-vks-*.yaml
+
 # State (may contain secrets in plaintext).
 # Per-env workspace state lives under terraform.tfstate.d/<env>/.
 # NOTE: overlays/*.tfvars are NON-secret and intentionally committed.

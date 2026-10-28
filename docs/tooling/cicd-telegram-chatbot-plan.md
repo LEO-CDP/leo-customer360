@@ -55,8 +55,8 @@ they post their own messages, so adding them would double-message.
 
 Single job, so the whole run collapses to one Telegram summary:
 
-1. **Unit tests** — runs the same runner set CI gates on (`ads-server`,
-   `customer360-api`, `data-tracking-api`, `identity_resolution`, `segmentation`,
+1. **Unit tests** — runs the same runner set CI gates on (`customer360-promotions`,
+   `customer360-api`, `customer360-event-api`, `identity_resolution`, `segmentation`,
    `docs-vector-search`). Each runner self-provisions its venv.
 2. **E2E → UAT** — mirrors CI's E2E leg against `https://beta.leocdp.com/c360api`;
    skips cleanly when the Keycloak secrets aren't set.
@@ -108,10 +108,10 @@ verified `200`):
 
 | Service | URL |
 | --- | --- |
-| frontend-admin (UI) | `https://beta.leocdp.com/health` |
+| customer360-frontend (UI) | `https://beta.leocdp.com/health` |
 | customer360-api | `https://beta.leocdp.com/c360api/health` |
-| data-tracking-api | `https://beta.leocdp.com/data/health` |
-| ads-server | `https://beta.leocdp.com/ads/health` |
+| customer360-event-api | `https://beta.leocdp.com/data/health` |
+| customer360-promotions | `https://beta.leocdp.com/ads/health` |
 | docs-vector-search (via frontend `/ai` proxy) | `https://beta.leocdp.com/ai/health` |
 | Keycloak (SSO realm) | `https://beta.leocdp.com/auth/realms/customer360` |
 
@@ -119,7 +119,7 @@ Override with the repo variable `HEALTH_CHECK_URLS` (space/newline-separated) �
 both the scheduled checks and the health monitor read it.
 
 > **docs-vector-search** has no public route of its own (private `docs` box,
-> reached via SSH/tunnel). The frontend-admin proxies it at `/ai/*`, so
+> reached via SSH/tunnel). The customer360-frontend proxies it at `/ai/*`, so
 > `…/ai/health` forwards to the service's `/health` — returns `200` when it's up
 > and `502` when it's unreachable, which is exactly what a health probe wants.
 

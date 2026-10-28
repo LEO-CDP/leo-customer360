@@ -1,0 +1,90 @@
+# Dagster orchestrator image for customer360-backend.
+# Runs the Dagster webserver or singleton daemon, loading all eight code
+# locations in workspace.yaml. Identity resolution is managed by Dagster; there
+# is no separate identity-resolution worker image.
+FROM python:3.12-slim-bookworm AS builder
+
+WORKDIR /app
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends build-essential libpq-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY customer360-dao/pyproject.toml customer360-dao/README.md /opt/customer360-dao/
+COPY customer360-backend/identity_resolution/requirements.txt /tmp/requirements/identity_resolution.txt
+COPY customer360-backend/ai_agents_runners/requirements.txt /tmp/requirements/ai_agents_runners.txt
+COPY customer360-backend/segmentation/requirements.txt /tmp/requirements/segmentation.txt
+COPY customer360-backend/analytics/requirements.txt /tmp/requirements/analytics.txt
+COPY customer360-backend/data_synch/requirements.txt /tmp/requirements/data_synch.txt
+COPY customer360-backend/email_engine/requirements.txt /tmp/requirements/email_engine.txt
+COPY customer360-backend/notification_engine/requirements.txt /tmp/requirements/notification_engine.txt
+COPY customer360-backend/campaign_activation/requirements.txt /tmp/requirements/campaign_activation.txt
+
+# Third-party dependencies FIRST, in their own layer, keyed only on the requirement
+# files + the DAO's declared dependencies (read from its pyproject.toml). The DAO
+# SOURCE is copied after this, so a DAO code change no longer rebuilds every wheel —
+# and, more importantly, no longer produces a new multi-hundred-MB /install layer
+# that every deploy has to re-download onto the VM (that was ~5.5 min of CD).
+# Both psycopg flavours are needed: dagster-postgres builds a postgresql+psycopg
+# (psycopg3) SQLAlchemy URL for Dagster's own storage, while the code locations
+# import psycopg2 directly. dagster-postgres is pinned to the same range as
+# dagster (Dagster ships its libraries on a 0.x scheme: core 1.9 == libs 0.25)
+# so its driver choice cannot shift on a rebuild. The Dagster packages are
+# pinned to one release because Dagster's UI and GraphQL packages require an
+# exact matching core version. Version specs and extras stay quoted — sh reads
+# <, > and [] in a RUN line.
+RUN mkdir -p /wheels /install \
+ && python -c "import tomllib; [print(d) for d in tomllib.load(open('/opt/customer360-dao/pyproject.toml', 'rb'))['project']['dependencies']]" \
+      > /tmp/requirements/_dao-deps.txt \
+ && grep -hv '^leo-customer360-dao' /tmp/requirements/*.txt > /tmp/third-party.txt \
+ && pip wheel --no-cache-dir --wheel-dir=/wheels -r /tmp/third-party.txt \
+      "dagster==1.13.26" "dagster-webserver==1.13.26" "dagster-graphql==1.13.26" \
+      "dagster-postgres==0.29.26" dagster-aws psycopg2-binary "psycopg[binary]" \
+ && pip install --no-cache-dir --no-index --find-links=/wheels --prefix=/install -r /tmp/third-party.txt \
+      "dagster==1.13.26" "dagster-webserver==1.13.26" "dagster-graphql==1.13.26" \
+      "dagster-postgres==0.29.26" dagster-aws psycopg2-binary "psycopg[binary]"
+
+# The local DAO package last: a small layer that is the only one a DAO change touches.
+# --no-deps: its dependencies are already in /install from the layer above.
+COPY customer360-dao/src /opt/customer360-dao/src
+RUN pip install --no-cache-dir --no-deps --prefix=/install-dao /opt/customer360-dao
+
+FROM python:3.12-slim-bookworm
+
+WORKDIR /app
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libpq5 \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /install /usr/local
+COPY --from=builder /install-dao /usr/local
+COPY customer360-backend /app
+COPY customer360-seeding/dev-backend-seeding /opt/customer360-seeding
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+
+ARG BUILD_DATE_TIME=unknown
+ARG GIT_COMMIT_HASH=unknown
+ENV DAGSTER_HOME=/dagster_home
+ENV BUILD_DATE_TIME=${BUILD_DATE_TIME} \
+    GIT_COMMIT_HASH=${GIT_COMMIT_HASH}
+RUN mkdir -p /dagster_home
+# The instance config ($DAGSTER_HOME/dagster.yaml) is NOT baked — entrypoint.sh
+# renders it at start against the pre-provisioned Dagster PostgreSQL database.
+# S3 compute logs are required in production via DAGSTER_REQUIRE_S3=true.
+#
+# boto3 config forcing S3 path-style addressing, used by the S3 compute-log
+# manager (no addressing_style config of its own) against MinIO / vStorage. App
+# S3 clients set their own explicit boto3 Config, which overrides this, so they
+# are unaffected.
+RUN printf '[default]\ns3 =\n    addressing_style = path\n' > /app/aws-config
+ENV AWS_CONFIG_FILE=/app/aws-config
+
+EXPOSE 3000
+# entrypoint.sh renders the production instance config, then exec's the CMD.
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["dagster-webserver", "-w", "workspace.yaml", "-h", "0.0.0.0", "-p", "3000"]
+
+# ci: trigger image build — GHCR smoke test 2026-08-20
+
+# ci/cd: redeploy trigger 2026-08-20 #3 (no functional change)

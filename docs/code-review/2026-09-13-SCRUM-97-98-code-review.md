@@ -4,7 +4,7 @@
 **Date:** 2026-09-13
 **Branch:** `feat/SCRUM-92/subtask-05-06` (HEAD `d605185`, includes a `main` merge)
 **Base:** `feat/SCRUM-92-leo-cdp-v-2-0-beta-agentic-outbound-email-marketing-execution-engine` (merge-base `0ae515b`)
-**Scope:** the SCRUM-97/98 change set only (~44 files) — email execution (`backend-system/email_engine`, `campaign_activation`), tracking/compliance (`customer360-api` routers/crud/utils), migrations 003/004 + fresh schema, and the e2e suite. The main-merge churn (`tools/docs-vector-search`, most `deployments/*`, research papers, `dev-c360.sh`) is **out of scope** for this review.
+**Scope:** the SCRUM-97/98 change set only (~44 files) — email execution (`customer360-backend/email_engine`, `campaign_activation`), tracking/compliance (`customer360-api` routers/crud/utils), migrations 003/004 + fresh schema, and the e2e suite. The main-merge churn (`tools/docs-vector-search`, most `deployments/*`, research papers, `dev-c360.sh`) is **out of scope** for this review.
 **Tickets:** [SCRUM-97](https://leocdp.atlassian.net/browse/SCRUM-97) · [SCRUM-98](https://leocdp.atlassian.net/browse/SCRUM-98)
 **Method:** this is a **re-review of the post-fix code** (the 2026-09-11 review's B1/H1/H2/M1–M5/L1–L9 were addressed). All prior fixes were adversarially re-verified (independent pass, tried to find bypasses); DB parity + tests checked first-hand.
 
@@ -42,12 +42,12 @@
 ## 3. New findings (this pass)
 
 ### N1 — MEDIUM · SMTP `starttls()` uses no SSL context (unverified TLS) — CONFIRMED
-`backend-system/email_engine/email_engine/adapters.py:104`
+`customer360-backend/email_engine/email_engine/adapters.py:104`
 `server.starttls()` is called with no `context`, so `smtplib` uses an unverified context (`check_hostname=False`, `verify_mode=CERT_NONE`). A MITM on the SMTP path can intercept the channel and capture `server.login(username, password)` — i.e. the tenant's `smtp_password` — and message content.
 **Fix:** `server.starttls(context=ssl.create_default_context())`.
 
 ### N2 — MEDIUM · Redis caches `smtp_password` in plaintext — PLAUSIBLE
-`backend-system/email_engine/email_engine/provider_config.py:113`
+`customer360-backend/email_engine/email_engine/provider_config.py:113`
 The full resolved config (including `smtp_password`) is `json.dumps`'d into Redis via `setex`. The migration notes "protect at rest", but the cache copy is undocumented cleartext in a Redis both deployables share and whose `REDIS_PASSWORD` is optional (may be unauthenticated in dev).
 **Fix:** cache only non-secret fields and re-read `smtp_password` from the DB at send time, or encrypt the cached blob.
 
@@ -57,16 +57,16 @@ The full resolved config (including `smtp_password`) is `json.dumps`'d into Redi
 **Fix:** make PUT an explicit full-replace (drop the password special-case) **or** merge all fields with `exclude_unset=True`.
 
 ### N4 — LOW-MEDIUM · `EMAIL_TRACKING_SECRET` keeps a well-known default and doesn't fail closed — PLAUSIBLE
-`customer360-api/core/config.py:189-192`, `backend-system/email_engine/email_engine/tracking.py:24`
+`customer360-api/core/config.py:189-192`, `customer360-backend/email_engine/email_engine/tracking.py:24`
 Unlike the webhook secret (empty default → 503), the tracking secret defaults to the public repo value `leocdp-dev-tracking-secret` and only logs a warning. Left at default in prod, anyone can mint valid click `k` (H1 returns) and forge tracking tokens (fake opens/clicks/unsubscribes, self-suppression).
 **Fix:** in prod, refuse to sign / disable the feature when the secret equals the dev default (mirror the webhook's fail-closed stance).
 
 ### N5 — LOW · Residual single-recipient at-least-once window — PLAUSIBLE
-`backend-system/email_engine/email_engine/send.py:380-388`
+`customer360-backend/email_engine/email_engine/send.py:380-388`
 Within a recipient's SAVEPOINT, `adapter.send()` runs before `_upsert_dispatch`; if the upsert then raises, the savepoint rollback discards the ledger row while the email already went out → a later run re-sends. Not an H2 bypass (concurrent runs are serialized); a narrow crash/DB-error window. **Fix:** record an intent/attempt row before dispatch, or accept as documented at-least-once.
 
 ### N6 — LOW · Advisory-lock key is 32-bit `hashtext` — PLAUSIBLE
-`backend-system/email_engine/email_engine/send.py:273`
+`customer360-backend/email_engine/email_engine/send.py:273`
 Two different campaign ids colliding under `hashtext`, sent concurrently, cause one to `skipped_locked` (under-send, not double-send) until re-activated. Astronomically rare. **Fix:** acceptable for beta; note the ceiling.
 
 ---
@@ -108,7 +108,7 @@ Scope: over-engineering/complexity only (correctness/security are §1–§6). Fo
 
 The feature is lean for what it does — explicit route constants, stdlib-only rendering (deliberately **not** a template engine — good call), small single-purpose helpers, reused segmentation/SQL-safety modules. Only two real cuts:
 
-- **PT1 — `delete:` the Redis provider-config cache.** `backend-system/email_engine/email_engine/provider_config.py` — `load_email_config` is called **exactly once per run** (`send.py:286`), so the Redis tier saves one DB read per campaign send while adding a whole cache/TTL/invalidation layer **and** the N2 plaintext-secret-in-Redis vector. → Read the active `crm_email_provider_config` row from the DB each run (DB → mock fallback). Net ~**−40 lines**, one fewer dependency edge, and **N2 disappears** (secret never leaves the DB). *This is the ponytail + security win — do PT1 instead of N2's "encrypt the cache".*
+- **PT1 — `delete:` the Redis provider-config cache.** `customer360-backend/email_engine/email_engine/provider_config.py` — `load_email_config` is called **exactly once per run** (`send.py:286`), so the Redis tier saves one DB read per campaign send while adding a whole cache/TTL/invalidation layer **and** the N2 plaintext-secret-in-Redis vector. → Read the active `crm_email_provider_config` row from the DB each run (DB → mock fallback). Net ~**−40 lines**, one fewer dependency edge, and **N2 disappears** (secret never leaves the DB). *This is the ponytail + security win — do PT1 instead of N2's "encrypt the cache".*
 - **PT2 — ~~`delete:` unused schema classes~~ → WITHDRAWN (false finding).** On inspection `customer360-api/core/schemas/crm.py` has **only** `EmailProviderConfigUpsert` + `EmailProviderConfigRead` (both used) — the `Base/Create/Update` triad never existed (the earlier "0 references" meant *absent*, not *dead*). The schema is already minimal; nothing to cut.
 
 Kept deliberately (not over-engineering):
