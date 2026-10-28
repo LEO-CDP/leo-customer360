@@ -36,3 +36,19 @@ def test_campaign_to_ai_agents_contract_is_in_canonical_schema_and_migration():
     assert "'crm_campaign_agent'" in schema
     assert "ENABLE ROW LEVEL SECURITY" in migration
     assert "FORCE ROW LEVEL SECURITY" in migration
+
+
+def test_legacy_and_invalid_profile_lifecycle_values_are_normalized_before_constraint():
+    migration = (
+        DATABASE_ROOT / "migrations" / "017_agent_campagn_journey.sql"
+    ).read_text(encoding="utf-8")
+    update_start = migration.index("UPDATE customer360.cdp_master_profiles")
+    constraint_start = migration.index(
+        "ADD CONSTRAINT cdp_master_profiles_lifecycle_stage_check"
+    )
+    normalization = migration[update_start:constraint_start]
+
+    for legacy_stage in ("prospect", "lead", "customer", "vip", "dormant", "churn_risk"):
+        assert f"WHEN '{legacy_stage}' THEN" in normalization
+    assert "ELSE NULL" in normalization
+    assert "WHERE lifecycle_stage IS NOT NULL" in normalization

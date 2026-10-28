@@ -81,9 +81,21 @@ BEGIN
             WHEN 'vip' THEN 'loyalty'
             WHEN 'dormant' THEN 'churned'
             WHEN 'churn_risk' THEN 'churned'
-            ELSE lifecycle_stage
+            WHEN 'awareness' THEN 'awareness'
+            WHEN 'acquisition' THEN 'acquisition'
+            WHEN 'activation' THEN 'activation'
+            WHEN 'engagement' THEN 'engagement'
+            WHEN 'conversion' THEN 'conversion'
+            WHEN 'retention' THEN 'retention'
+            WHEN 'loyalty' THEN 'loyalty'
+            WHEN 'churned' THEN 'churned'
+            ELSE NULL
         END
-        WHERE lifecycle_stage IN ('prospect', 'lead', 'customer', 'vip', 'dormant', 'churn_risk');
+        WHERE lifecycle_stage IS NOT NULL
+          AND lifecycle_stage NOT IN (
+              'awareness', 'acquisition', 'activation', 'engagement',
+              'conversion', 'retention', 'loyalty', 'churned'
+          );
         EXECUTE 'ALTER TABLE customer360.cdp_master_profiles ADD CONSTRAINT cdp_master_profiles_lifecycle_stage_check CHECK (lifecycle_stage IN (
             ''awareness'', ''acquisition'', ''activation'', ''engagement'',
             ''conversion'', ''retention'', ''loyalty'', ''churned''))';
