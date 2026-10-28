@@ -29,6 +29,7 @@ ALTER TABLE customer360.crm_campaign
 DO $$
 DECLARE
     c RECORD;
+    current_tenant_id UUID;
 BEGIN
     FOR c IN
         SELECT * FROM (VALUES
@@ -73,29 +74,82 @@ BEGIN
                 'ALTER TABLE customer360.cdp_master_profiles DROP CONSTRAINT IF EXISTS %I',
                 c.conname);
         END LOOP;
-        UPDATE customer360.cdp_master_profiles
-        SET lifecycle_stage = CASE lifecycle_stage
-            WHEN 'prospect' THEN 'awareness'
-            WHEN 'lead' THEN 'acquisition'
-            WHEN 'customer' THEN 'conversion'
-            WHEN 'vip' THEN 'loyalty'
-            WHEN 'dormant' THEN 'churned'
-            WHEN 'churn_risk' THEN 'churned'
-            WHEN 'awareness' THEN 'awareness'
-            WHEN 'acquisition' THEN 'acquisition'
-            WHEN 'activation' THEN 'activation'
-            WHEN 'engagement' THEN 'engagement'
-            WHEN 'conversion' THEN 'conversion'
-            WHEN 'retention' THEN 'retention'
-            WHEN 'loyalty' THEN 'loyalty'
-            WHEN 'churned' THEN 'churned'
-            ELSE NULL
-        END
-        WHERE lifecycle_stage IS NOT NULL
-          AND lifecycle_stage NOT IN (
-              'awareness', 'acquisition', 'activation', 'engagement',
-              'conversion', 'retention', 'loyalty', 'churned'
-          );
+
+        -- cdp_master_profiles, cdp_domain_profiles, and cdp_customer_personas
+        -- are FORCE RLS-protected. Scope each tenant explicitly before
+        -- normalizing lifecycle_stage so non-superuser roles (e.g. managed vDB)
+        -- can update every tenant's rows before the table-wide CHECK is added.
+        FOR current_tenant_id IN
+            SELECT tenant_id FROM customer360.sys_tenant ORDER BY tenant_id
+        LOOP
+            PERFORM set_config('app.tenant_id', current_tenant_id::text, true);
+
+            UPDATE customer360.cdp_master_profiles
+            SET lifecycle_stage = CASE lifecycle_stage
+                WHEN 'prospect' THEN 'awareness'
+                WHEN 'lead' THEN 'acquisition'
+                WHEN 'customer' THEN 'conversion'
+                WHEN 'vip' THEN 'loyalty'
+                WHEN 'dormant' THEN 'churned'
+                WHEN 'churn_risk' THEN 'churned'
+                WHEN 'awareness' THEN 'awareness'
+                WHEN 'acquisition' THEN 'acquisition'
+                WHEN 'activation' THEN 'activation'
+                WHEN 'engagement' THEN 'engagement'
+                WHEN 'conversion' THEN 'conversion'
+                WHEN 'retention' THEN 'retention'
+                WHEN 'loyalty' THEN 'loyalty'
+                WHEN 'churned' THEN 'churned'
+                ELSE NULL
+            END
+            WHERE tenant_id = current_tenant_id
+              AND lifecycle_stage IS NOT NULL
+              AND lifecycle_stage NOT IN (
+                  'awareness', 'acquisition', 'activation', 'engagement',
+                  'conversion', 'retention', 'loyalty', 'churned'
+              );
+
+            UPDATE customer360.cdp_domain_profiles
+            SET lifecycle_stage = CASE lifecycle_stage
+                WHEN 'prospect' THEN 'awareness'
+                WHEN 'lead' THEN 'acquisition'
+                WHEN 'customer' THEN 'conversion'
+                WHEN 'vip' THEN 'loyalty'
+                WHEN 'dormant' THEN 'churned'
+                WHEN 'churn_risk' THEN 'churned'
+                ELSE lifecycle_stage
+            END
+            WHERE tenant_id = current_tenant_id
+              AND lifecycle_stage IN ('prospect', 'lead', 'customer', 'vip', 'dormant', 'churn_risk');
+
+            UPDATE customer360.cdp_customer_personas
+            SET lifecycle_stage = CASE lifecycle_stage
+                WHEN 'prospect' THEN 'awareness'
+                WHEN 'lead' THEN 'acquisition'
+                WHEN 'customer' THEN 'conversion'
+                WHEN 'vip' THEN 'loyalty'
+                WHEN 'dormant' THEN 'churned'
+                WHEN 'churn_risk' THEN 'churned'
+                WHEN 'awareness' THEN 'awareness'
+                WHEN 'acquisition' THEN 'acquisition'
+                WHEN 'activation' THEN 'activation'
+                WHEN 'engagement' THEN 'engagement'
+                WHEN 'conversion' THEN 'conversion'
+                WHEN 'retention' THEN 'retention'
+                WHEN 'loyalty' THEN 'loyalty'
+                WHEN 'churned' THEN 'churned'
+                ELSE NULL
+            END
+            WHERE tenant_id = current_tenant_id
+              AND lifecycle_stage IS NOT NULL
+              AND lifecycle_stage NOT IN (
+                  'awareness', 'acquisition', 'activation', 'engagement',
+                  'conversion', 'retention', 'loyalty', 'churned'
+              );
+        END LOOP;
+
+        PERFORM set_config('app.tenant_id', '', true);
+
         EXECUTE 'ALTER TABLE customer360.cdp_master_profiles ADD CONSTRAINT cdp_master_profiles_lifecycle_stage_check CHECK (lifecycle_stage IN (
             ''awareness'', ''acquisition'', ''activation'', ''engagement'',
             ''conversion'', ''retention'', ''loyalty'', ''churned''))';

@@ -42,13 +42,16 @@ def test_legacy_and_invalid_profile_lifecycle_values_are_normalized_before_const
     migration = (
         DATABASE_ROOT / "migrations" / "017_agent_campagn_journey.sql"
     ).read_text(encoding="utf-8")
-    update_start = migration.index("UPDATE customer360.cdp_master_profiles")
+    loop_start = migration.index("FOR current_tenant_id IN")
     constraint_start = migration.index(
         "ADD CONSTRAINT cdp_master_profiles_lifecycle_stage_check"
     )
-    normalization = migration[update_start:constraint_start]
+    normalization = migration[loop_start:constraint_start]
 
+    assert "set_config('app.tenant_id', current_tenant_id::text, true)" in normalization
+    assert "WHERE tenant_id = current_tenant_id" in normalization
+    assert "set_config('app.tenant_id', '', true)" in normalization
     for legacy_stage in ("prospect", "lead", "customer", "vip", "dormant", "churn_risk"):
         assert f"WHEN '{legacy_stage}' THEN" in normalization
     assert "ELSE NULL" in normalization
-    assert "WHERE lifecycle_stage IS NOT NULL" in normalization
+    assert "AND lifecycle_stage IS NOT NULL" in normalization
