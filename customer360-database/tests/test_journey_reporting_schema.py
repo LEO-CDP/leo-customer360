@@ -12,13 +12,16 @@ def test_journey_reporting_is_in_canonical_schema_and_upgrade_migration():
 
     for sql in (schema, migration):
         assert "CREATE TABLE IF NOT EXISTS customer360.cdp_journey_metric (" in sql
+        assert "pg_get_constraintdef(oid) LIKE '%churned%'" in sql
+        assert "DROP CONSTRAINT IF EXISTS cdp_journey_metric_journey_stage_check" in sql
+        assert "ADD CONSTRAINT cdp_journey_metric_journey_stage_check" in sql
         assert "CREATE TABLE IF NOT EXISTS customer360.cdp_journey_metric_daily (" in sql
         assert "CREATE OR REPLACE FUNCTION customer360.refresh_journey_metrics_pg(" in sql
         assert "CREATE OR REPLACE VIEW customer360.vw_journey_stage_report" in sql
         assert "dim_type IN ('all', 'channel', 'campaign', 'segment', 'agent')" in sql
         assert "business_model TEXT NOT NULL DEFAULT 'B2C'" in sql
         assert "applicable_business_models TEXT[] NOT NULL" in sql
-        assert "ALTER TABLE customer360.cdp_journey_metric\n" not in sql
+        assert "ALTER TABLE customer360.cdp_journey_metric\n    ADD COLUMN" not in sql
         assert "ALTER TABLE customer360.cdp_journey_metric_daily\n    ADD COLUMN" not in sql
         assert "CREATE TABLE IF NOT EXISTS customer360.cdp_journey_metric_domain" in sql
         assert "UNIQUE NULLS NOT DISTINCT (metric_code, domain_code)" in sql
