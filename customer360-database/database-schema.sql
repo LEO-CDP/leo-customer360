@@ -4213,6 +4213,25 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_journey_metric (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'customer360.cdp_journey_metric'::regclass
+          AND conname = 'cdp_journey_metric_journey_stage_check'
+          AND pg_get_constraintdef(oid) LIKE '%churned%'
+    ) THEN
+        ALTER TABLE customer360.cdp_journey_metric
+            DROP CONSTRAINT IF EXISTS cdp_journey_metric_journey_stage_check;
+        ALTER TABLE customer360.cdp_journey_metric
+            ADD CONSTRAINT cdp_journey_metric_journey_stage_check
+            CHECK (journey_stage IS NULL OR journey_stage IN (
+                'awareness', 'acquisition', 'activation', 'engagement',
+                'conversion', 'retention', 'loyalty', 'churned'));
+    END IF;
+END $$;
+
 COMMENT ON TABLE customer360.cdp_journey_metric IS
     'KPI definitions shown on each journey stage report. source tells which job computes it; rule holds its parameters.';
 COMMENT ON COLUMN customer360.cdp_journey_metric.applicable_business_models IS
