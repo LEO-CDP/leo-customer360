@@ -8,6 +8,9 @@ It brings fragmented customer data into a unified, tenant-aware customer model a
 
 > **Collect → Resolve → Unify → Understand → Activate**
 
+![Unified Journey Report](docs/marketing/images/unified-journey-report.png)
+
+
 - **Repository:** https://github.com/LEO-CDP/leo-customer360
 - **Documentation Site:** https://leo-cdp.github.io/leo-customer360/
 - **Repository Docs Hub:** [`docs/README.md`](docs/README.md) · **Vietnamese README:** [`README-vn.md`](README-vn.md)

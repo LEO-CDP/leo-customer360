@@ -1,5 +1,7 @@
 # Customer Journey Map
 
+![Unified Journey Report](images/unified-journey-report.png)
+
 The Customer Journey Map is the tenant-scoped marketing and analytics report
 that tracks how customer profiles progress through eight canonical lifecycle
 stages. Each stage combines:
