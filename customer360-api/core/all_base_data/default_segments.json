@@ -131,10 +131,11 @@
             "field": "lifecycle_stage",
             "operator": "in",
             "value": [
-              "customer",
-              "vip",
-              "dormant",
-              "churn_risk"
+              "engagement",
+              "conversion",
+              "retention",
+              "loyalty",
+              "churned"
             ]
           },
           {
@@ -164,7 +165,7 @@
           }
         ]
       },
-      "sql_rules": "lifecycle_stage IN ('customer', 'vip', 'dormant', 'churn_risk') AND last_activity_at < (now() - INTERVAL '30 days') AND last_activity_at > (now() - INTERVAL '180 days') AND churn_risk_tier IN ('medium', 'high', 'critical')"
+      "sql_rules": "lifecycle_stage IN ('engagement', 'conversion', 'retention', 'loyalty', 'churned') AND last_activity_at < (now() - INTERVAL '30 days') AND last_activity_at > (now() - INTERVAL '180 days') AND churn_risk_tier IN ('medium', 'high', 'critical')"
     },
     {
       "segment_tag": "champions",
@@ -279,8 +280,9 @@
             "field": "lifecycle_stage",
             "operator": "in",
             "value": [
-              "prospect",
-              "lead"
+              "awareness",
+              "acquisition",
+              "activation"
             ]
           },
           {
@@ -290,7 +292,7 @@
           }
         ]
       },
-      "sql_rules": "lifecycle_stage IN ('prospect', 'lead') AND lead_conversion_probability >= 0.7"
+      "sql_rules": "lifecycle_stage IN ('awareness', 'acquisition', 'activation') AND lead_conversion_probability >= 0.7"
     },
     {
       "segment_tag": "identity_review_needed",
@@ -455,8 +457,10 @@
             "field": "lifecycle_stage",
             "operator": "in",
             "value": [
-              "customer",
-              "vip"
+              "engagement",
+              "conversion",
+              "retention",
+              "loyalty"
             ]
           },
           {
@@ -470,7 +474,7 @@
           }
         ]
       },
-      "sql_rules": "domain = 'retail' AND lifecycle_stage IN ('customer', 'vip') AND preferred_channel IN ('In-Store', 'POS', 'Store')"
+      "sql_rules": "domain = 'retail' AND lifecycle_stage IN ('engagement', 'conversion', 'retention', 'loyalty') AND preferred_channel IN ('In-Store', 'POS', 'Store')"
     },
     {
       "segment_tag": "retail_discount_seekers",
@@ -582,8 +586,10 @@
             "field": "lifecycle_stage",
             "operator": "in",
             "value": [
-              "customer",
-              "vip"
+              "engagement",
+              "conversion",
+              "retention",
+              "loyalty"
             ]
           },
           {
@@ -612,7 +618,7 @@
           }
         ]
       },
-      "sql_rules": "domain = 'retail' AND lifecycle_stage IN ('customer', 'vip') AND churn_risk_tier IN ('high', 'critical') AND last_activity_at < (now() - INTERVAL '14 days') AND last_activity_at > (now() - INTERVAL '90 days')"
+      "sql_rules": "domain = 'retail' AND lifecycle_stage IN ('engagement', 'conversion', 'retention', 'loyalty') AND churn_risk_tier IN ('high', 'critical') AND last_activity_at < (now() - INTERVAL '14 days') AND last_activity_at > (now() - INTERVAL '90 days')"
     },
     {
       "segment_tag": "retail_omnichannel_shoppers",
@@ -755,13 +761,14 @@
             "field": "lifecycle_stage",
             "operator": "in",
             "value": [
-              "prospect",
-              "lead"
+              "awareness",
+              "acquisition",
+              "activation"
             ]
           }
         ]
       },
-      "sql_rules": "domain = 'retail' AND preferred_channel IN ('Website', 'Mobile App', 'Zalo') AND lead_conversion_probability >= 0.45 AND lifecycle_stage IN ('prospect', 'lead')"
+      "sql_rules": "domain = 'retail' AND preferred_channel IN ('Website', 'Mobile App', 'Zalo') AND lead_conversion_probability >= 0.45 AND lifecycle_stage IN ('awareness', 'acquisition', 'activation')"
     },
     {
       "segment_tag": "ecommerce_churn_watch",
@@ -793,8 +800,10 @@
             "field": "lifecycle_stage",
             "operator": "in",
             "value": [
-              "customer",
-              "vip"
+              "engagement",
+              "conversion",
+              "retention",
+              "loyalty"
             ]
           },
           {
@@ -806,7 +815,7 @@
           }
         ]
       },
-      "sql_rules": "domain = 'retail' AND preferred_channel IN ('Website', 'Mobile App', 'Zalo') AND lifecycle_stage IN ('customer', 'vip') AND churn_risk_tier = 'medium'"
+      "sql_rules": "domain = 'retail' AND preferred_channel IN ('Website', 'Mobile App', 'Zalo') AND lifecycle_stage IN ('engagement', 'conversion', 'retention', 'loyalty') AND churn_risk_tier = 'medium'"
     },
     {
       "segment_tag": "ecommerce_reactivation_90d",
@@ -838,10 +847,11 @@
             "field": "lifecycle_stage",
             "operator": "in",
             "value": [
-              "customer",
-              "vip",
-              "dormant",
-              "churn_risk"
+              "engagement",
+              "conversion",
+              "retention",
+              "loyalty",
+              "churned"
             ]
           },
           {
@@ -854,7 +864,7 @@
           }
         ]
       },
-      "sql_rules": "domain = 'retail' AND preferred_channel IN ('Website', 'Mobile App', 'Zalo') AND lifecycle_stage IN ('customer', 'vip', 'dormant', 'churn_risk') AND last_activity_at < (now() - INTERVAL '90 days')"
+      "sql_rules": "domain = 'retail' AND preferred_channel IN ('Website', 'Mobile App', 'Zalo') AND lifecycle_stage IN ('engagement', 'conversion', 'retention', 'loyalty', 'churned') AND last_activity_at < (now() - INTERVAL '90 days')"
     }
   ],
   "TRAVEL_SEGMENTS": [
@@ -936,8 +946,9 @@
             "field": "lifecycle_stage",
             "operator": "in",
             "value": [
-              "prospect",
-              "lead"
+              "awareness",
+              "acquisition",
+              "activation"
             ]
           },
           {
@@ -963,7 +974,7 @@
           }
         ]
       },
-      "sql_rules": "domain = 'travel' AND lifecycle_stage IN ('prospect', 'lead') AND lead_conversion_probability >= 0.5 AND last_activity_at < (now() - INTERVAL '14 days') AND last_activity_at > (now() - INTERVAL '90 days')"
+      "sql_rules": "domain = 'travel' AND lifecycle_stage IN ('awareness', 'acquisition', 'activation') AND lead_conversion_probability >= 0.5 AND last_activity_at < (now() - INTERVAL '14 days') AND last_activity_at > (now() - INTERVAL '90 days')"
     },
     {
       "segment_tag": "travel_loyalty_growth",
@@ -1025,8 +1036,10 @@
             "field": "lifecycle_stage",
             "operator": "in",
             "value": [
-              "customer",
-              "vip"
+              "engagement",
+              "conversion",
+              "retention",
+              "loyalty"
             ]
           },
           {
@@ -1039,7 +1052,7 @@
           }
         ]
       },
-      "sql_rules": "domain = 'travel' AND lifecycle_stage IN ('customer', 'vip') AND churn_risk_tier IN ('high', 'critical')"
+      "sql_rules": "domain = 'travel' AND lifecycle_stage IN ('engagement', 'conversion', 'retention', 'loyalty') AND churn_risk_tier IN ('high', 'critical')"
     }
   ],
   "EDUCATION_SEGMENTS": [
@@ -1065,8 +1078,9 @@
             "field": "lifecycle_stage",
             "operator": "in",
             "value": [
-              "prospect",
-              "lead"
+              "awareness",
+              "acquisition",
+              "activation"
             ]
           },
           {
@@ -1076,7 +1090,7 @@
           }
         ]
       },
-      "sql_rules": "domain = 'education' AND lifecycle_stage IN ('prospect', 'lead') AND lead_conversion_probability >= 0.65"
+      "sql_rules": "domain = 'education' AND lifecycle_stage IN ('awareness', 'acquisition', 'activation') AND lead_conversion_probability >= 0.65"
     },
     {
       "segment_tag": "education_active_learners",
@@ -1133,8 +1147,10 @@
             "field": "lifecycle_stage",
             "operator": "in",
             "value": [
-              "customer",
-              "vip"
+              "engagement",
+              "conversion",
+              "retention",
+              "loyalty"
             ]
           },
           {
@@ -1153,7 +1169,7 @@
           }
         ]
       },
-      "sql_rules": "domain = 'education' AND lifecycle_stage IN ('customer', 'vip') AND engagement_score < 40 AND churn_risk_tier IN ('medium', 'high', 'critical')"
+      "sql_rules": "domain = 'education' AND lifecycle_stage IN ('engagement', 'conversion', 'retention', 'loyalty') AND engagement_score < 40 AND churn_risk_tier IN ('medium', 'high', 'critical')"
     },
     {
       "segment_tag": "education_alumni_advocates",
@@ -1211,9 +1227,9 @@
             "field": "lifecycle_stage",
             "operator": "in",
             "value": [
-              "customer",
-              "dormant",
-              "churn_risk"
+              "conversion",
+              "retention",
+              "churned"
             ]
           },
           {
@@ -1239,7 +1255,7 @@
           }
         ]
       },
-      "sql_rules": "domain = 'education' AND lifecycle_stage IN ('customer', 'dormant', 'churn_risk') AND last_activity_at < (now() - INTERVAL '120 days') AND last_activity_at > (now() - INTERVAL '365 days') AND lead_conversion_probability >= 0.4"
+      "sql_rules": "domain = 'education' AND lifecycle_stage IN ('conversion', 'retention', 'churned') AND last_activity_at < (now() - INTERVAL '120 days') AND last_activity_at > (now() - INTERVAL '365 days') AND lead_conversion_probability >= 0.4"
     }
   ],
   "REAL_ESTATE_SEGMENTS": [
@@ -1265,8 +1281,9 @@
             "field": "lifecycle_stage",
             "operator": "in",
             "value": [
-              "prospect",
-              "lead"
+              "awareness",
+              "acquisition",
+              "activation"
             ]
           },
           {
@@ -1279,7 +1296,7 @@
           }
         ]
       },
-      "sql_rules": "domain = 'real_estate' AND lifecycle_stage IN ('prospect', 'lead') AND lead_grade IN ('A', 'Hot')"
+      "sql_rules": "domain = 'real_estate' AND lifecycle_stage IN ('awareness', 'acquisition', 'activation') AND lead_grade IN ('A', 'Hot')"
     },
     {
       "segment_tag": "real_estate_investor_profile",
@@ -1328,8 +1345,9 @@
             "field": "lifecycle_stage",
             "operator": "in",
             "value": [
-              "prospect",
-              "lead"
+              "awareness",
+              "acquisition",
+              "activation"
             ]
           },
           {
@@ -1355,7 +1373,7 @@
           }
         ]
       },
-      "sql_rules": "domain = 'real_estate' AND lifecycle_stage IN ('prospect', 'lead') AND lead_conversion_probability >= 0.35 AND last_activity_at < (now() - INTERVAL '30 days') AND last_activity_at > (now() - INTERVAL '180 days')"
+      "sql_rules": "domain = 'real_estate' AND lifecycle_stage IN ('awareness', 'acquisition', 'activation') AND lead_conversion_probability >= 0.35 AND last_activity_at < (now() - INTERVAL '30 days') AND last_activity_at > (now() - INTERVAL '180 days')"
     },
     {
       "segment_tag": "real_estate_tour_ready",
@@ -1378,8 +1396,9 @@
             "field": "lifecycle_stage",
             "operator": "in",
             "value": [
-              "prospect",
-              "lead"
+              "awareness",
+              "acquisition",
+              "activation"
             ]
           },
           {
@@ -1394,7 +1413,7 @@
           }
         ]
       },
-      "sql_rules": "domain = 'real_estate' AND lifecycle_stage IN ('prospect', 'lead') AND engagement_score >= 65 AND lead_conversion_probability >= 0.55"
+      "sql_rules": "domain = 'real_estate' AND lifecycle_stage IN ('awareness', 'acquisition', 'activation') AND engagement_score >= 65 AND lead_conversion_probability >= 0.55"
     },
     {
       "segment_tag": "real_estate_mortgage_risk",
@@ -1455,8 +1474,10 @@
             "field": "lifecycle_stage",
             "operator": "in",
             "value": [
-              "customer",
-              "vip"
+              "engagement",
+              "conversion",
+              "retention",
+              "loyalty"
             ]
           },
           {
@@ -1474,7 +1495,7 @@
           }
         ]
       },
-      "sql_rules": "domain = 'banking' AND lifecycle_stage IN ('customer', 'vip') AND preferred_channel IN ('Mobile App', 'Internet Banking App') AND engagement_score >= 60"
+      "sql_rules": "domain = 'banking' AND lifecycle_stage IN ('engagement', 'conversion', 'retention', 'loyalty') AND preferred_channel IN ('Mobile App', 'Internet Banking App') AND engagement_score >= 60"
     },
     {
       "segment_tag": "banking_premium_clients",
@@ -1498,8 +1519,10 @@
             "field": "lifecycle_stage",
             "operator": "in",
             "value": [
-              "customer",
-              "vip"
+              "engagement",
+              "conversion",
+              "retention",
+              "loyalty"
             ]
           },
           {
@@ -1509,7 +1532,7 @@
           }
         ]
       },
-      "sql_rules": "domain = 'banking' AND lifecycle_stage IN ('customer', 'vip') AND predictive_clv >= 50000000"
+      "sql_rules": "domain = 'banking' AND lifecycle_stage IN ('engagement', 'conversion', 'retention', 'loyalty') AND predictive_clv >= 50000000"
     },
     {
       "segment_tag": "banking_cross_sell_ready",
@@ -1532,8 +1555,10 @@
             "field": "lifecycle_stage",
             "operator": "in",
             "value": [
-              "customer",
-              "vip"
+              "engagement",
+              "conversion",
+              "retention",
+              "loyalty"
             ]
           },
           {
@@ -1551,7 +1576,7 @@
           }
         ]
       },
-      "sql_rules": "domain = 'banking' AND lifecycle_stage IN ('customer', 'vip') AND lead_conversion_probability >= 0.6 AND churn_risk_tier IN ('low', 'medium')"
+      "sql_rules": "domain = 'banking' AND lifecycle_stage IN ('engagement', 'conversion', 'retention', 'loyalty') AND lead_conversion_probability >= 0.6 AND churn_risk_tier IN ('low', 'medium')"
     },
     {
       "segment_tag": "banking_attrition_risk",
@@ -1574,8 +1599,10 @@
             "field": "lifecycle_stage",
             "operator": "in",
             "value": [
-              "customer",
-              "vip"
+              "engagement",
+              "conversion",
+              "retention",
+              "loyalty"
             ]
           },
           {
@@ -1588,7 +1615,7 @@
           }
         ]
       },
-      "sql_rules": "domain = 'banking' AND lifecycle_stage IN ('customer', 'vip') AND churn_risk_tier IN ('high', 'critical')"
+      "sql_rules": "domain = 'banking' AND lifecycle_stage IN ('engagement', 'conversion', 'retention', 'loyalty') AND churn_risk_tier IN ('high', 'critical')"
     }
   ],
   "MEDIA_SEGMENTS": [
@@ -1647,8 +1674,9 @@
             "field": "lifecycle_stage",
             "operator": "in",
             "value": [
-              "prospect",
-              "lead"
+              "awareness",
+              "acquisition",
+              "activation"
             ]
           },
           {
@@ -1663,7 +1691,7 @@
           }
         ]
       },
-      "sql_rules": "domain = 'media' AND lifecycle_stage IN ('prospect', 'lead') AND engagement_score >= 50 AND lead_conversion_probability >= 0.5"
+      "sql_rules": "domain = 'media' AND lifecycle_stage IN ('awareness', 'acquisition', 'activation') AND engagement_score >= 50 AND lead_conversion_probability >= 0.5"
     },
     {
       "segment_tag": "media_lapsing_subscribers",
@@ -1686,8 +1714,10 @@
             "field": "lifecycle_stage",
             "operator": "in",
             "value": [
-              "customer",
-              "vip"
+              "engagement",
+              "conversion",
+              "retention",
+              "loyalty"
             ]
           },
           {
@@ -1717,7 +1747,7 @@
           }
         ]
       },
-      "sql_rules": "domain = 'media' AND lifecycle_stage IN ('customer', 'vip') AND last_activity_at < (now() - INTERVAL '14 days') AND last_activity_at > (now() - INTERVAL '60 days') AND churn_risk_tier IN ('medium', 'high', 'critical')"
+      "sql_rules": "domain = 'media' AND lifecycle_stage IN ('engagement', 'conversion', 'retention', 'loyalty') AND last_activity_at < (now() - INTERVAL '14 days') AND last_activity_at > (now() - INTERVAL '60 days') AND churn_risk_tier IN ('medium', 'high', 'critical')"
     },
     {
       "segment_tag": "media_loyal_subscribers",
@@ -1740,8 +1770,10 @@
             "field": "lifecycle_stage",
             "operator": "in",
             "value": [
-              "customer",
-              "vip"
+              "engagement",
+              "conversion",
+              "retention",
+              "loyalty"
             ]
           },
           {
@@ -1766,7 +1798,7 @@
           }
         ]
       },
-      "sql_rules": "domain = 'media' AND lifecycle_stage IN ('customer', 'vip') AND customer_since < ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '365 days') AND engagement_score >= 60 AND churn_risk_tier = 'low'"
+      "sql_rules": "domain = 'media' AND lifecycle_stage IN ('engagement', 'conversion', 'retention', 'loyalty') AND customer_since < ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '365 days') AND engagement_score >= 60 AND churn_risk_tier = 'low'"
     }
   ]
 }

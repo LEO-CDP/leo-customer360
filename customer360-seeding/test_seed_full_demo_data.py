@@ -23,6 +23,12 @@ import seeding_utils as utils  # noqa: E402
 def test_metadata_catalogs_and_tuple_shapes_are_preserved():
     metadata = utils.load_demo_metadata()
     assert len(metadata.campaigns) == 8
+    assert len(metadata.lifecycle_stages) == 8
+    assert set(metadata.lifecycle_stages) == set(seed.JOURNEY_STAGES)
+    assert {
+        seed.infer_journey_stage_from_objective(campaign[5])
+        for campaign in metadata.campaigns
+    } == set(seed.JOURNEY_STAGES)
     assert len(metadata.icp_archetypes) == 14
     assert len(metadata.accounts) == 28
     assert len(metadata.ai_agent_models) == 5

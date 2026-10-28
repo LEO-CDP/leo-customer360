@@ -26,8 +26,8 @@ PG_CHECK_DEFS = [
     "CHECK (((is_hashed = false) OR (persona_name IS NOT NULL)))",
     "CHECK ((gender = ANY (ARRAY['male'::text, 'female'::text, 'other'::text])))",
     "CHECK (((latest_nps_score >= 0) AND (latest_nps_score <= 10)))",
-    "CHECK ((lifecycle_stage = ANY (ARRAY['prospect'::text, 'lead'::text, 'customer'::text, "
-    "'vip'::text, 'dormant'::text, 'churn_risk'::text])))",
+    "CHECK ((lifecycle_stage = ANY (ARRAY['awareness'::text, 'acquisition'::text, 'activation'::text, "
+    "'engagement'::text, 'conversion'::text, 'retention'::text, 'loyalty'::text, 'churned'::text])))",
     "CHECK ((weird = ANY (ARRAY['it''s'::text, 'a b'::text])))",
 ]
 
@@ -102,7 +102,10 @@ class ParseAllowedValuesTests(unittest.TestCase):
     def test_reads_single_column_in_lists_and_ignores_other_checks(self):
         self.assertEqual(parse_allowed_values(PG_CHECK_DEFS), {
             "gender": ["male", "female", "other"],
-            "lifecycle_stage": ["prospect", "lead", "customer", "vip", "dormant", "churn_risk"],
+            "lifecycle_stage": [
+                "awareness", "acquisition", "activation", "engagement",
+                "conversion", "retention", "loyalty", "churned",
+            ],
             "weird": ["it's", "a b"],
         })
 

@@ -69,7 +69,7 @@ echo "🌐 Seeding full demo data (CRM journey graph, relations, transactions, S
 "$VENV_PYTHON" ../../customer360-seeding/dev-backend-seeding/seed_full_demo_data.py
 
 DEMO_TENANT_ID="11111111-1111-1111-1111-111111111111"
-PG_CONTAINER="${PG_CONTAINER:-pgsql16_vector}"
+PG_CONTAINER="${PG_CONTAINER:-customer360-postgres}"
 DB_NAME="${DB_NAME:-customer360}"
 DB_SCHEMA="${DB_SCHEMA:-customer360}"
 

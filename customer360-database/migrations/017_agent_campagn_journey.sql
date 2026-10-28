@@ -52,6 +52,65 @@ BEGIN
                 c.table_name, c.constraint_name);
         END IF;
     END LOOP;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'customer360.cdp_master_profiles'::regclass
+          AND contype = 'c'
+          AND pg_get_constraintdef(oid) LIKE '%lifecycle_stage%'
+          AND pg_get_constraintdef(oid) LIKE '%awareness%'
+          AND pg_get_constraintdef(oid) LIKE '%churned%'
+          AND pg_get_constraintdef(oid) NOT LIKE '%prospect%'
+    ) THEN
+        FOR c IN
+            SELECT conname
+            FROM pg_constraint
+            WHERE conrelid = 'customer360.cdp_master_profiles'::regclass
+              AND contype = 'c'
+              AND pg_get_constraintdef(oid) LIKE '%lifecycle_stage%'
+        LOOP
+            EXECUTE format(
+                'ALTER TABLE customer360.cdp_master_profiles DROP CONSTRAINT IF EXISTS %I',
+                c.conname);
+        END LOOP;
+        UPDATE customer360.cdp_master_profiles
+        SET lifecycle_stage = CASE lifecycle_stage
+            WHEN 'prospect' THEN 'awareness'
+            WHEN 'lead' THEN 'acquisition'
+            WHEN 'customer' THEN 'conversion'
+            WHEN 'vip' THEN 'loyalty'
+            WHEN 'dormant' THEN 'churned'
+            WHEN 'churn_risk' THEN 'churned'
+            ELSE lifecycle_stage
+        END
+        WHERE lifecycle_stage IN ('prospect', 'lead', 'customer', 'vip', 'dormant', 'churn_risk');
+        EXECUTE 'ALTER TABLE customer360.cdp_master_profiles ADD CONSTRAINT cdp_master_profiles_lifecycle_stage_check CHECK (lifecycle_stage IN (
+            ''awareness'', ''acquisition'', ''activation'', ''engagement'',
+            ''conversion'', ''retention'', ''loyalty'', ''churned''))';
+    END IF;
+
+    DELETE FROM customer360.cdp_persona_config
+    WHERE config_key IN (
+        'LIFECYCLE_BEHAVIOR_PROSPECT_BASE',
+        'LIFECYCLE_BEHAVIOR_LEAD_BASE',
+        'LIFECYCLE_BEHAVIOR_CUSTOMER_BASE',
+        'LIFECYCLE_BEHAVIOR_VIP_BASE',
+        'LIFECYCLE_BEHAVIOR_DORMANT_BASE',
+        'LIFECYCLE_BEHAVIOR_CHURN_RISK_BASE'
+    );
+
+    INSERT INTO customer360.cdp_persona_config
+        (config_key, config_value, data_type, config_description, is_active, updated_by)
+    VALUES
+        ('LIFECYCLE_BEHAVIOR_AWARENESS_BASE', '20.0', 'NUMERIC', 'Behavior base score for awareness', TRUE, 'system_seed'),
+        ('LIFECYCLE_BEHAVIOR_ACQUISITION_BASE', '40.0', 'NUMERIC', 'Behavior base score for acquisition', TRUE, 'system_seed'),
+        ('LIFECYCLE_BEHAVIOR_ACTIVATION_BASE', '50.0', 'NUMERIC', 'Behavior base score for activation', TRUE, 'system_seed'),
+        ('LIFECYCLE_BEHAVIOR_ENGAGEMENT_BASE', '60.0', 'NUMERIC', 'Behavior base score for engagement', TRUE, 'system_seed'),
+        ('LIFECYCLE_BEHAVIOR_CONVERSION_BASE', '65.0', 'NUMERIC', 'Behavior base score for conversion', TRUE, 'system_seed'),
+        ('LIFECYCLE_BEHAVIOR_RETENTION_BASE', '75.0', 'NUMERIC', 'Behavior base score for retention', TRUE, 'system_seed'),
+        ('LIFECYCLE_BEHAVIOR_LOYALTY_BASE', '95.0', 'NUMERIC', 'Behavior base score for loyalty', TRUE, 'system_seed'),
+        ('LIFECYCLE_BEHAVIOR_CHURNED_BASE', '30.0', 'NUMERIC', 'Behavior base score for churned', TRUE, 'system_seed')
+    ON CONFLICT (config_key) DO NOTHING;
 END $$;
 
 COMMENT ON COLUMN customer360.cdp_ai_agents.journey_stage IS

@@ -559,7 +559,7 @@ class MasterProfilesPaginationEndpointTests(unittest.TestCase):
             response = self.client.get(
                 "/master-profiles/?tenant_id=11111111-1111-1111-1111-111111111111"
                 "&data_source_id=22222222-2222-2222-2222-222222222222"
-                "&domain=healthcare&lifecycle_stage=customer&membership_tier=Gold"
+                "&domain=healthcare&lifecycle_stage=conversion&membership_tier=Gold"
                 "&churn_risk_tier=high&linked_raw_profile_count_min=2"
                 "&q=nguyen&page=3&page_size=15&days=30"
                 "&from_date=2026-09-01&to_date=2026-09-29"
@@ -571,7 +571,7 @@ class MasterProfilesPaginationEndpointTests(unittest.TestCase):
             tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
             data_source_id=uuid.UUID("22222222-2222-2222-2222-222222222222"),
             domain="healthcare",
-            lifecycle_stage="customer",
+            lifecycle_stage="conversion",
             domain_attribute_key=None,
             domain_attribute_value=None,
             membership_tier="Gold",

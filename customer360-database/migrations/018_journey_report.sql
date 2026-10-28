@@ -185,6 +185,35 @@ COMMENT ON TABLE customer360.cdp_journey_metric_daily IS
 COMMENT ON COLUMN customer360.cdp_journey_metric_daily.currency IS
     'ISO 4217 currency for campaign-derived metrics; empty for non-campaign metrics and UNK when campaign currency is unset. No cross-currency totals are combined.';
 
+DO $$
+DECLARE
+    c RECORD;
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'customer360.cdp_journey_metric_daily'::regclass
+          AND contype = 'c'
+          AND pg_get_constraintdef(oid) LIKE '%journey_stage%'
+          AND pg_get_constraintdef(oid) LIKE '%churned%'
+    ) THEN
+        FOR c IN
+            SELECT conname
+            FROM pg_constraint
+            WHERE conrelid = 'customer360.cdp_journey_metric_daily'::regclass
+              AND contype = 'c'
+              AND pg_get_constraintdef(oid) LIKE '%journey_stage%'
+        LOOP
+            EXECUTE format(
+                'ALTER TABLE customer360.cdp_journey_metric_daily DROP CONSTRAINT IF EXISTS %I',
+                c.conname);
+        END LOOP;
+        EXECUTE 'ALTER TABLE customer360.cdp_journey_metric_daily ADD CONSTRAINT cdp_journey_metric_daily_journey_stage_check CHECK (journey_stage IN (
+            ''awareness'', ''acquisition'', ''activation'', ''engagement'',
+            ''conversion'', ''retention'', ''loyalty'', ''churned''))';
+    END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_journey_metric_daily_latest
     ON customer360.cdp_journey_metric_daily (tenant_id, journey_stage, window_days, report_date DESC);
 

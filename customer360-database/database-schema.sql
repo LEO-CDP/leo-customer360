@@ -886,17 +886,18 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_master_profiles (
     -- Channel the customer engages with most, used to drive recommendation/
     -- next-best-action logic (e.g. 'Mobile App', 'Website', 'Internet Banking App').
     preferred_channel TEXT,
-    -- Current stage in the prospect-to-customer journey, for lifecycle marketing
-    -- and reporting. Distinct from churn_risk_tier (a churn-model score) --
-    -- 'churn_risk' here is a lifecycle bucket, not a probability.
+    -- Current stage in the 8-stage Customer Journey Map (awareness .. churned),
+    -- for lifecycle marketing and reporting.
     lifecycle_stage TEXT CHECK (
         lifecycle_stage IN (
-            'prospect',
-            'lead',
-            'customer',
-            'vip',
-            'dormant',
-            'churn_risk'
+            'awareness',
+            'acquisition',
+            'activation',
+            'engagement',
+            'conversion',
+            'retention',
+            'loyalty',
+            'churned'
         )
     ),
 
@@ -1815,12 +1816,14 @@ VALUES
     ('RISK_LEVEL_HIGH_THRESHOLD', '60.0', 'NUMERIC', 'Risk level threshold: high', TRUE, 'system_seed'),
     ('RISK_LEVEL_MEDIUM_THRESHOLD', '40.0', 'NUMERIC', 'Risk level threshold: medium', TRUE, 'system_seed'),
 
-    ('LIFECYCLE_BEHAVIOR_PROSPECT_BASE', '20.0', 'NUMERIC', 'Behavior base score for prospect', TRUE, 'system_seed'),
-    ('LIFECYCLE_BEHAVIOR_LEAD_BASE', '40.0', 'NUMERIC', 'Behavior base score for lead', TRUE, 'system_seed'),
-    ('LIFECYCLE_BEHAVIOR_CUSTOMER_BASE', '65.0', 'NUMERIC', 'Behavior base score for customer', TRUE, 'system_seed'),
-    ('LIFECYCLE_BEHAVIOR_VIP_BASE', '95.0', 'NUMERIC', 'Behavior base score for VIP', TRUE, 'system_seed'),
-    ('LIFECYCLE_BEHAVIOR_DORMANT_BASE', '30.0', 'NUMERIC', 'Behavior base score for dormant', TRUE, 'system_seed'),
-    ('LIFECYCLE_BEHAVIOR_CHURN_RISK_BASE', '35.0', 'NUMERIC', 'Behavior base score for churn_risk', TRUE, 'system_seed'),
+    ('LIFECYCLE_BEHAVIOR_AWARENESS_BASE', '20.0', 'NUMERIC', 'Behavior base score for awareness', TRUE, 'system_seed'),
+    ('LIFECYCLE_BEHAVIOR_ACQUISITION_BASE', '40.0', 'NUMERIC', 'Behavior base score for acquisition', TRUE, 'system_seed'),
+    ('LIFECYCLE_BEHAVIOR_ACTIVATION_BASE', '50.0', 'NUMERIC', 'Behavior base score for activation', TRUE, 'system_seed'),
+    ('LIFECYCLE_BEHAVIOR_ENGAGEMENT_BASE', '60.0', 'NUMERIC', 'Behavior base score for engagement', TRUE, 'system_seed'),
+    ('LIFECYCLE_BEHAVIOR_CONVERSION_BASE', '65.0', 'NUMERIC', 'Behavior base score for conversion', TRUE, 'system_seed'),
+    ('LIFECYCLE_BEHAVIOR_RETENTION_BASE', '75.0', 'NUMERIC', 'Behavior base score for retention', TRUE, 'system_seed'),
+    ('LIFECYCLE_BEHAVIOR_LOYALTY_BASE', '95.0', 'NUMERIC', 'Behavior base score for loyalty', TRUE, 'system_seed'),
+    ('LIFECYCLE_BEHAVIOR_CHURNED_BASE', '30.0', 'NUMERIC', 'Behavior base score for churned', TRUE, 'system_seed'),
     ('LIFECYCLE_BEHAVIOR_DEFAULT_BASE', '30.0', 'NUMERIC', 'Behavior base score default fallback', TRUE, 'system_seed'),
 
     ('ENGAGEMENT_RECENCY_UNKNOWN_SCORE', '30.0', 'NUMERIC', 'Engagement recency score when unknown', TRUE, 'system_seed'),
@@ -4315,6 +4318,35 @@ COMMENT ON TABLE customer360.cdp_journey_metric_daily IS
     'Snapshot of journey-stage KPIs. Percent values are stored 0-100. currency separates campaign-derived metrics by ISO 4217 currency (UNK means unset); currencies are never combined.';
 COMMENT ON COLUMN customer360.cdp_journey_metric_daily.currency IS
     'ISO 4217 currency for campaign-derived metrics; empty for non-campaign metrics and UNK when campaign currency is unset. No cross-currency totals are combined.';
+
+DO $$
+DECLARE
+    c RECORD;
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'customer360.cdp_journey_metric_daily'::regclass
+          AND contype = 'c'
+          AND pg_get_constraintdef(oid) LIKE '%journey_stage%'
+          AND pg_get_constraintdef(oid) LIKE '%churned%'
+    ) THEN
+        FOR c IN
+            SELECT conname
+            FROM pg_constraint
+            WHERE conrelid = 'customer360.cdp_journey_metric_daily'::regclass
+              AND contype = 'c'
+              AND pg_get_constraintdef(oid) LIKE '%journey_stage%'
+        LOOP
+            EXECUTE format(
+                'ALTER TABLE customer360.cdp_journey_metric_daily DROP CONSTRAINT IF EXISTS %I',
+                c.conname);
+        END LOOP;
+        EXECUTE 'ALTER TABLE customer360.cdp_journey_metric_daily ADD CONSTRAINT cdp_journey_metric_daily_journey_stage_check CHECK (journey_stage IN (
+            ''awareness'', ''acquisition'', ''activation'', ''engagement'',
+            ''conversion'', ''retention'', ''loyalty'', ''churned''))';
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_journey_metric_daily_latest
     ON customer360.cdp_journey_metric_daily
