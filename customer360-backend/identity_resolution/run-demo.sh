@@ -3,7 +3,7 @@
 #   1. Loads DB config from .env (see core-customer360/dev-start-pgsql.sh)
 #   2. Creates/reuses a virtualenv and installs requirements.txt
 #   3. Seeds sample Adjust / OneSignal / Web Tracking raw profiles
-#      (retail + banking domains)
+#      (retail, education, real estate, travel, banking, and media domains)
 #   4. Runs identity resolution batch(es) against them
 #   5. Prints the resulting master profiles + ready-to-use psql commands so
 #      you can inspect the data yourself.
@@ -59,14 +59,14 @@ echo "📦 Installing local leo-customer360-dao checkout..."
 echo "📥 Installing requirements..."
 "$VENV_PYTHON" -m pip install -q -r requirements.txt
 
-echo "🌱 Seeding sample Adjust / OneSignal / Web Tracking data (retail + banking)..."
+echo "🌱 Seeding sample Adjust / OneSignal / Web Tracking data across six domains..."
 "$VENV_PYTHON" ../../customer360-seeding/dev-backend-seeding/init_sample_data.py
 
 echo "⚙️  Running Customer Identity Resolution..."
-"$VENV_PYTHON" scripts/test_resolution_task.py
+CIR_VALIDATE_DEMO_COVERAGE=1 "$VENV_PYTHON" scripts/test_resolution_task.py
 
 echo "🌐 Seeding full demo data (CRM journey graph, relations, transactions, S3 behavioral events, master-profile enrichment)..."
-"$VENV_PYTHON" ../../customer360-seeding/dev-backend-seeding/seed_full_demo_data.py
+CIR_VALIDATE_DEMO_COVERAGE=1 "$VENV_PYTHON" ../../customer360-seeding/dev-backend-seeding/seed_full_demo_data.py
 
 DEMO_TENANT_ID="11111111-1111-1111-1111-111111111111"
 PG_CONTAINER="${PG_CONTAINER:-customer360-postgres}"

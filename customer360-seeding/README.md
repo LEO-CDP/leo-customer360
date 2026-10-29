@@ -12,6 +12,12 @@ UAT environments. This folder covers three separate workflows:
 | API-only fresh traffic seed | `seed_api_data.py` or `./dev-c360.sh seed-new-data` | `customer360-event-api` HTTP endpoint only |
 | Backend CIR demo seed | `dev-backend-seeding/init_sample_data.py`, `seed_full_demo_data.py`, and `seeding_content_items.py` | PostgreSQL raw-profile, CRM, relation, persona, event, and seven-domain content fixtures |
 
+On an empty database, `./dev-c360.sh reset -y` runs the backend demo seed:
+8,000 raw records represent 5,600 synthetic customers across retail,
+education, real estate, travel, banking, and media. It resolves the records
+and checks for more than 5,000 master profiles with every domain represented.
+Reset deletes the development volumes; `no-seed` skips the demo seed.
+
 The web simulator does not publish to Kafka. It sends one ordered event batch
 per synthetic user to the tracking API; the tracking service writes NDJSON to
 S3-compatible storage, and the analytics job aggregates those objects.
@@ -164,6 +170,18 @@ MinIO objects, trigger analytics, inspect MinIO, or start/restart Docker.
 The launcher installs only [requirements-api-seed.txt](requirements-api-seed.txt)
 for this workflow.
 
+With the sample defaults, this creates 24,000 events for 6,000 distinct
+synthetic identities across retail, education, real estate, travel, banking,
+and media. The `dev-c360.sh seed-new-data` launcher enforces at least 6,000
+identities and increases the event count as needed, including when older
+environment files specify smaller counts. Multiple sessions are combined in
+bounded requests, retaining each event's user and session identifiers. Each
+identity stays in the same domain across sessions. Unseeded runs use new
+identities; an explicit random seed makes identifiers reproducible. Events are
+processed asynchronously: acceptance or an empty tracking queue does **not**
+mean 6,000 master profiles have already been created. Analytics and identity
+resolution must run separately.
+
 With the local tracking API already running:
 
 ```bash
@@ -183,14 +201,21 @@ Configuration is read from the simulator or repository `.env` files:
 | --- | --- | --- |
 | `SEED_TRACKING_API_URL` | API endpoint receiving seed traffic | `http://localhost:8010/api/v1/tracking/logs` |
 | `SEED_TRACKING_DATA_SOURCE_ID` | Registered data-source UUID | `15dc39d4-ae42-5c60-9c77-66f05dcae448` |
-| `NEW_DATA_EVENT_COUNT` | Number of events to generate | `20000` |
+| `NEW_DATA_EVENT_COUNT` | Number of events to generate | `24000` |
 | `NEW_DATA_LOOKBACK_HOURS` | Event-time window behind now | `48` |
-| `SEED_EVENTS_PER_SESSION` | Events per HTTP request/session | `20` |
+| `SEED_EVENTS_PER_SESSION` | Events per simulated session | `4` |
+| `SEED_EVENTS_PER_REQUEST` | Maximum events per API request (1–1000; lower it if the API limit is lower) | `1000` |
 | `SEED_API_CONCURRENCY` | Concurrent HTTP requests | `4` |
-| `SEED_PROFILE_COUNT` | Synthetic users rotated through sessions | `1000` |
+| `SEED_PROFILE_COUNT` | Synthetic users rotated through sessions | `6000` |
 | `TRACKING_REQUEST_TIMEOUT_SECONDS` | Per-request timeout | `10` |
 | `SEED_QUEUE_DRAIN_TIMEOUT_SECONDS` | Maximum wait for the API queue to flush | `180` |
 | `SEED_QUEUE_POLL_INTERVAL_SECONDS` | Queue-status polling interval | `2` |
+
+When running the simulator directly without `--min-profiles`, the number of
+identities actually represented is the lesser of
+`SEED_PROFILE_COUNT` and the number of sessions
+(`ceil(NEW_DATA_EVENT_COUNT / SEED_EVENTS_PER_SESSION)`). Lower overrides can
+therefore produce fewer than 5,001 identities.
 
 The former `seed_full_demo_data.py --new-data` mode has been removed. The full
 demo seed still owns database enrichment and direct demo-fixture setup; fresh

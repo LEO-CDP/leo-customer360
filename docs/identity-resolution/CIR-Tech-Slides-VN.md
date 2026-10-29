@@ -499,7 +499,7 @@ metadata seed và trạng thái database.
 | PII-safe label | `customer360-dao/src/leo_customer360_dao/agentic_engines/persona.py` |
 | Schema, indexes, constraints, persona tables | `customer360-database/database-schema.sql` |
 | Attribute catalog và CIR seed | `customer360-database/init-core-database.sql` |
-| FORCE RLS migration | `customer360-database/migrations/001_harden_tenant_rls_policies.sql` |
+| FORCE RLS legacy upgrade | `customer360-database/legacy-upgrade.sql` (historical step 001) |
 | Demo seed và hash PII | `customer360-seeding/dev-backend-seeding/init_sample_data.py` |
 | Demo resolution | `customer360-backend/identity_resolution/scripts/test_resolution_task.py` |
 | Workspace code locations | `customer360-backend/workspace.yaml` |

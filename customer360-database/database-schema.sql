@@ -24,6 +24,21 @@ CREATE EXTENSION IF NOT EXISTS btree_gist;
 -- =========================================================
 CREATE SCHEMA IF NOT EXISTS customer360;
 
+-- A fresh schema already includes the consolidated legacy upgrade.
+CREATE TABLE IF NOT EXISTS customer360.sys_schema_upgrade_history (
+    upgrade_key TEXT PRIMARY KEY,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+DO $$
+BEGIN
+    IF to_regclass('customer360.sys_tenant') IS NULL THEN
+        INSERT INTO customer360.sys_schema_upgrade_history (upgrade_key)
+        VALUES ('legacy_through_018')
+        ON CONFLICT (upgrade_key) DO NOTHING;
+    END IF;
+END $$;
+
 ---------------------------------------------------
 -- ENTITY TABLES
 ---------------------------------------------------
@@ -2870,7 +2885,26 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_product_items (
         CHECK (embedding IS NULL OR vector_dims(embedding) IN (384, 768))
 );
 
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'customer360' AND table_name = 'cdp_product_items'
+          AND column_name = 'store_id'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'customer360' AND table_name = 'cdp_product_items'
+          AND column_name = 'source_id'
+    ) THEN
+        ALTER TABLE customer360.cdp_product_items RENAME COLUMN store_id TO source_id;
+    END IF;
+END $$;
+
 ALTER TABLE customer360.cdp_product_items
+    ADD COLUMN IF NOT EXISTS source_id TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS source_type TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS ext_attributes JSONB NOT NULL DEFAULT '{}'::JSONB
+        CHECK (jsonb_typeof(ext_attributes) = 'object'),
     ADD COLUMN IF NOT EXISTS embedding_text TEXT,
     ADD COLUMN IF NOT EXISTS embedding VECTOR,
     ADD COLUMN IF NOT EXISTS embedding_model VARCHAR(255),
@@ -4939,6 +4973,16 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_customer_valuation (
         (tenant_id, master_profile_id, domain_code, as_of_date, model_name, model_version)
 );
 
+ALTER TABLE customer360.cdp_customer_valuation
+    ADD COLUMN IF NOT EXISTS insights TEXT,
+    ADD COLUMN IF NOT EXISTS actions JSONB NOT NULL DEFAULT '[]'::jsonb,
+    ADD COLUMN IF NOT EXISTS historical_gross_profit NUMERIC(20, 4),
+    ADD COLUMN IF NOT EXISTS purchase_intent_score NUMERIC(7, 4),
+    ADD COLUMN IF NOT EXISTS churn_risk_score NUMERIC(7, 4),
+    ADD COLUMN IF NOT EXISTS next_best_product_score NUMERIC(7, 4),
+    ADD COLUMN IF NOT EXISTS incremental_campaign_value NUMERIC(20, 4),
+    ADD COLUMN IF NOT EXISTS profile_quality_score NUMERIC(5, 2);
+
 COMMENT ON TABLE customer360.cdp_customer_valuation IS
 'Cross-industry customer lifetime value feature snapshot and model-output table. One row per tenant/profile/domain/as-of-date/model/version.';
 COMMENT ON COLUMN customer360.cdp_customer_valuation.domain_features IS
@@ -5148,7 +5192,7 @@ END;
 $$;
 
 -- ============================================================================
--- sys_assistant_message: LEO Assistant chat memory (see migrations/007)
+-- sys_assistant_message: LEO Assistant chat memory
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS customer360.sys_assistant_message (
     message_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

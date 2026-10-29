@@ -18,8 +18,8 @@ Connects to the PostgreSQL database configured via environment variables /
    upsert-if-missing) -- ``database-schema.sql`` never seeds tenants, and
    every tenant-scoped table has a NOT NULL FK to ``sys_tenant.tenant_id``.
 5. Clears any previous demo data (scoped to ``DEMO_TENANT_ID`` only, so it
-   never touches other tenants) and inserts 1,000 generated raw profiles for
-    both the education and retail domains: each customer's anonymous first
+   never touches other tenants) and inserts 8,000 generated raw profiles for
+   six business domains: each customer's anonymous first
    touch is an Adjust install (across Facebook Ads, TikTok Ads, Google
    Ads, Grab Ads, FPT Play Ads, and offline PR events at shopping malls),
    and ~30% of the rows are additional PII-revealing duplicate touches
@@ -122,9 +122,9 @@ VIETNAMESE_GIVEN_NAMES = (
 RETAIL_TOUCH_EVENTS = ("login", "app_open", "purchase")
 EDUCATION_TOUCH_EVENTS = ("login", "course_started", "assignment_submitted")
 
-# Share of synthetic customers whose app belongs to the education domain
-# (the rest are retail). Tune here if you want a different domain mix.
-EDUCATION_DOMAIN_SHARE = 0.4
+DEMO_DOMAINS = ("retail", "education", "real_estate", "travel", "banking", "media")
+DEFAULT_RAW_PROFILE_COUNT = 8_000
+DEFAULT_DUPLICATE_RATE = 0.3
 
 
 def _random_full_name(rng: random.Random) -> str:
@@ -133,26 +133,20 @@ def _random_full_name(rng: random.Random) -> str:
     )
 
 
-def _build_customer(rng: random.Random, index: int, used_names: set, used_phones: set) -> dict:
+def _build_customer(rng: random.Random, index: int, used_phones: set) -> dict:
     """Creates one synthetic person's stable identity (device + PII), shared
     across every raw-profile row generated for that person.
 
     phone_number is regenerated on collision since it IS an active CIR
     matching rule -- a coincidental collision would make identity resolution
-    incorrectly merge two distinct people into one profile. full_name is also
-    kept collision-free purely for demo realism/readability; it is NOT a CIR
-    matching key (common/shared names are too collision-prone to trust for
-    identity matching -- see init-core-database.sql's is_identity_resolution
-    seed for full_name).
+    incorrectly merge two distinct people into one profile. Names can repeat;
+    they are not CIR matching keys. The email includes the customer index.
     """
-    domain = "education" if rng.random() < EDUCATION_DOMAIN_SHARE else "retail"
+    domain = DEMO_DOMAINS[index % len(DEMO_DOMAINS)]
     platform = "ios" if rng.random() < 0.5 else "android"
     channel = rng.choice(ADJUST_CHANNELS)
 
     full_name = _random_full_name(rng)
-    while full_name in used_names:
-        full_name = _random_full_name(rng)
-    used_names.add(full_name)
 
     phone_number = f"09{rng.randint(10000000, 99999999)}"
     while phone_number in used_phones:
@@ -268,9 +262,12 @@ def _touch_event(rng: random.Random, customer: dict, event_time: datetime, sourc
     return base
 
 
-def generate_raw_profiles(count: int = 1000, duplicate_rate: float = 0.3, seed: int = 42) -> list[dict]:
-    """Generates ``count`` synthetic raw-profile events for the retail and
-    education domains, spread across all 3 documented ingestion source systems
+def generate_raw_profiles(
+    count: int = DEFAULT_RAW_PROFILE_COUNT,
+    duplicate_rate: float = DEFAULT_DUPLICATE_RATE,
+    seed: int = 42,
+) -> list[dict]:
+    """Generate ``count`` raw-profile events across six domains and three sources
     (Adjust mobile attribution, OneSignal push engagement, Web Tracking/
     GA4-style browsing -- see TOUCH_SOURCE_SYSTEMS).
 
@@ -286,14 +283,17 @@ def generate_raw_profiles(count: int = 1000, duplicate_rate: float = 0.3, seed: 
     Uses a fixed ``seed`` so re-running this script produces the exact same
     dataset (consistent with the rest of this script being idempotent).
     """
+    if count < 1:
+        raise ValueError("count must be at least 1")
+    if not 0 <= duplicate_rate < 1:
+        raise ValueError("duplicate_rate must be at least 0 and less than 1")
     rng = random.Random(seed)
     num_unique = max(1, round(count * (1 - duplicate_rate)))
     num_duplicates = count - num_unique
 
     base_time = datetime.now() - timedelta(days=60)
-    used_names: set = set()
     used_phones: set = set()
-    customers = [_build_customer(rng, i, used_names, used_phones) for i in range(num_unique)]
+    customers = [_build_customer(rng, i, used_phones) for i in range(num_unique)]
     profiles = [_install_event(customer, base_time + timedelta(minutes=i)) for i, customer in enumerate(customers)]
 
     for i in range(num_duplicates):
@@ -429,7 +429,7 @@ def main() -> None:
         host=DB_HOST, dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD, port=DB_PORT
     )
     try:
-        raw_profiles = generate_raw_profiles(count=1000, duplicate_rate=0.3)
+        raw_profiles = generate_raw_profiles()
         with conn.cursor() as cursor:
             set_tenant_context(cursor, DEMO_TENANT_ID)
             ensure_extensions(cursor)

@@ -359,8 +359,9 @@ Campaign activation and email administration under `/admin`:
   Re-imports update the existing product identified by
   `(tenant_id, Source_Type, Store_ID, Product_ID_Type, Product_ID)`. `Store_ID`
   maps to product-table `source_id`; the optional `Source_Type` TSV column
-  maps to non-null `source_type` and defaults to an empty string. Apply database
-  migration `007_cdp_product_items.sql` first. The upload API and Dagster
+  maps to non-null `source_type` and defaults to an empty string. Initialize the
+  current database schema and apply the [legacy upgrade](../customer360-database/legacy-upgrade.sql)
+  to existing databases first. The upload API and Dagster
   worker must share the product-import bucket and S3 settings; the worker must
   also be able to reach `AGENT_SERVICE_URL` and use the matching
   `AGENT_API_TOKEN` when configured.

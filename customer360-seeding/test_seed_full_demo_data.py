@@ -51,6 +51,15 @@ def test_metadata_catalogs_and_tuple_shapes_are_preserved():
     assert set(metadata.behavioral_event_templates) == supported_domains
 
 
+def test_campaign_experiment_prioritizes_existing_baseline_segments():
+    cursor = MagicMock()
+    cursor.fetchall.return_value = [{"segment_id": "first"}, {"segment_id": "second"}]
+    seed.seed_campaign_experiments(cursor, {seed.CAMPAIGNS[0][0]: "campaign-id"})
+    assert "segment_tag IN ('churn_risk', 'champions')" in cursor.execute.call_args_list[0].args[0]
+    assert cursor.execute.call_args_list[2].args[1][5] == "first"
+    assert cursor.execute.call_args_list[3].args[1][5] == "second"
+
+
 def test_metadata_path_is_independent_of_working_directory(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     assert utils.load_demo_metadata().industries == seed.INDUSTRIES
@@ -87,6 +96,7 @@ def test_stable_helpers_preserve_identity_and_random_isolation():
     )
     assert utils.canonical_demo_domain(None) == "retail"
     assert utils.canonical_demo_domain("education") == "education"
+    assert seed._profile_domain("profile-1", "banking") == "banking"
     assert utils.email_token(" Jane.. Doe ") == "jane.doe"
 
 

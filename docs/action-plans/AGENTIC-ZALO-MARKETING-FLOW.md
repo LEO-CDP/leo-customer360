@@ -88,7 +88,7 @@ Implication: this story must convert `campaign_activation` and `notification_eng
 
 ### SUBTASK-01: Schema and Migration Foundation for Zalo OA
 
-Component: `customer360-database/migrations`
+Component: `customer360-database/legacy-upgrade.sql`
 Priority: P0 Blocker  
 Depends on: none  
 Blocks: SUBTASK-02..08  

@@ -789,6 +789,91 @@ ON CONFLICT (tenant_id, segment_tag) DO UPDATE SET
     status_code         = EXCLUDED.status_code,
     updated_at          = now();
 
+DO $$
+DECLARE
+    conflicting_domain TEXT;
+BEGIN
+    SELECT d.domain_code INTO conflicting_domain
+    FROM customer360.sys_domain d
+    JOIN customer360.cdp_segments s
+      ON s.tenant_id = '11111111-1111-1111-1111-111111111111'::uuid
+     AND s.segment_tag = 'domain_' || d.domain_code
+    WHERE s.domain <> d.domain_code
+    ORDER BY d.domain_code
+    LIMIT 1;
+
+    IF conflicting_domain IS NOT NULL THEN
+        RAISE EXCEPTION 'Cannot seed domain segment for %: tag already belongs to a different domain',
+            conflicting_domain;
+    END IF;
+END $$;
+
+-- One editable, tenant-scoped baseline segment for every catalog domain.
+-- Existing segments are not overwritten on subsequent bootstrap runs.
+WITH domain_rules AS (
+    SELECT d.domain_code, d.domain_name,
+        CASE
+            WHEN d.domain_code IN (
+                '_', 'retail', 'banking', 'insurance', 'healthcare', 'telecom',
+                'travel', 'real_estate', 'education', 'manufacturing', 'media', 'hospitality'
+            ) THEN format('domain = %L', d.domain_code)
+            ELSE format(
+                'domain = convert_from(decode(%L, %L), %L)',
+                encode(convert_to(d.domain_code, 'UTF8'), 'hex'), 'hex', 'UTF8'
+            )
+        END AS sql_rule
+    FROM customer360.sys_domain d
+)
+INSERT INTO customer360.cdp_segments (
+    tenant_id,
+    domain,
+    segment_tag,
+    segment_name,
+    description,
+    json_rules,
+    sql_rules,
+    final_generated_sql,
+    processed_by,
+    is_active,
+    member_count,
+    status_code
+)
+SELECT
+    '11111111-1111-1111-1111-111111111111'::uuid,
+    d.domain_code,
+    'domain_' || d.domain_code,
+    d.domain_name || ' Customers',
+    'Active customer profiles in the ' || d.domain_name || ' domain.',
+    jsonb_build_object(
+        'condition', 'AND',
+        'rules', jsonb_build_array(jsonb_build_object(
+            'field', 'domain', 'operator', 'equal', 'value', d.domain_code
+        ))
+    ),
+    d.sql_rule,
+    format(
+        'SELECT master_profile_id FROM customer360.cdp_master_profiles WHERE tenant_id = %L::uuid AND (%s)',
+        '11111111-1111-1111-1111-111111111111', d.sql_rule
+    ),
+    'human',
+    TRUE,
+    0,
+    1
+FROM domain_rules d
+ON CONFLICT (tenant_id, segment_tag) DO NOTHING;
+
+UPDATE customer360.cdp_segments
+SET audience_tags = CASE
+    WHEN segment_tag IN ('high_value', 'champions') THEN
+        ARRAY['demographic/personal-finance/personal-level-affluence-band/high-net-worth']::text[]
+    WHEN segment_tag = 'growth_potential' THEN
+        ARRAY['demographic/personal-finance/personal-level-affluence-band/mid-net-worth']::text[]
+END,
+    updated_at = now()
+WHERE tenant_id = '11111111-1111-1111-1111-111111111111'::uuid
+  AND segment_tag IN ('high_value', 'champions', 'growth_potential')
+  AND COALESCE(cardinality(audience_tags), 0) = 0;
+
 
 ---------------------------------------------------
 -- SYSTEM DATA SOURCES SEED

@@ -121,8 +121,8 @@ Database áp dụng chính xác tập thuật ngữ này bằng các ràng buộ
 Các tệp schema và migration:
 
 - [`database-schema.sql`](../../customer360-database/database-schema.sql) — định nghĩa schema chuẩn.
-- [`017_agent_campagn_journey.sql`](../../customer360-database/migrations/017_agent_campagn_journey.sql) — bổ sung `journey_stage` cho chiến dịch và AI agent, tạo `crm_campaign_agent`, chuẩn hóa giá trị `lifecycle_stage` của hồ sơ giữa các tenant theo RLS và seed baseline chấm điểm persona `LIFECYCLE_BEHAVIOR_*_BASE`.
-- [`018_journey_report.sql`](../../customer360-database/migrations/018_journey_report.sql) — tạo `cdp_journey_metric`, `cdp_journey_metric_domain`, `cdp_journey_metric_daily`, `refresh_journey_metrics_pg(p_tenant, p_date)` và `vw_journey_stage_report`.
+- [Nâng cấp dữ liệu cũ, bước 017](../../customer360-database/legacy-upgrade.sql) — bổ sung `journey_stage` cho chiến dịch và AI agent, tạo `crm_campaign_agent`, chuẩn hóa giá trị `lifecycle_stage` của hồ sơ giữa các tenant theo RLS và seed baseline chấm điểm persona `LIFECYCLE_BEHAVIOR_*_BASE`.
+- [Nâng cấp dữ liệu cũ, bước 018](../../customer360-database/legacy-upgrade.sql) — tạo `cdp_journey_metric`, `cdp_journey_metric_domain`, `cdp_journey_metric_daily`, `refresh_journey_metrics_pg(p_tenant, p_date)` và `vw_journey_stage_report`.
 
 ---
 

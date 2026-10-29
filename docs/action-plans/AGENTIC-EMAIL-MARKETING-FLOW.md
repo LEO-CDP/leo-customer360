@@ -85,7 +85,7 @@ Implication: this story must convert `campaign_activation` and `email_engine` to
 
 ### SUBTASK-01: Schema and Migration Foundation
 
-Component: `customer360-database/migrations`
+Component: `customer360-database/legacy-upgrade.sql`
 Priority: P0 Blocker  
 Depends on: none  
 Blocks: SUBTASK-02..08  

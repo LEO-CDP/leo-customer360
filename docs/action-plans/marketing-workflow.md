@@ -28,7 +28,7 @@ This document describes the current frontend behavior and separates it from foll
 | [workflow-template.js](../../customer360-frontend/static/js/workflow/workflow-template.js) | Studio markup and industry journey recipes. |
 | [workflow-studio-frame.html](../../customer360-frontend/static/js/workflow/workflow-studio-frame.html) | Loads the studio's browser dependencies in the same-origin iframe. |
 | [flowy.js](../../customer360-frontend/static/js/workflow/flowy.js) and [flowy.css](../../customer360-frontend/static/css/flowy.css) | Canvas block layout/drag behavior and its styles. |
-| [repository.py](../../customer360-dao/src/leo_customer360_dao/workflow/repository.py), [models.py](../../customer360-dao/src/leo_customer360_dao/workflow/models.py), and [010_campaign_workflow_link.sql](../../customer360-database/migrations/010_campaign_workflow_link.sql) | Versioned workflow storage contract, workflow schema, and tenant-safe campaign-to-version foreign key. |
+| [repository.py](../../customer360-dao/src/leo_customer360_dao/workflow/repository.py), [models.py](../../customer360-dao/src/leo_customer360_dao/workflow/models.py), and [legacy upgrade](../../customer360-database/legacy-upgrade.sql) | Versioned workflow storage contract, workflow schema, and tenant-safe campaign-to-version foreign key. |
 
 The studio is hosted in an iframe so the campaign editor can embed the canvas without sharing its page styles or Flowy instance. The frame loads jQuery, Handlebars, Flowy, the workflow core, templates, and the studio script. The host waits for the studio's `onReady` callback before using the frame API.
 

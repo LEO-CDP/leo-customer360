@@ -17,7 +17,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
@@ -30,11 +30,12 @@ from web_user_simulator import TrackingApiError, TrackingLogClient
 LOGGER = logging.getLogger("seed_api_data")
 DEFAULT_TRACKING_API_URL = "http://localhost:8010/api/v1/tracking/logs"
 DEFAULT_DATA_SOURCE_ID = "15dc39d4-ae42-5c60-9c77-66f05dcae448"
-DEFAULT_EVENT_COUNT = 20_000
+DEFAULT_EVENT_COUNT = 24_000
 DEFAULT_LOOKBACK_HOURS = 48
-DEFAULT_EVENTS_PER_SESSION = 20
+DEFAULT_EVENTS_PER_SESSION = 4
 DEFAULT_CONCURRENCY = 4
-DEFAULT_PROFILE_COUNT = 1_000
+DEFAULT_PROFILE_COUNT = 6_000
+DEFAULT_EVENTS_PER_REQUEST = 1_000
 
 EVENT_TEMPLATES = (
     ("page_view", "GENERAL", "web", "product"),
@@ -46,7 +47,7 @@ EVENT_TEMPLATES = (
     ("support_request", "SERVICE_INDUSTRY", "web", "support"),
     ("app_open", "GENERAL", "mobile_app", "app"),
 )
-DOMAINS = ("retail", "education", "real_estate", "travel")
+DOMAINS = ("retail", "education", "real_estate", "travel", "banking", "media")
 DEVICE_PROFILES = (
     (
         "desktop",
@@ -76,6 +77,7 @@ class ApiSeedConfig:
     events_per_session: int = DEFAULT_EVENTS_PER_SESSION
     concurrency: int = DEFAULT_CONCURRENCY
     profile_count: int = DEFAULT_PROFILE_COUNT
+    events_per_request: int = DEFAULT_EVENTS_PER_REQUEST
     request_timeout_seconds: float = 10.0
     queue_drain_timeout_seconds: float = 180.0
     queue_poll_interval_seconds: float = 2.0
@@ -94,6 +96,8 @@ class ApiSeedConfig:
             raise ValueError("concurrency must be at least 1")
         if self.profile_count < 1:
             raise ValueError("profile_count must be at least 1")
+        if not 1 <= self.events_per_request <= DEFAULT_EVENTS_PER_REQUEST:
+            raise ValueError("events_per_request must be between 1 and 1000")
         if self.request_timeout_seconds <= 0:
             raise ValueError("request_timeout_seconds must be greater than zero")
         if self.queue_drain_timeout_seconds < 0:
@@ -126,6 +130,9 @@ class ApiSeedConfig:
             profile_count=int(
                 os.getenv("SEED_PROFILE_COUNT", str(DEFAULT_PROFILE_COUNT))
             ),
+            events_per_request=int(
+                os.getenv("SEED_EVENTS_PER_REQUEST", str(DEFAULT_EVENTS_PER_REQUEST))
+            ),
             request_timeout_seconds=float(
                 os.getenv("TRACKING_REQUEST_TIMEOUT_SECONDS", "10")
             ),
@@ -146,6 +153,7 @@ class ApiTrafficGenerator:
         self.config = config
         self.clock = (clock or datetime.now(timezone.utc)).astimezone(timezone.utc)
         self.rng = random.Random(config.seed)
+        self.run_id = uuid4().hex if config.seed is None else str(config.seed)
 
     def iter_sessions(self) -> Iterator[dict[str, Any]]:
         """Yield API request payloads, keeping each request user/session scoped."""
@@ -155,8 +163,9 @@ class ApiTrafficGenerator:
         while remaining:
             session_index += 1
             event_count = min(remaining, self.config.events_per_session)
-            profile_index = session_index % self.config.profile_count
-            user_id = f"api-seed-user-{profile_index:06d}"
+            profile_index = (session_index - 1) % self.config.profile_count
+            user_id = f"api-seed-{self.run_id}-user-{profile_index:06d}"
+            domain = DOMAINS[profile_index % len(DOMAINS)]
             session_id = self._identifier("session", session_index)
             device_type, user_agent = self.rng.choice(DEVICE_PROFILES)
             events = [
@@ -164,6 +173,7 @@ class ApiTrafficGenerator:
                     session_index=session_index,
                     event_index=index,
                     user_id=user_id,
+                    domain=domain,
                     session_id=session_id,
                     event_time=self.clock - timedelta(
                         seconds=self.rng.randint(0, int(lookback.total_seconds()))
@@ -192,6 +202,7 @@ class ApiTrafficGenerator:
         session_index: int,
         event_index: int,
         user_id: str,
+        domain: str,
         session_id: str,
         event_time: datetime,
         device_type: str,
@@ -204,7 +215,6 @@ class ApiTrafficGenerator:
                 "event",
                 session_index * self.config.events_per_session + event_index,
             )
-        domain = self.rng.choice(DOMAINS)
         is_conversion = event_name == "purchase"
         return {
             "event_id": event_id,
@@ -240,19 +250,30 @@ class ApiTrafficGenerator:
         }
 
 
-def _send_session(
+def _send_batch(
     tracker: TrackingLogClient,
     config: ApiSeedConfig,
-    session: dict[str, Any],
+    events: list[dict[str, Any]],
+    user_agent: str,
 ) -> dict[str, Any]:
     response = tracker.send(
         data_source_id=config.data_source_id,
-        session_id=session["session_id"],
-        user_id=session["user_id"],
-        events=session["events"],
-        user_agent=session["user_agent"],
+        session_id=None,
+        user_id=None,
+        events=events,
+        user_agent=user_agent,
     )
-    return {"event_count": len(session["events"]), "response": response}
+    if response.get("accepted") is not True:
+        raise TrackingApiError(
+            "tracking API did not accept batch: "
+            f"{response.get('filter_reason') or 'invalid acceptance response'}"
+        )
+    if response.get("event_count") != len(events):
+        raise TrackingApiError(
+            f"tracking API reported {response.get('event_count')} events for batch; "
+            f"expected {len(events)}"
+        )
+    return {"event_count": len(events), "response": response}
 
 
 def _queue_status_url(tracking_api_url: str) -> str:
@@ -309,10 +330,22 @@ def run_api_seed(config: ApiSeedConfig, *, dry_run: bool = False) -> int:
     """Generate sessions and POST them to the tracking API only."""
     sessions = list(ApiTrafficGenerator(config).iter_sessions())
     total_events = sum(len(session["events"]) for session in sessions)
+    identities = {session["user_id"] for session in sessions}
+    domains = {event["domain"] for session in sessions for event in session["events"]}
+    events_by_agent: dict[str, list[dict[str, Any]]] = {}
+    for session in sessions:
+        events_by_agent.setdefault(session["user_agent"], []).extend(session["events"])
+    batches = [
+        (events[start : start + config.events_per_request], user_agent)
+        for user_agent, events in events_by_agent.items()
+        for start in range(0, len(events), config.events_per_request)
+    ]
     LOGGER.info(
-        "Prepared %d simulated events in %d API request(s) for endpoint %s and data source %s",
+        "Prepared %d events for %d distinct identities across %d domains in %d API request(s) for endpoint %s and data source %s",
         total_events,
-        len(sessions),
+        len(identities),
+        len(domains),
+        len(batches),
         config.tracking_api_url,
         config.data_source_id,
     )
@@ -327,19 +360,15 @@ def run_api_seed(config: ApiSeedConfig, *, dry_run: bool = False) -> int:
     accepted_events = 0
     with ThreadPoolExecutor(max_workers=config.concurrency) as executor:
         futures = [
-            executor.submit(_send_session, tracker, config, session)
-            for session in sessions
+            executor.submit(_send_batch, tracker, config, batch, user_agent)
+            for batch, user_agent in batches
         ]
         for session_index, future in enumerate(as_completed(futures), start=1):
             try:
                 result = future.result()
                 accepted_events += result["event_count"]
-                LOGGER.info(
-                    "Accepted API request %d/%d (%d events)",
-                    session_index,
-                    len(futures),
-                    result["event_count"],
-                )
+                if session_index % 100 == 0 or session_index == len(futures):
+                    LOGGER.info("Accepted API requests %d/%d", session_index, len(futures))
             except TrackingApiError as exc:
                 failed += 1
                 LOGGER.error("Tracking API request failed: %s", exc)
@@ -349,9 +378,9 @@ def run_api_seed(config: ApiSeedConfig, *, dry_run: bool = False) -> int:
         accepted_events,
         failed,
     )
-    if failed == 0:
-        wait_for_tracking_queue(config)
-    return 1 if failed else 0
+    if failed:
+        return 1
+    return 0 if wait_for_tracking_queue(config) else 1
 
 
 def _parse_args() -> argparse.Namespace:
@@ -359,8 +388,10 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--events", type=int, default=None)
     parser.add_argument("--lookback-hours", type=int, default=None)
     parser.add_argument("--events-per-session", type=int, default=None)
+    parser.add_argument("--events-per-request", type=int, default=None)
     parser.add_argument("--concurrency", type=int, default=None)
     parser.add_argument("--profile-count", type=int, default=None)
+    parser.add_argument("--min-profiles", type=int, default=None)
     parser.add_argument("--tracking-url", default=None)
     parser.add_argument("--data-source-id", default=None)
     parser.add_argument("--seed", type=int, default=None)
@@ -381,6 +412,8 @@ def main() -> int:
         overrides["lookback_hours"] = args.lookback_hours
     if args.events_per_session is not None:
         overrides["events_per_session"] = args.events_per_session
+    if args.events_per_request is not None:
+        overrides["events_per_request"] = args.events_per_request
     if args.concurrency is not None:
         overrides["concurrency"] = args.concurrency
     if args.profile_count is not None:
@@ -396,9 +429,16 @@ def main() -> int:
     if args.no_queue_wait:
         overrides["queue_drain_timeout_seconds"] = 0
     if overrides:
-        from dataclasses import replace
-
         config = replace(config, **overrides)
+    if args.min_profiles is not None:
+        if args.min_profiles < 1:
+            raise ValueError("--min-profiles must be at least 1")
+        profile_count = max(config.profile_count, args.min_profiles)
+        config = replace(
+            config,
+            profile_count=profile_count,
+            event_count=max(config.event_count, profile_count * config.events_per_session),
+        )
     logging.basicConfig(
         level=logging.INFO if args.verbose else logging.WARNING,
         format="%(asctime)s %(levelname)s %(message)s",

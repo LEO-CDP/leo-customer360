@@ -481,7 +481,7 @@ service gate below.
 | [customer360-backend/analytics/source_analytics/tracking_log_aggregation.py](../../customer360-backend/analytics/source_analytics/tracking_log_aggregation.py) | Process MinIO `events/` and `_processed/` state, compact Silver data, reconcile counts, and retain Redis as cache only | 1, 3 |
 | [customer360-backend/analytics/dagster_defs.py](../../customer360-backend/analytics/dagster_defs.py) | Register compaction, reconciliation, backfill, and replay jobs/schedules | 3, 4 |
 | [customer360-database/database-schema.sql](../../customer360-database/database-schema.sql) | Keep tracking state out of the public API database; remove raw-event table only in Phase 6 | 1, 6 |
-| [customer360-database/migrations/001_harden_tenant_rls_policies.sql](../../customer360-database/migrations/001_harden_tenant_rls_policies.sql) | Keep the public tracking service outside PostgreSQL tenant-control paths | 1 |
+| [Tenant RLS schema](../../customer360-database/database-schema.sql) | Keep the public tracking service outside PostgreSQL tenant-control paths | 1 |
 | [customer360-api/core/config.py](../../customer360-api/core/config.py) | Add event backend, query engine, time-range, bucket, and feature-flag settings | 2, 3, 5 |
 | [customer360-event-api/core/config.py](../../customer360-event-api/core/config.py) | Add envelope, bucket, compression, request-limit, Redis idempotency, and processed-state settings | 1 |
 | [customer360-backend/analytics/source_analytics/](../../customer360-backend/analytics/source_analytics/) | Add state-marker handling, compaction, quarantine, reconciliation, and backfill modules | 3, 4 |

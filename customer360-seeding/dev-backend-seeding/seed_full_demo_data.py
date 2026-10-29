@@ -104,7 +104,9 @@ SUPPORTED_PROFILE_DOMAINS = (
     "real_estate",
     "healthcare",
     "education",
+    "banking",
 )
+RESET_DEMO_DOMAINS = {"retail", "education", "real_estate", "travel", "banking", "media"}
 
 
 def _table(name: str) -> str:
@@ -401,7 +403,8 @@ def seed_campaign_experiments(cursor, campaign_ids: dict) -> dict[str, list[str]
         SELECT segment_id
         FROM {_table('cdp_segments')}
         WHERE tenant_id = %s AND is_active = TRUE AND status_code = 1
-        ORDER BY segment_name, segment_id
+        ORDER BY CASE WHEN segment_tag IN ('churn_risk', 'champions') THEN 0 ELSE 1 END,
+                 segment_name, segment_id
         LIMIT 2;
         """,
         (DEMO_TENANT_ID,),
@@ -1887,6 +1890,14 @@ class FullDemoSeeder:
         seed_graph_edges(cursor, crm_ids, detail_profiles)
         enrich_master_profiles(cursor, master_profiles)
         master_profiles = fetch_master_profiles(cursor)
+        if os.environ.get("CIR_VALIDATE_DEMO_COVERAGE") == "1":
+            domains = {profile["domain"] for profile in master_profiles}
+            missing = RESET_DEMO_DOMAINS - domains
+            if len(master_profiles) <= 5000 or missing:
+                raise RuntimeError(
+                    f"Demo requires more than 5000 resolved profiles in all six domains; "
+                    f"found {len(master_profiles)}, missing domains: {sorted(missing)}"
+                )
         archetypes = seed_persona_archetypes(cursor)
         personas_computed = seed_customer_personas(cursor, master_profiles, archetypes)
         seed_content_items(cursor)
@@ -1923,6 +1934,7 @@ class FullDemoSeeder:
 
 def main() -> None:
     """Run the existing full-demo CLI without changing its launch commands."""
+    logging.getLogger("leo_customer360_dao.agentic_engines.persona_engine").setLevel(logging.WARNING)
     if len(sys.argv) > 1 and sys.argv[1] == "--new-data":
         raise SystemExit(
             "--new-data moved to customer360-seeding/seed_api_data.py; "

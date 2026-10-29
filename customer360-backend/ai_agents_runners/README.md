@@ -101,8 +101,10 @@ profile receives no recommendations while other profiles continue processing.
 The configured provider, model, dimension, embedding contract version, and
 canonical source text are stored with each content vector. Vectors are regenerated when the
 provider/model changes or content title, summary, domain, type, or segment tags
-change. Apply migration `008_content_embedding_contract.sql` to preserve
-384/768-dimensional vectors and clear unsupported sizes for lazy refresh.
+change. The canonical database schema supports 384/768-dimensional vectors.
+For older databases, the consolidated
+[legacy upgrade](../../customer360-database/legacy-upgrade.sql) clears
+unsupported sizes for lazy refresh.
 
 For Gemini, set `DOCS_EMBEDDING_PROVIDER=gemini` and configure
 `DOCS_GEMINI_API_KEY`, `DOCS_GEMINI_EMBEDDING_MODEL`, and

@@ -10,14 +10,14 @@ END;
 $$;
 
 SELECT pg_temp.assert_true(
-    (SELECT count(*) = 13
+    (SELECT count(*) = 12
         AND bool_and(
             (status = 'ACTIVE')
             = (agent_code IN ('product_recommendation', 'eligibility_policy'))
         )
         AND bool_and(status IN ('ACTIVE', 'INACTIVE'))
      FROM customer360.cdp_ai_agents),
-    'Fresh bootstrap has active recommendation and eligibility agents plus 11 inactive templates/service agents');
+    'Fresh bootstrap has active recommendation and eligibility agents plus 10 inactive templates/service agents');
 SELECT pg_temp.assert_true(
     NOT EXISTS (
         SELECT 1 FROM customer360.cdp_profile_attributes attribute

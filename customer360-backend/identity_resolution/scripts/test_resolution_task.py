@@ -27,6 +27,7 @@ load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+logging.getLogger("leo_customer360_dao.agentic_engines.persona_engine").setLevel(logging.WARNING)
 
 DB_HOST = os.environ.get("DB_HOST", "localhost")
 DB_NAME = os.environ.get("DB_NAME", "customer360")
@@ -38,6 +39,7 @@ BATCH_SIZE = int(os.environ.get("CIR_BATCH_SIZE", "5000"))
 
 # Must match customer360-seeding/dev-backend-seeding/init_sample_data.py
 DEMO_TENANT_ID = "11111111-1111-1111-1111-111111111111"
+DEMO_DOMAINS = ("retail", "education", "real_estate", "travel", "banking", "media")
 
 
 def _table(name: str) -> str:
@@ -54,6 +56,28 @@ def _short_hash(value):
 def print_summary(cursor) -> int:
     cursor.execute(
         f"""
+        SELECT domain, COUNT(*) AS profile_count
+        FROM {_table('cdp_master_profiles')}
+        WHERE tenant_id = %s
+        GROUP BY domain
+        ORDER BY domain;
+        """,
+        (DEMO_TENANT_ID,),
+    )
+    domain_counts = {row["domain"]: row["profile_count"] for row in cursor.fetchall()}
+    total = sum(domain_counts.values())
+    print(f"\n=== {total} master profile(s) resolved for tenant {DEMO_TENANT_ID} ===")
+    for domain, count in domain_counts.items():
+        print(f"- {domain}: {count}")
+    if os.environ.get("CIR_VALIDATE_DEMO_COVERAGE") == "1":
+        missing = [domain for domain in DEMO_DOMAINS if not domain_counts.get(domain)]
+        if total <= 5000 or missing:
+            raise RuntimeError(
+                f"Demo requires more than 5000 resolved profiles in all six domains; "
+                f"found {total}, missing domains: {missing}"
+            )
+    cursor.execute(
+        f"""
         SELECT m.master_profile_id, m.domain, m.full_name, m.email, m.phone_number,
                dp.domain_attributes ->> 'national_id' AS national_id,
                m.device_ids, m.advertising_ids, m.cookie_ids,
@@ -66,13 +90,14 @@ def print_summary(cursor) -> int:
            AND dp.master_profile_id = m.master_profile_id
            AND dp.domain_id = d.domain_id
         WHERE m.tenant_id = %s
-        ORDER BY m.domain, m.created_at;
+        ORDER BY m.domain, m.created_at
+        LIMIT 10;
         """,
         (DEMO_TENANT_ID,),
     )
     masters = cursor.fetchall()
 
-    print(f"\n=== {len(masters)} master profile(s) resolved for tenant {DEMO_TENANT_ID} ===")
+    print("\n=== Up to 10 sample master profiles ===")
     print("(full_name/email/phone_number/national_id are SHA-256 hashes -- no plaintext PII is stored)")
     print("(persona_name is the readable, non-PII stand-in required whenever is_hashed = TRUE)")
     for m in masters:
@@ -99,7 +124,7 @@ def print_summary(cursor) -> int:
     print("\n=== raw profile status_code counts (3 = processed) ===")
     for row in cursor.fetchall():
         print(f"- status_code={row['status_code']}: {row['cnt']}")
-    return len(masters)
+    return total
 
 
 def main() -> None:

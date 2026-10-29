@@ -314,7 +314,7 @@ erDiagram
 
 `cdp_ai_decision_log` is the single table behind every eval in §9. `outcome` is
 back-filled from reviewer action or downstream event. Apply the same tenant RLS
-policy pattern as `migrations/001_harden_tenant_rls_policies.sql`.
+policy pattern as `customer360-database/legacy-upgrade.sql` (historical step 001).
 
 ---
 

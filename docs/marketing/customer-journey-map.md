@@ -118,8 +118,8 @@ The database enforces this exact vocabulary via `CHECK` constraints across:
 Schema and migration files:
 
 - [`database-schema.sql`](../../customer360-database/database-schema.sql) — canonical schema definition.
-- [`017_agent_campagn_journey.sql`](../../customer360-database/migrations/017_agent_campagn_journey.sql) — adds `journey_stage` to campaigns and AI agents, creates `crm_campaign_agent`, normalizes profile `lifecycle_stage` values across tenants under RLS, and seeds `LIFECYCLE_BEHAVIOR_*_BASE` persona scoring baselines.
-- [`018_journey_report.sql`](../../customer360-database/migrations/018_journey_report.sql) — creates `cdp_journey_metric`, `cdp_journey_metric_domain`, `cdp_journey_metric_daily`, `refresh_journey_metrics_pg(p_tenant, p_date)`, and `vw_journey_stage_report`.
+- [Legacy upgrade, step 017](../../customer360-database/legacy-upgrade.sql) — adds `journey_stage` to campaigns and AI agents, creates `crm_campaign_agent`, normalizes profile `lifecycle_stage` values across tenants under RLS, and seeds `LIFECYCLE_BEHAVIOR_*_BASE` persona scoring baselines.
+- [Legacy upgrade, step 018](../../customer360-database/legacy-upgrade.sql) — creates `cdp_journey_metric`, `cdp_journey_metric_domain`, `cdp_journey_metric_daily`, `refresh_journey_metrics_pg(p_tenant, p_date)`, and `vw_journey_stage_report`.
 
 ---
 

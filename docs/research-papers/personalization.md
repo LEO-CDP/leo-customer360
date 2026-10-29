@@ -57,12 +57,12 @@ scaffold.
 The current workflow:
 
 - selects active, tenant-scoped workflow steps in execution order from
-  [cdp_agent_workflow](../../customer360-database/database-schema.sql#L2885);
+  [cdp_agent_workflow](../../customer360-database/database-schema.sql#L3102);
 - supports API-triggered runs and cron-triggered runs;
 - dispatches active `ranking_recommendation` agents for eligible segment
   members;
 - ranks explicitly selected, tenant-owned
-  [cdp_content_items](../../customer360-database/database-schema.sql#L2586)
+  [cdp_content_items](../../customer360-database/database-schema.sql#L2708)
   using tags, semantic similarity, or a hybrid score;
 - persists run status and ranked items per profile; and
 - serves the latest successful persisted results through the Customer 360 API.
@@ -76,7 +76,7 @@ persona model. The flow was checked against the
 [workflow API](../../customer360-api/core/routers/agent_workflow_api.py),
 [Dagster definitions](./dagster_defs.py), [runner queries](./runner.py),
 [ranking SQL](./agent_pipeline/agent_types/ranking_recommendation.py), and the
-[workflow/recommendation migration](../../customer360-database/migrations/006_cdp_agent_workflow.sql).
+[workflow/recommendation legacy upgrade](../../customer360-database/legacy-upgrade.sql).
 The sample below is synthetic and adapted from the unit-test fixtures.
 
 ### 1.2.1 Implementation Method
@@ -85,9 +85,9 @@ The sample below is synthetic and adapted from the unit-test fixtures.
    Dagster; the cron sensor submits a scheduled run. The master job passes its
    Dagster run ID through execution so persisted recommendations can be traced
    to that run. The runner joins
-   [cdp_agent_workflow](../../customer360-database/database-schema.sql#L2885)
+   [cdp_agent_workflow](../../customer360-database/database-schema.sql#L3102)
    to
-   [cdp_ai_agents](../../customer360-database/database-schema.sql#L1909),
+   [cdp_ai_agents](../../customer360-database/database-schema.sql#L1998),
    selects active workflow steps and active agents, applies the requested
    tenant/segment scope, and orders steps by `execution_order`. Cron runs also
    match the effective step-or-agent schedule. Only
@@ -212,22 +212,22 @@ The orchestration is implemented in [dagster_defs.py](./dagster_defs.py) and
    segment. The cron sensor submits a run that checks eligible workflow
    schedules. Dagster assigns a run ID; recommendation records use this same ID.
 2. **Build the execution plan.** The runner joins active
-   [cdp_agent_workflow](../../customer360-database/database-schema.sql#L2885)
+   [cdp_agent_workflow](../../customer360-database/database-schema.sql#L3102)
    steps to active registered
-   [cdp_ai_agents](../../customer360-database/database-schema.sql#L1909),
+   [cdp_ai_agents](../../customer360-database/database-schema.sql#L1998),
    applies the requested tenant and segment scope, and orders steps by
    `execution_order`. Cron runs use the workflow schedule override when present,
    otherwise the registered agent's schedule. This path executes only
    `ranking_recommendation` steps; other model types are logged and skipped.
 3. **Select the audience.** For each tenant/segment pair, the runner loads
    active Customer 360 master profiles (the unified customer profiles) from
-   [cdp_master_profiles](../../customer360-database/database-schema.sql#L685)
+   [cdp_master_profiles](../../customer360-database/database-schema.sql#L765)
    that belong to the active
-   [cdp_segments](../../customer360-database/database-schema.sql#L2833)
+   [cdp_segments](../../customer360-database/database-schema.sql#L3042)
    row. A profile belongs to the segment when its `segmentation_tags` contains
    the segment's `segment_tag`. The tenant ID scopes profile selection,
    candidate reads, and all writes; tenant ownership is rooted in
-   [sys_tenant](../../customer360-database/database-schema.sql#L34).
+   [sys_tenant](../../customer360-database/database-schema.sql#L49).
 4. **Prepare ranking inputs.** The `tags` strategy does not require embeddings.
    For `semantic` and `hybrid`, the runner checks that each selected candidate
    belongs to the tenant and is active. It generates or refreshes a canonical
@@ -247,9 +247,9 @@ The orchestration is implemented in [dagster_defs.py](./dagster_defs.py) and
    `minimum_score`, and returns at most `top_k` items per profile in the
    existing deterministic order.
 6. **Persist the outcome.** The runner creates or resets a `RUNNING` row in
-   [cdp_profile_recommendation_runs](../../customer360-database/database-schema.sql#L3864),
+   [cdp_profile_recommendation_runs](../../customer360-database/database-schema.sql#L5009),
    then bulk-upserts each batch of per-profile ranked items into
-   [cdp_profile_recommendations](../../customer360-database/database-schema.sql#L3882).
+   [cdp_profile_recommendations](../../customer360-database/database-schema.sql#L5027).
    On success, it marks the run `SUCCEEDED` and invalidates the tenant's
    recommendation cache. On failure, it marks the run `FAILED`, removes partial
    rows for that run, and propagates the error.
@@ -351,7 +351,7 @@ PYTHONPATH=.:../customer360-dao/src pytest -q \
 The test cases are in
 [test_ranking_recommendation.py](./tests/test_ranking_recommendation.py).
 
-# 4. Agent Registry: [cdp_ai_agents](../../customer360-database/database-schema.sql#L1909)
+# 4. Agent Registry: [cdp_ai_agents](../../customer360-database/database-schema.sql#L1998)
 
 Agent definitions are global and use `agent_code` as their stable primary key.
 For workflow selection, the runner uses the agent code, `model_type`, `status`,
@@ -369,13 +369,13 @@ content/product ranking. The seeded recommendation agent is
 `product_recommendation`; its current lifecycle status must still be checked
 at runtime rather than assumed from seed data.
 
-# 5. Segment Workflow: [cdp_agent_workflow](../../customer360-database/database-schema.sql#L2885)
+# 5. Segment Workflow: [cdp_agent_workflow](../../customer360-database/database-schema.sql#L3102)
 
 Workflow rows are tenant-owned and attach one registered agent from
-[cdp_ai_agents](../../customer360-database/database-schema.sql#L1909) to one
+[cdp_ai_agents](../../customer360-database/database-schema.sql#L1998) to one
 tenant-owned
-[cdp_segments](../../customer360-database/database-schema.sql#L2833) row under
-[sys_tenant](../../customer360-database/database-schema.sql#L34).
+[cdp_segments](../../customer360-database/database-schema.sql#L3042) row under
+[sys_tenant](../../customer360-database/database-schema.sql#L49).
 
 | Field | Purpose |
 | --- | --- |
@@ -394,7 +394,7 @@ to cron runs.
 ## 6.1 Candidate Catalog and Tenant Checks
 
 Candidate IDs refer to
-[cdp_content_items](../../customer360-database/database-schema.sql#L2586).
+[cdp_content_items](../../customer360-database/database-schema.sql#L2708).
 Each row belongs to a tenant and stores its item type (`news`, `video`,
 `product`, or `article`), display and call-to-action fields, segment tags,
 status, and publication metadata.
@@ -470,7 +470,7 @@ to be `openai` or `gemini`. The runner supports 384- and 768-dimensional
 vectors. For selected content, it generates or refreshes a vector when the
 canonical text, provider/model, contract version, or dimension is stale.
 Migration
-[`008_content_embedding_contract.sql`](../../customer360-database/migrations/008_content_embedding_contract.sql)
+[the legacy embedding upgrade](../../customer360-database/legacy-upgrade.sql)
 preserves legacy 384- and 768-dimensional vectors and clears other sizes.
 
 Products are ranked through their linked content items in the current
@@ -480,9 +480,9 @@ product ranking.
 ## 6.5 Persistence and Failure Handling
 
 The runner records run status in
-[cdp_profile_recommendation_runs](../../customer360-database/database-schema.sql#L3864)
+[cdp_profile_recommendation_runs](../../customer360-database/database-schema.sql#L5009)
 and per-profile ranked items in
-[cdp_profile_recommendations](../../customer360-database/database-schema.sql#L3882).
+[cdp_profile_recommendations](../../customer360-database/database-schema.sql#L5027).
 The read API serves these persisted records; it does not run ranking during the
 request.
 
@@ -535,16 +535,16 @@ tenant-scoped query is in
 The current ranking contract reads only:
 
 - the profile's domain and segmentation tags from
-  [cdp_master_profiles](../../customer360-database/database-schema.sql#L685);
+  [cdp_master_profiles](../../customer360-database/database-schema.sql#L765);
 - segment membership from
-  [cdp_segments](../../customer360-database/database-schema.sql#L2833); and
+  [cdp_segments](../../customer360-database/database-schema.sql#L3042); and
 - explicitly selected content candidates from
-  [cdp_content_items](../../customer360-database/database-schema.sql#L2586).
+  [cdp_content_items](../../customer360-database/database-schema.sql#L2708).
 
 It does not currently use persona-match records from
-[cdp_customer_personas](../../customer360-database/database-schema.sql#L1475)
+[cdp_customer_personas](../../customer360-database/database-schema.sql#L1562)
 or shared persona definitions from
-[cdp_persona_archetypes](../../customer360-database/database-schema.sql#L1430).
+[cdp_persona_archetypes](../../customer360-database/database-schema.sql#L1517).
 Additional analytics or persona fields stored on a master profile are also
 outside the current ranking input contract.
 
@@ -581,6 +581,6 @@ handling define the operational boundaries of this implementation.
 
 - [AI runner orchestration](./README.md)
 - [Workflow schema](../../customer360-dao/src/leo_customer360_dao/models/agent_workflow.py)
-- [Workflow migration](../../customer360-database/migrations/006_cdp_agent_workflow.sql)
+- [Workflow legacy upgrade](../../customer360-database/legacy-upgrade.sql)
 - [Agent registry schema](../../customer360-database/database-schema.sql)
 - [Content item model](../../customer360-dao/src/leo_customer360_dao/models/content.py)

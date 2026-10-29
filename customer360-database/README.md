@@ -1,7 +1,7 @@
 # Customer 360 Database
 
 This directory contains the PostgreSQL schema, seed data, materialized views,
-and forward migrations for the Customer 360 platform.
+and consolidated legacy upgrade for the Customer 360 platform.
 
 The canonical application DDL is [database-schema.sql](database-schema.sql).
 It creates the `customer360` schema, required extensions, tenant-scoped tables,
@@ -9,6 +9,15 @@ foreign keys, indexes, triggers, graph partitions, connector configuration,
 and row-level security policies. Keep application queries and DAO models
 aligned with this file; do not infer table or column names from older planning
 documents or backups.
+
+## Contents
+
+- [Schema inventory and capability summary](#database-schema-by-platform-capability)
+- [Database requirements](#database-requirements) and [installation](#installation-order)
+- [Initialization and seeds](#initialization-and-seeds)
+- [Detailed schema notes](#detailed-schema-notes)
+- [Tenant isolation](#tenant-isolation) and [database behaviors](#important-database-behaviors)
+- [Legacy upgrades](#legacy-upgrades) and [verification queries](#verification-queries)
 
 ## Database Requirements
 
@@ -34,12 +43,14 @@ For a fresh database, run the SQL files in this order:
 2. `init-cdp-ai-agents.sql`
 3. `init-core-database.sql`
 4. `data-view-for-llm.sql`
-5. `migrations/*.sql`, in filename order
+
+For an existing database, run [legacy-upgrade.sql](legacy-upgrade.sql) after
+these files. The setup helpers run it automatically; fresh databases skip the
+historical steps using the bootstrap marker.
 
 The deployment helper [run-sql.sh](../deployments/postgres/run-sql.sh) applies
 that order automatically after the repository's PostgreSQL bootstrap scripts.
-It runs `psql` with `ON_ERROR_STOP=1`, so the first failed script stops the
-deployment.
+It runs `psql` with `ON_ERROR_STOP=1`, so the first failed script stops the deployment.
 
 Example for a local database:
 
@@ -48,17 +59,16 @@ psql -v ON_ERROR_STOP=1 -d customer360 -f customer360-database/database-schema.s
 psql -v ON_ERROR_STOP=1 -d customer360 -f customer360-database/init-cdp-ai-agents.sql
 psql -v ON_ERROR_STOP=1 -d customer360 -f customer360-database/init-core-database.sql
 psql -v ON_ERROR_STOP=1 -d customer360 -f customer360-database/data-view-for-llm.sql
-for migration in customer360-database/migrations/*.sql; do
-	psql -v ON_ERROR_STOP=1 -d customer360 -f "$migration"
-done
+# Required for an existing database; harmless and fast for a fresh database.
+psql -v ON_ERROR_STOP=1 -d customer360 -f customer360-database/legacy-upgrade.sql
 ```
 
-`database-schema.sql` is idempotent for normal object creation, but it is not
-a replacement for migrations on an existing volume. Review migration impact
-before running against production data. Several migrations deliberately fail
-when existing data cannot be safely backfilled or constrained.
+`database-schema.sql` is idempotent for normal object creation, but existing
+volumes also need the historical data and compatibility upgrades. Back up the
+database and review the [legacy upgrade](#legacy-upgrades) before production
+execution; it can fail when existing data cannot be safely constrained.
 
-Migration `008_content_embedding_contract.sql` makes content tags non-null
+The historical embedding upgrade makes content tags non-null
 (converting existing nulls to empty arrays), supports 384- and 768-dimensional
 recommendation vectors with size-specific HNSW indexes, adds embedding
 source/version metadata, and clears unsupported vector sizes for lazy
@@ -68,7 +78,7 @@ ranking; current ranking uses linked content embeddings.
 ## Initialization And Seeds
 
 `init-cdp-ai-agents.sql` is the unified AI-agent registry seed. It creates
-11 core agents (one per execution type) and two prompt-backed agents for the
+10 core agents (one per execution type) and two prompt-backed agents for the
 notification and segment endpoints. `product_recommendation` and
 `eligibility_policy` are active because their runner handlers are implemented;
 the remaining new entries are `INACTIVE`. Run it before
@@ -79,15 +89,15 @@ to satisfy ownership metadata.
 The seed is atomic and insert-only on conflicts: rerunning it preserves deployed
 configuration, activation state, feature definitions and append-only prompt
 history. It does **not** repair existing rows. Upgrade existing databases using
-reviewed migrations and the versioned prompt publishing API. Migration
-`013_remove_graph_ml_agent_type.sql` removes the retired graph agent and model
+the consolidated upgrade and the versioned prompt publishing API. Historical
+step `013` removes the retired graph agent and model
 type from existing databases; it aborts if workflows or profile attributes
-still reference that agent. Migration `014_activate_eligibility_policy.sql`
+still reference that agent. Step `014`
 activates the implemented rules-engine handler on existing inactive seed rows
-without overriding other operator-managed lifecycle states. Migration
-`015_remove_semantic_embedding_agent_type.sql` removes the semantic-profile seed
+without overriding other operator-managed lifecycle states. Step
+`015` removes the semantic-profile seed
 and model type; it aborts if workflows or profile attributes still reference
-that agent. Migration `016_add_unclassified_profile_domain.sql` registers `_`
+that agent. Step `016` registers `_`
 (`Unclassified / Not set`), makes it the default for master/raw profile
 domains, and repairs legacy null, empty, or `unknown` profile domains without
 reclassifying valid business domains.
@@ -178,19 +188,367 @@ boolean; consent for email or another provider is never inferred.
 - seeds persona scoring configuration and other reference data; and
 - prepares the tenant context used by RLS-protected inserts.
 
-`data-view-for-llm.sql` creates the LLM-oriented materialized views after the
-base tables exist. It currently creates:
+`data-view-for-llm.sql` creates two LLM-oriented materialized views after the
+base tables exist:
 
 - `customer360.mv_customer_transactions`;
-- `customer360.mv_customer_engagements`; and
-- `customer360.mv_customer_360_overview`.
+- `customer360.mv_customer_engagements`.
 
 These are derived projections, not the source of truth. Refresh them after
 large profile, transaction, or interaction loads. Use `REFRESH MATERIALIZED
 VIEW CONCURRENTLY` only when the required unique indexes and deployment
-conditions are present.
+conditions are present. The combined `mv_customer_360_overview` is mentioned
+only as an optional idea in the script; it is not created by it. Materialized
+views persist query results and do not inherit source-table RLS at read time:
+restrict direct access and enforce tenant isolation in the consuming service.
 
-## Schema Areas
+## Database schema by platform capability
+
+This inventory documents [database-schema.sql](database-schema.sql). It
+counts a partitioned parent as one logical table and counts its partitions
+separately. Counts describe the checked-in definitions, not the state of a
+particular deployed database, which can differ because of migrations.
+
+| Scope | Logical tables | Child partitions | Ordinary views | Materialized views |
+| --- | ---: | ---: | ---: | ---: |
+| Canonical `customer360` DDL | **71** | **15** | **3** | **0** |
+| Separate [`data-view-for-llm.sql`](data-view-for-llm.sql) | 0 | 0 | 0 | 2 |
+| Separate [`leo_ads` DDL](../customer360-promotions/sql-scripts/db-schema-init.sql) | 22 | 2 | 1 | 0 |
+| **Combined, if all scripts are applied** | **93** | **17** | **4** | **2** |
+
+The canonical DDL therefore declares 86 table relations when the 15 physical
+partitions are included. Views, materialized views, indexes, and functions
+are not counted as tables.
+
+The following capability counts cover **distinct `customer360` logical tables
+explicitly listed in that capability's inventory**, not every table the
+capability may use. A table shared by multiple groups is counted once in each
+group but once in the 71-table unique total. Consequently, the 75 table
+references in the capability rows are not additive. The promotions group
+has no tables in the canonical DDL; its independently defined 22 `leo_ads`
+tables are shown separately below.
+
+| Capability | `customer360` tables | `customer360` views |
+| --- | ---: | ---: |
+| [Customer 360](#customer-360) | 11 | 0 |
+| [Identity Resolution (CIR)](#identity-resolution-cir) | 5 | 0 |
+| [Persona Resolution Engine](#persona-resolution-engine) | 6 | 0 |
+| [Identity Graph](#identity-graph) | 3 | 0 |
+| [Event Tracking & Web SDK](#event-tracking--web-sdk) | 3 | 0 |
+| [Segmentation & IAB Tags](#segmentation--iab-tags) | 4 | 0 |
+| [Analytics](#analytics) | 4 | 2 |
+| [REST & MCP APIs](#rest--mcp-apis) | 0 | 0 |
+| [Multi-tenancy & Security](#multi-tenancy--security) | 6 | 0 |
+| [Authentication & RBAC](#authentication--rbac) | 6 | 0 |
+| [Admin UI](#admin-ui) | 5 | 1 |
+| [Campaign Workflow Activation](#campaign-workflow-activation) | 11 | 0 |
+| [Ad Audience Synchronization](#ad-audience-synchronization) | 1 | 0 |
+| [AI Campaign Planning](#ai-campaign-planning) | 2 | 0 |
+| [Promotions API](#promotions-api) | 0 | 0 |
+| [Vector Search & Embeddings](#vector-search--embeddings) | 4 | 0 |
+| [Customer Scoring Catalog](#customer-scoring-catalog) | 4 | 0 |
+
+All objects below are in the `customer360` schema unless explicitly marked
+otherwise. Object names link to their definitions; consult the SQL for
+**all columns, types, defaults, keys, checks, indexes, triggers, and subsequent
+`ALTER TABLE` statements**. Constraints and indexes can appear elsewhere in
+the file, including the tenant-aware foreign-key and RLS blocks near its end.
+The [schema diagrams](full-schema-diagram.md) provide supplementary relationship
+visualizations; use the SQL for the current inventory. Product capability
+status does not imply that every feature is implemented in PostgreSQL.
+
+### Customer 360
+
+**Inventory: 11 tables; 0 views.**
+
+| Object | Purpose and key relationships |
+| --- | --- |
+| [`cdp_master_profiles`](database-schema.sql#L765) | Golden customer record with identity, demographics, consent, lifecycle, tags, and scores. Partial unique indexes enforce per-tenant non-null email and phone uniqueness. |
+| [`cdp_domain_profiles`](database-schema.sql#L1020) | Domain-specific attributes and analytics linked to a master profile; the domain-attribute catalog trigger registers new keys. |
+| [`cdp_customer_valuation`](database-schema.sql#L4847) | Tenant-, profile-, domain-, date-, and model-scoped customer valuation snapshots. |
+| [`crm_customer_contacts`](database-schema.sql#L2636) | Customer interactions associated with master profiles. |
+| [`crm_transactions`](database-schema.sql#L2650) | Cross-domain transaction facts; `master_profile_id` can be null until identity resolution. |
+| [`crm_lead`](database-schema.sql#L630), [`crm_lead_source`](database-schema.sql#L650) | Leads and their sources. |
+| [`crm_contact`](database-schema.sql#L665), [`crm_account`](database-schema.sql#L685), [`crm_opportunity`](database-schema.sql#L702), [`crm_industry`](database-schema.sql#L722) | CRM contacts, accounts, opportunities, and industries. |
+
+The customer timeline is assembled from profiles, interactions, transactions,
+and event data; there is no dedicated timeline table in this DDL.
+
+### Identity Resolution (CIR)
+
+**Inventory: 5 tables; 0 views.**
+
+| Object | Purpose and key relationships |
+| --- | --- |
+| [`cdp_raw_profiles_stage`](database-schema.sql#L1309) | Inbound raw identities and event-derived data awaiting processing. |
+| [`cdp_profile_links`](database-schema.sql#L1449) | Raw-to-master links with matching and unmerge lifecycle metadata. |
+| [`cdp_identity_index`](database-schema.sql#L2471) | Normalized identifier lookup for matching. |
+| [`cdp_profile_merge_history`](database-schema.sql#L2578) | Source and target snapshots and history of merges. |
+| [`cdp_profile_attributes`](database-schema.sql#L2272) | Attribute and matching metadata shared with segmentation and scoring. |
+
+The matching engine and S3 event projections are implemented outside this SQL;
+the DDL also enables `pg_trgm` and `fuzzystrmatch` for fuzzy matching.
+
+### Persona Resolution Engine
+
+**Inventory: 6 tables; 0 views.**
+
+| Object | Purpose and key relationships |
+| --- | --- |
+| [`cdp_persona_archetypes`](database-schema.sql#L1517) | Tenant/domain archetypes, 768-dimensional centroids, component scores, and matched-profile count. |
+| [`cdp_customer_personas`](database-schema.sql#L1562) | Versioned profile-to-archetype assignments and scores. |
+| [`cdp_persona_features`](database-schema.sql#L1726) | Input signals for a persona assignment. |
+| [`cdp_persona_score_details`](database-schema.sql#L1757) | Component scores, weights, formulas, and explanations. |
+| [`cdp_persona_history`](database-schema.sql#L1782) | Persona change history. |
+| [`cdp_persona_config`](database-schema.sql#L1812) | Global typed configuration for persona scoring. |
+
+The three persona detail tables are linked through `persona_id` and do not
+themselves carry `tenant_id`; access must be scoped through the owning
+tenant's persona rather than treated as independently tenant-filtered tables.
+The archetype count is maintained by a trigger on persona assignments.
+
+### Identity Graph
+
+**Inventory: 3 logical tables; 15 child partitions; 0 views.**
+
+| Object | Purpose and key relationships |
+| --- | --- |
+| [`cdp_relation_types`](database-schema.sql#L2608) | Global vocabulary of profile relationship types. |
+| [`cdp_relations`](database-schema.sql#L2617) | Typed relations between master profiles. |
+| [`graph_edges`](database-schema.sql#L3260) | General-purpose tenant-scoped edges between typed IDs, list-partitioned by `relation`; the 15 physical partitions are listed under [Graph storage](#graph-storage). |
+
+Raw-to-master identity links also appear in `cdp_profile_links`; not every
+graph edge is a declared foreign-key relationship. Query through the parent
+table and apply tenant context.
+
+### Event Tracking & Web SDK
+
+**Inventory: 3 tables; 0 views.**
+
+| Object | Purpose and key relationships |
+| --- | --- |
+| [`cdp_event_catalog`](database-schema.sql#L1905) | Global cross-domain event vocabulary. |
+| [`sys_data_source`](database-schema.sql#L2504) | Tenant inbound source and connector configuration, including sensitive access tokens. |
+| [`cdp_raw_profiles_stage`](database-schema.sql#L1309) | Staged event-derived identity and attribution fields for downstream processing. |
+
+The Web SDK, Redis Streams handoff, and S3/MinIO event storage are not tables
+in this schema. Tracking endpoints validate and sanitize input before
+asynchronous handoff; they do not connect directly to PostgreSQL.
+
+### Segmentation & IAB Tags
+
+**Inventory: 4 tables; 0 views.**
+
+| Object | Purpose and key relationships |
+| --- | --- |
+| [`cdp_segments`](database-schema.sql#L3042) | Tenant segment rules, generated SQL, processing metadata, counts, and audience tags. |
+| [`cdp_audience_tags`](database-schema.sql#L2983) | Global IAB Audience Taxonomy 1.1 tag hierarchy. |
+| [`cdp_agent_workflow`](database-schema.sql#L3102) | Ordered agent configuration and candidate content IDs per tenant and segment. |
+| [`crm_segment_sync_runs`](database-schema.sql#L3805) | Segment synchronization execution records. |
+
+The visual query builder, AI drafting, and scheduling are application/backend
+features; segment rules and workflow configuration are persisted here.
+
+The core seed creates one default-tenant baseline segment for every
+`sys_domain` row, including `_`, with tag `domain_<domain_code>` and a rule
+matching profiles in that domain. Re-running the core seed adds segments for
+new catalog domains without overwriting existing domain segments. A tag
+already assigned to a different domain causes an explicit error. These rows
+are not automatically created for other tenants or when a domain is added
+between seed runs. Membership counts and profile tags are updated by the
+normal segment recomputation job or API, not by inserting the seed rows.
+For nonstandard catalog codes, the SQL rule encodes the domain value so it
+remains compatible with segment SQL safety checks; the editable JSON rule
+retains the original domain code.
+
+To check domain coverage, tenant isolation, and repeatable seeding on a
+disposable database initialized with the schema and both seeds:
+
+```bash
+psql -v ON_ERROR_STOP=1 -d customer360_test \
+    -f customer360-database/tests/domain_segments.sql
+```
+
+### Analytics
+
+**Inventory: 4 tables; 2 ordinary views.**
+
+| Object | Purpose and key relationships |
+| --- | --- |
+| [`crm_campaign_performance_daily`](database-schema.sql#L510) | Daily campaign performance facts. |
+| [`vw_campaign_performance_metrics`](database-schema.sql#L544) | Campaign-level spend, funnel metrics, CPA, and ROAS. |
+| [`cdp_journey_metric`](database-schema.sql#L4227) | Global journey KPI definitions and business-model applicability. |
+| [`cdp_journey_metric_domain`](database-schema.sql#L4301) | General and domain-specific KPI mappings. |
+| [`cdp_journey_metric_daily`](database-schema.sql#L4319) | Tenant daily windowed KPI snapshots, including dimensions and currency. |
+| [`vw_journey_stage_report`](database-schema.sql#L4795) | Invoker-security view comparing current and prior journey KPI windows. |
+
+`refresh_journey_metrics_pg` refreshes supported PostgreSQL-sourced metrics;
+event-lake metrics are populated separately. The two materialized
+projections from [data-view-for-llm.sql](data-view-for-llm.sql) are described
+above and are not defined by the canonical DDL. S3 log aggregation and
+device/channel extraction are backend processing, not separate base tables.
+
+### REST & MCP APIs
+
+**Inventory: 0 dedicated tables; 0 dedicated views.**
+
+There are no REST- or MCP-specific tables in `database-schema.sql`. The APIs
+access the relevant tenant-scoped objects above through their services. API
+authorization and tenant context remain required; a database object inventory
+does not describe endpoint or tool availability.
+
+### Multi-tenancy & Security
+
+**Inventory: 6 tables; 0 views.**
+
+| Object | Purpose and key relationships |
+| --- | --- |
+| [`sys_tenant`](database-schema.sql#L49) | Tenant identity, status, industry, and B2B/B2C/B2B2C business model. |
+| [`sys_schema_upgrade_history`](database-schema.sql#L28) | Global operational marker recording completion of the consolidated historical upgrade. |
+| [`sys_domain`](database-schema.sql#L100) | Global business-domain dictionary, including `_` for unclassified profiles. |
+| [`sys_tenant_domain`](database-schema.sql#L138) | Tenant-to-domain assignments. |
+| [`sys_organization`](database-schema.sql#L174) | Tenant organization hierarchy. |
+| [`sys_audit_log`](database-schema.sql#L371) | Tenant audit records, actors, actions, and request/result metadata. |
+
+The canonical DDL enables and forces RLS on its explicit list of tenant tables
+and on recommendation tables; see [Tenant Isolation](#tenant-isolation) for
+important exceptions and access requirements. `sys_tenant` and `sys_domain`
+are not included in that policy list.
+
+### Authentication & RBAC
+
+**Inventory: 6 tables; 0 views.**
+
+| Object | Purpose and key relationships |
+| --- | --- |
+| [`sys_user`](database-schema.sql#L198) | Tenant application user and optional organization membership. |
+| [`sys_userinfo`](database-schema.sql#L258) | Local and external authentication identities linked to users. |
+| [`sys_role`](database-schema.sql#L316) | Tenant roles. |
+| [`sys_permission`](database-schema.sql#L334) | Global permission dictionary. |
+| [`sys_role_permission`](database-schema.sql#L346) | Role-to-permission assignments. |
+| [`sys_user_role`](database-schema.sql#L355) | Tenant-scoped user-to-role assignments. |
+
+Keycloak itself and bearer-token issuance are external to this DDL.
+`sys_role_permission` has no `tenant_id`; scope access via its owning role.
+
+### Admin UI
+
+**Inventory: 5 tables; 1 ordinary view.**
+
+| Object | Purpose and key relationships |
+| --- | --- |
+| [`sys_assistant_message`](database-schema.sql#L5197) | Tenant-scoped assistant conversation messages and optional customer context. |
+| [`crm_flow`](database-schema.sql#L5255), [`crm_flow_version`](database-schema.sql#L5268) | Workflow identity and versioned snapshots edited through the administration UI. |
+| [`crm_flow_node`](database-schema.sql#L5380), [`crm_flow_edge`](database-schema.sql#L5456) | Persisted workflow graph projections. |
+| [`crm_vw_flow_node`](database-schema.sql#L5539) | Readable workflow-node projection. |
+
+Administration also uses the user, role, tenant, catalog, campaign, and
+segment tables documented in their respective sections. The UI itself and
+the docs assistant's search index are not created by this DDL.
+
+### Campaign Workflow Activation
+
+**Inventory: 11 tables; 0 views.**
+
+| Object | Purpose and key relationships |
+| --- | --- |
+| [`crm_campaign`](database-schema.sql#L434) | Campaign definition, status, channel, journey stage, and workflow association. |
+| [`crm_campaign_member`](database-schema.sql#L612) | Campaign membership. |
+| [`crm_message_templates`](database-schema.sql#L3624) | Reusable outbound message templates. |
+| [`crm_campaign_reviews`](database-schema.sql#L3241) | Campaign review records. |
+| [`crm_campaign_experiments`](database-schema.sql#L3673), [`crm_campaign_experiment_variants`](database-schema.sql#L3692) | Experiment definitions and variants linked to campaigns, segments, and templates. |
+| [`crm_campaign_content_items`](database-schema.sql#L3784) | Campaign-to-content associations. |
+| [`crm_campaign_workflow_action_runs`](database-schema.sql#L3882) | Per-profile workflow action execution/idempotency records. |
+| [`cdp_campaign_dispatch_logs`](database-schema.sql#L3956) | Outbound per-recipient dispatch ledger. |
+| [`crm_connector_config`](database-schema.sql#L3987) | Tenant outbound provider configuration; `credentials` can contain secrets. |
+| [`crm_suppression_list`](database-schema.sql#L4037) | Global or campaign-scoped suppression records and protected time windows. |
+
+Workflow versions, nodes, and edges are listed under [Admin UI](#admin-ui).
+The `crm_save_flow`, `crm_review_flow_version`, `crm_publish_flow`,
+`crm_load_flow`, and `crm_node_json` routines manage workflow snapshots,
+review, publication, and reconstruction. Approval and channel execution are
+also enforced by application services; database objects alone do not send
+messages.
+
+### Ad Audience Synchronization
+
+**Inventory: 1 table; 0 views.**
+
+[`crm_ad_sync_runs`](database-schema.sql#L3835) records tenant-scoped,
+idempotent audience synchronization runs. Segments, profiles, consent, and
+suppression data provide the inputs; hashing and provider uploads occur in
+the activation service, not in this DDL.
+
+### AI Campaign Planning
+
+**Inventory: 2 tables; 0 views.**
+
+[`crm_campaign_agent`](database-schema.sql#L4194) assigns agents and
+guardrails to campaigns. [`cdp_ai_agents`](database-schema.sql#L1998) holds
+the shared agent registry and prompt version history; campaign reviews,
+message templates, and content links are documented above. The dedicated
+agent service performs planning; registry rows do not themselves execute it.
+
+### Promotions API
+
+**Inventory: 0 `customer360` tables; separately, 22 `leo_ads` logical
+tables, 2 child partitions, and 1 ordinary view.**
+
+The `leo_ads` schema is **not** created by `database-schema.sql`. Its separate
+[promotions DDL](../customer360-promotions/sql-scripts/db-schema-init.sql)
+defines the following objects:
+
+| `leo_ads` objects | Purpose |
+| --- | --- |
+| [`tenant`](../customer360-promotions/sql-scripts/db-schema-init.sql#L37) | Promotions tenant and settings. |
+| [`source_type`](../customer360-promotions/sql-scripts/db-schema-init.sql#L54), [`render_type`](../customer360-promotions/sql-scripts/db-schema-init.sql#L64), [`destination_type`](../customer360-promotions/sql-scripts/db-schema-init.sql#L77) | Source, render, and destination dictionaries. |
+| [`advertiser`](../customer360-promotions/sql-scripts/db-schema-init.sql#L94), [`source_account`](../customer360-promotions/sql-scripts/db-schema-init.sql#L108), [`source_asset`](../customer360-promotions/sql-scripts/db-schema-init.sql#L129) | Advertisers and external source accounts and assets. |
+| [`placement`](../customer360-promotions/sql-scripts/db-schema-init.sql#L153), [`placement_format`](../customer360-promotions/sql-scripts/db-schema-init.sql#L171) | Inventory placements and supported formats. |
+| [`campaign`](../customer360-promotions/sql-scripts/db-schema-init.sql#L193), [`creative`](../customer360-promotions/sql-scripts/db-schema-init.sql#L224), [`creative_render`](../customer360-promotions/sql-scripts/db-schema-init.sql#L266), [`creative_item`](../customer360-promotions/sql-scripts/db-schema-init.sql#L322) | Campaigns, creative content, renders, and items. |
+| [`destination`](../customer360-promotions/sql-scripts/db-schema-init.sql#L286), [`tracking_endpoint`](../customer360-promotions/sql-scripts/db-schema-init.sql#L298) | Creative destinations and tracking endpoints. |
+| [`ad`](../customer360-promotions/sql-scripts/db-schema-init.sql#L349), [`targeting_rule`](../customer360-promotions/sql-scripts/db-schema-init.sql#L377), [`audience`](../customer360-promotions/sql-scripts/db-schema-init.sql#L402), [`ad_audience`](../customer360-promotions/sql-scripts/db-schema-init.sql#L419), [`placement_ad`](../customer360-promotions/sql-scripts/db-schema-init.sql#L436) | Ads, targeting, audience associations, and placement associations. |
+| [`user_serving_key`](../customer360-promotions/sql-scripts/db-schema-init.sql#L457) | Serving-time user identifiers. |
+| [`ad_event`](../customer360-promotions/sql-scripts/db-schema-init.sql#L475) | Partitioned ad telemetry, with [`ad_event_2026_08`](../customer360-promotions/sql-scripts/db-schema-init.sql#L498) and [`ad_event_default`](../customer360-promotions/sql-scripts/db-schema-init.sql#L502) child partitions. |
+| [`v_active_ads`](../customer360-promotions/sql-scripts/db-schema-init.sql#L622) | Ordinary view of active ads. |
+
+See the [promotions schema documentation](../customer360-promotions/sql-scripts/README.md)
+for details. This schema has its own tenant model and no foreign keys into
+`customer360`; do not assume its tenant IDs or RLS policies are shared with
+`customer360`.
+
+### Vector Search & Embeddings
+
+**Inventory: 4 tables; 0 views.**
+
+| Object | Purpose and key relationships |
+| --- | --- |
+| [`cdp_content_items`](database-schema.sql#L2708) | Tenant content candidates and 384- or 768-dimensional embeddings, with dimension-specific HNSW indexes. |
+| [`cdp_product_items`](database-schema.sql#L2813) | Tenant product catalog with optional content linkage and reserved 384- or 768-dimensional embeddings. |
+| [`cdp_profile_recommendation_runs`](database-schema.sql#L5009) | Tenant/segment recommendation run metadata. |
+| [`cdp_profile_recommendations`](database-schema.sql#L5027) | Ranked per-profile content candidates, scores, and explanations. |
+
+Persona archetype centroids use `vector(768)` and IVFFlat; campaign, CRM,
+and graph embeddings include `vector(1536)`. Product-vector columns are
+reserved for future direct product ranking; current ranking uses linked
+content embeddings. Triggers invalidate stale content and product embeddings
+when their source data changes.
+
+### Customer Scoring Catalog
+
+**Inventory: 4 tables; 0 views.**
+
+| Object | Purpose and key relationships |
+| --- | --- |
+| [`cdp_ai_feature_catalog`](database-schema.sql#L1949) | Global allow-listed feature definitions and derivation guidance. |
+| [`cdp_ai_agents`](database-schema.sql#L1998) | Global registry of scoring models, rule engines, and task agents. |
+| [`cdp_profile_attributes`](database-schema.sql#L2272) | Governed profile attributes and producer/matching metadata. |
+| [`cdp_master_profiles`](database-schema.sql#L765) | Persisted customer scores and lifecycle attributes. |
+
+These are catalog and storage foundations, not an automated ML training
+pipeline. Activation of an agent requires an implemented executor and an
+appropriate model/data contract; see [Model and feature readiness](#model-and-feature-readiness).
+
+## Detailed Schema Notes
 
 ### System, tenants, and access control
 
@@ -276,7 +634,7 @@ conditions are present.
 	Identity Resolution (CIR).
 - `cdp_profile_links` records raw-to-master matches, scores, methods, and
 	unmerge lifecycle state.
-- `cdp_identity_index` provides normalized O(1) identifier lookup for
+- `cdp_identity_index` provides indexed normalized identifier lookup for
 	streaming matching.
 - `cdp_profile_merge_history` preserves source and target snapshots for
 	master-profile merges and later unmerge analysis.
@@ -410,16 +768,27 @@ partition for new relation values. The 15 physical child tables are
 
 ## Tenant Isolation
 
-Tenant isolation has two layers:
+Tenant isolation relies on both application authorization and database
+controls:
 
-1. Tenant-owned tables carry a non-null `tenant_id` foreign key to
-	 `sys_tenant`.
-2. Composite tenant-aware foreign keys are added near the end of
-	 `database-schema.sql` so a child row cannot reference a parent from another
-	 tenant. The original single-column foreign keys remain for compatibility.
+1. Many tenant-owned tables carry a non-null `tenant_id` and have forced RLS.
+	 The schema's explicit policy list and separately defined recommendation
+	 policies are the authoritative coverage, not a blanket policy for every
+	 object.
+2. Composite tenant-aware foreign keys are added for listed relationships near
+	 the end of `database-schema.sql`. Do not assume every relationship is
+	 protected by a composite foreign key.
 
-RLS is enabled and forced for tenant-owned tables. Every pooled connection
-used by a tenant-facing service must set the tenant before querying:
+Global catalogs and tenant-related tables without `tenant_id`, including
+`sys_role_permission` and the persona detail tables, are not independently
+tenant-filtered by those policies. Scope access through the authorized
+parent and restrict direct privileges. Materialized views likewise require
+separate access controls, and direct access to graph partitions must not be
+assumed to inherit the parent table's RLS policy. Ordinary view security
+depends on the view definition and PostgreSQL privileges.
+
+Every pooled connection used by a tenant-facing service must set the tenant
+before querying:
 
 ```sql
 SELECT set_config('app.tenant_id', '<tenant-uuid>', true);
@@ -454,17 +823,28 @@ so it must set the tenant context before each tenant-scoped operation.
 - `graph_edges` and `sys_user_role` may require the tenant-consistency
 	migration when upgrading older volumes.
 
-## Forward Migrations
+## Legacy Upgrades
 
-Forward migrations are incremental upgrades for databases that already have the
-base schema. Apply them **once, in filename order**, after
-`database-schema.sql`, the required seeds, and materialized-view setup. The
-repository's [`run-sql.sh`](../deployments/postgres/run-sql.sh) runs the base
-scripts first, then applies sorted `migrations/*.sql` files with
-`ON_ERROR_STOP=1`; it excludes `*.down.sql` rollback scripts. When using the
-manual loop in Installation Order, shell glob order is the migration order.
+The consolidated [legacy-upgrade.sql](legacy-upgrade.sql) retains the
+historical steps through `018`, in order, for existing installations.
+Run it with `psql -v ON_ERROR_STOP=1` after the canonical schema, both seeds,
+and materialized views. A session advisory lock serializes concurrent upgrade
+runs. On success it records `legacy_through_018` in the global
+`sys_schema_upgrade_history` table; subsequent runs skip the historical steps.
+Fresh schemas record that marker at bootstrap because their DDL and seeds
+already contain the current definitions. Restrict writes to the history table
+to the database setup role.
 
-| Migration | Purpose |
+The historical steps contain their original transaction boundaries, so a failed
+run may have committed earlier steps but does not record completion. Resolve
+the reported error and rerun the consolidated script. Tenant data backfills run
+with explicit tenant context under forced RLS. Review and back up existing
+databases first: upgrades can lock tables, build indexes, modify legacy data,
+or reject incompatible data. Do not delete the marker to force a rerun without
+reviewing the effects. The setup helper retains `--skip-migrations` as an alias
+for `--skip-legacy-upgrade`; skipping is unsafe for an unupgraded database.
+
+| Historical step | Purpose |
 | --- | --- |
 | `001_harden_tenant_rls_policies.sql` | Rebuild fail-closed tenant RLS policies on existing tenant-owned tables. |
 | `002_profile_indexes.sql` | Add tenant-leading profile, contact, and transaction indexes for common activity queries. |
@@ -494,10 +874,9 @@ by default). Campaigns do not yet carry a domain, so campaign totals remain
 general. Do not infer a profile's business model from its domain. Other
 source-job metrics are left untouched by the PostgreSQL refresh.
 
-`006_cdp_agent_workflow.sql` is for existing installations. A fresh database
-already receives `cdp_agent_workflow` from `database-schema.sql`; the migration
-is intentionally safe to reapply after that canonical schema. It creates an
-empty workflow table and does not seed workflow steps or activate agents.
+The historical workflow step is for existing installations. A fresh database
+already receives `cdp_agent_workflow` from `database-schema.sql`; the step
+creates an empty workflow table and does not seed steps or activate agents.
 
 The candidate-validation triggers verify that referenced content items exist
 for the workflow tenant and prevent deletion or tenant/key changes while an
@@ -512,7 +891,7 @@ failures).
 
 Run the workflow regression checks against a **disposable PostgreSQL 16
 database** after applying the base schema and AI-agent seed, or after applying
-the migration to an existing test database with its required tables and seed
+the upgrade to an existing test database with its required tables and seed
 agents:
 
 ```bash
@@ -525,11 +904,14 @@ ordering, tenant isolation, candidate protection, and transaction-isolation
 guards, then roll back their fixtures. Run them as a test database
 administrator; they are not production migration steps.
 
-Review each migration against the target database before production execution.
-These migrations can lock tables, build indexes, or alter security policy.
-Schedule and monitor production rollout accordingly. Do not rerun the complete
-bootstrap sequence against a production database as a substitute for its
-ordered migrations.
+For the fresh bootstrap marker, tenant backfills, and repeat-run regression,
+run the following against a **separate disposable database** after the schema
+and both seeds. This test changes schema and data and does not roll them back:
+
+```bash
+psql -v ON_ERROR_STOP=1 -d customer360_test \
+    -f customer360-database/tests/legacy_upgrade.sql
+```
 
 ## Verification Queries
 
