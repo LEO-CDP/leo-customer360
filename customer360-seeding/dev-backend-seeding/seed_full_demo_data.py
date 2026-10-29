@@ -17,7 +17,7 @@ from typing import Any
 import psycopg2
 from dotenv import load_dotenv
 from psycopg2.extensions import connection as DatabaseConnection
-from psycopg2.extras import Json, RealDictCursor
+from psycopg2.extras import Json, RealDictCursor, execute_values
 
 
 from leo_customer360_dao.agentic_engines.persona_engine import (  # noqa: E402
@@ -589,9 +589,10 @@ def seed_campaign_performance_daily(cursor, campaign_ids: dict, experiment_varia
             current += timedelta(days=1)
 
 
-def seed_data_sources(cursor) -> None:
-    """Seeds tenant-scoped rows in sys_data_source used by metadata/data-sources."""
+def seed_data_sources(cursor) -> dict[str, str]:
+    """Seed demo sources and return their actual tenant-scoped database IDs."""
     logger.info("Seeding sys_data_source catalog for demo tenant...")
+    source_ids: dict[str, str] = {}
     for data_source in DATA_SOURCES:
         data_source_id = demo_id(f"sys_data_source:{data_source['slug']}")
         cursor.execute(
@@ -623,7 +624,8 @@ def seed_data_sources(cursor) -> None:
                 data_source_hosts = EXCLUDED.data_source_hosts,
                 javascript_tags = EXCLUDED.javascript_tags,
                 qr_code_data = EXCLUDED.qr_code_data,
-                updated_at = now();
+                updated_at = now()
+            RETURNING data_source_id;
             """,
             (
                 data_source_id,
@@ -649,6 +651,11 @@ def seed_data_sources(cursor) -> None:
                 Json(data_source["qr_code_data"]),
             ),
         )
+        row = cursor.fetchone()
+        if row is None:
+            raise RuntimeError(f"Could not resolve demo data source {data_source['slug']}")
+        source_ids[data_source["slug"]] = str(row["data_source_id"])
+    return source_ids
 
 
 def update_data_source_statistics(cursor, statistics_by_source: dict[str, dict[str, Any]]) -> None:
@@ -673,6 +680,47 @@ def update_data_source_statistics(cursor, statistics_by_source: dict[str, dict[s
                 source_id,
             ),
         )
+        if cursor.rowcount != 1:
+            raise RuntimeError(f"Active demo data source {source_id} was not found")
+
+
+def update_profile_event_statistics(
+    cursor, statistics_by_profile: dict[str, dict[str, dict[str, int]]]
+) -> None:
+    """Persist seeded event counts on the tenant's master profiles."""
+    rows = [
+        (DEMO_TENANT_ID, profile_id, Json(statistics))
+        for profile_id, statistics in statistics_by_profile.items()
+    ]
+    for start in range(0, len(rows), 1000):
+        batch = rows[start : start + 1000]
+        execute_values(
+            cursor,
+            f"""
+            UPDATE {_table('cdp_master_profiles')} AS m
+            SET data_source_analytics = COALESCE(m.data_source_analytics, '{{}}'::jsonb) || (
+                SELECT jsonb_object_agg(
+                    entry.key,
+                    COALESCE(m.data_source_analytics -> entry.key, '{{}}'::jsonb) || entry.value
+                )
+                FROM jsonb_each(v.statistics) AS entry
+            )
+            FROM (VALUES %s) AS v(tenant_id, master_profile_id, statistics)
+            WHERE m.tenant_id = v.tenant_id
+              AND m.master_profile_id = v.master_profile_id
+              AND (m.data_source_analytics IS NULL OR jsonb_typeof(m.data_source_analytics) = 'object')
+              AND NOT EXISTS (
+                  SELECT 1 FROM jsonb_each(v.statistics) AS entry
+                  WHERE m.data_source_analytics ? entry.key
+                    AND jsonb_typeof(m.data_source_analytics -> entry.key) <> 'object'
+              );
+            """,
+            batch,
+            template="(%s::uuid, %s::uuid, %s::jsonb)",
+            page_size=len(batch),
+        )
+        if cursor.rowcount != len(batch):
+            raise RuntimeError("Could not update all demo profile event statistics")
 
 
 def seed_ai_agents(cursor) -> None:
@@ -1524,7 +1572,6 @@ def fetch_event_profiles(cursor) -> list:
           ON r.tenant_id = l.tenant_id
          AND r.raw_profile_id = l.raw_profile_id
         WHERE m.tenant_id = %s
-          AND m.status_code = 1
         ORDER BY m.master_profile_id, r.raw_profile_id;
         """,
         (DEMO_TENANT_ID,),
@@ -1580,7 +1627,7 @@ def _ensure_demo_s3_bucket(client: Any, bucket: str) -> None:
             raise RuntimeError(f"Could not create demo event bucket {bucket}") from exc
 
 
-def _clear_demo_event_objects(client: Any, bucket: str) -> None:
+def _clear_demo_event_objects(client: Any, bucket: str, source_id: str) -> None:
     from botocore.exceptions import BotoCoreError, ClientError
 
     try:
@@ -1589,16 +1636,23 @@ def _clear_demo_event_objects(client: Any, bucket: str) -> None:
             str(item["Key"])
             for page in paginator.paginate(Bucket=bucket, Prefix="events/")
             for item in page.get("Contents", [])
-            if "-demo-behavioral-" in str(item.get("Key", ""))
+            if str(item.get("Key", "")).rsplit("/", 1)[-1]
+            == f"demo-behavioral-{source_id}.jsonl.gz"
         ]
-        for start in range(0, len(keys), 1000):
-            client.delete_objects(
+        object_keys = keys + [
+            f"_processed/{uuid.uuid5(uuid.NAMESPACE_URL, f's3://{bucket}/{key}')}.json"
+            for key in keys
+        ]
+        for start in range(0, len(object_keys), 1000):
+            response = client.delete_objects(
                 Bucket=bucket,
                 Delete={
-                    "Objects": [{"Key": key} for key in keys[start : start + 1000]],
+                    "Objects": [{"Key": key} for key in object_keys[start : start + 1000]],
                     "Quiet": True,
                 },
             )
+            if response.get("Errors"):
+                raise RuntimeError(f"Could not clear prior demo event objects from {bucket}")
     except (BotoCoreError, ClientError) as exc:
         raise RuntimeError(f"Could not clear prior demo event objects from {bucket}") from exc
 
@@ -1623,6 +1677,8 @@ def _build_behavioral_event(
     raw_profile: dict,
     event_index: int,
     event_time: datetime,
+    source_id: str,
+    session_index: int,
 ) -> dict[str, Any]:
     domain = _profile_domain(str(profile["master_profile_id"]), profile.get("domain"))
     templates = BEHAVIORAL_EVENT_TEMPLATES.get(domain, BEHAVIORAL_EVENT_TEMPLATES["retail"])
@@ -1631,7 +1687,7 @@ def _build_behavioral_event(
     device_type = "mobile" if channel == "mobile_app" else "desktop"
     source_system = _event_output_source(raw_profile.get("source_system"))
     event_id = str(uuid.uuid5(DEMO_NAMESPACE, f"behavioral-event:{DEMO_TENANT_ID}:{event_index}"))
-    session_id = f"demo-session-{event_index // 5:06d}"
+    session_id = f"demo-{profile['master_profile_id']}-{session_index // 5}"
     entity_id = f"demo-{entity_type}-{rng.randint(1, 5000):05d}"
     event_value = round(rng.uniform(150_000, 3_000_000), 2) if is_conversion else None
     payload = {
@@ -1663,7 +1719,7 @@ def _build_behavioral_event(
         "schema_version": 1,
         "ingestion_version": "demo-1.0",
         "event_id": event_id,
-        "data_source_id": str(uuid.uuid5(DEMO_NAMESPACE, f"sys_data_source:{_event_source_slug(raw_profile.get('source_system'))}")),
+        "data_source_id": source_id,
         "tenant_id": DEMO_TENANT_ID,
         "event_time": event_time.isoformat(),
         "received_at": (event_time + timedelta(seconds=rng.randint(1, 90))).isoformat(),
@@ -1687,6 +1743,7 @@ def _build_behavioral_event(
 
 def _calculate_event_statistics(
     batches: dict[tuple[str, str], list[dict[str, Any]]],
+    source_ids: dict[str, str],
 ) -> dict[str, dict[str, Any]]:
     """Calculate data-source metrics from the event envelopes queued for S3."""
     source_totals: dict[str, int] = defaultdict(int)
@@ -1703,8 +1760,7 @@ def _calculate_event_statistics(
         )
 
     statistics_by_source: dict[str, dict[str, Any]] = {}
-    for source_slug in sorted(set(BEHAVIORAL_SOURCE_SLUGS.values())):
-        source_id = str(uuid.uuid5(DEMO_NAMESPACE, f"sys_data_source:{source_slug}"))
+    for source_id in sorted(set(source_ids.values())):
         total_events = source_totals[source_id]
         statistics_by_source[source_id] = {
             "total_tracked_event": total_events,
@@ -1726,6 +1782,7 @@ def _validate_event_batches(
     batches: dict[tuple[str, str], list[dict[str, Any]]],
     expected_event_count: int,
     now: datetime,
+    expected_profiles: set[str],
 ) -> None:
     """Validate S3 batch counts, partitions, and the enforced 30-day timeline."""
     actual_event_count = sum(len(envelopes) for envelopes in batches.values())
@@ -1735,8 +1792,12 @@ def _validate_event_batches(
         )
 
     window_start = now - timedelta(days=BEHAVIORAL_EVENT_LOOKBACK_DAYS)
+    profile_counts: dict[str, int] = defaultdict(int)
     for (source_id, event_hour), envelopes in batches.items():
         for envelope in envelopes:
+            profile_counts[str(envelope["master_profile_id"])] += 1
+            if envelope["data_source_id"] != source_id:
+                raise RuntimeError(f"Event {envelope['event_id']} is in the wrong source bucket")
             event_time = datetime.fromisoformat(envelope["event_time"])
             received_at = datetime.fromisoformat(envelope["received_at"])
             if not window_start <= event_time <= now:
@@ -1751,14 +1812,20 @@ def _validate_event_batches(
                 raise RuntimeError(
                     f"Event {envelope['event_id']} is in the wrong S3 timeline partition"
                 )
+    if set(profile_counts) != expected_profiles:
+        raise RuntimeError("Generated events do not cover exactly the seeded master profiles")
+    if any(count < MIN_EVENTS_PER_MASTER_PROFILE for count in profile_counts.values()):
+        raise RuntimeError("A seeded master profile has too few behavioral events")
 
 
 def seed_behavioral_events(
     event_profiles: list,
     *,
+    source_ids: dict[str, str],
+    expected_profiles: set[str],
     event_count: int = BEHAVIORAL_EVENT_COUNT,
     s3_client: Any | None = None,
-) -> dict[str, dict[str, Any]]:
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, dict[str, int]]]]:
     if not event_profiles:
         raise RuntimeError("No raw/master profile links found for behavioral events")
     if event_count < 1:
@@ -1767,32 +1834,53 @@ def seed_behavioral_events(
     for row in event_profiles:
         profiles_by_master[str(row["master_profile_id"])].append(row)
     masters = sorted(profiles_by_master)
+    if set(masters) != expected_profiles:
+        missing = len(expected_profiles - set(masters))
+        unexpected = len(set(masters) - expected_profiles)
+        raise RuntimeError(
+            f"Cannot seed events: {missing} master profiles lack an active raw link; "
+            f"{unexpected} linked profiles are unexpected"
+        )
+    missing_sources = set(BEHAVIORAL_SOURCE_SLUGS.values()) - set(source_ids)
+    if missing_sources:
+        raise RuntimeError(f"Missing registered demo data sources: {sorted(missing_sources)}")
+    event_count = max(event_count, len(masters) * MIN_EVENTS_PER_MASTER_PROFILE)
     now = datetime.now(timezone.utc)
-    start = now - timedelta(days=BEHAVIORAL_EVENT_LOOKBACK_DAYS)
+    start = now - timedelta(days=BEHAVIORAL_EVENT_LOOKBACK_DAYS) + timedelta(hours=1)
     rng = stable_rng(f"behavioral-events:{DEMO_TENANT_ID}:{event_count}:{BEHAVIORAL_EVENT_LOOKBACK_DAYS}")
     latest_event_time = now - timedelta(seconds=90)
     span_seconds = max(1, int((latest_event_time - start).total_seconds()))
     batches: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    profile_statistics: dict[str, dict[str, dict[str, int]]] = {
+        master_id: {
+            source_id: {"total_tracked_events": 0}
+            for source_id in set(source_ids.values())
+        }
+        for master_id in masters
+    }
     for event_index in range(event_count):
         master_id = masters[event_index % len(masters)]
-        raw_profile = profiles_by_master[master_id][event_index % len(profiles_by_master[master_id])]
+        profile_event_index = event_index // len(masters)
+        raw_profile = profiles_by_master[master_id][profile_event_index % len(profiles_by_master[master_id])]
+        source_id = source_ids[_event_source_slug(raw_profile.get("source_system"))]
         event_time = start + timedelta(seconds=rng.randint(0, span_seconds))
         envelope = _build_behavioral_event(
             {"master_profile_id": master_id, "domain": raw_profile.get("domain")},
             raw_profile,
             event_index,
             event_time,
+            source_id,
+            profile_event_index,
         )
-        source_id = str(uuid.uuid5(DEMO_NAMESPACE, f"sys_data_source:{_event_source_slug(raw_profile.get('source_system'))}"))
+        profile_statistics[master_id][source_id]["total_tracked_events"] += 1
         batches[(source_id, _behavioral_event_hour(event_time))].append(envelope)
 
-    _validate_event_batches(batches, event_count, now)
+    _validate_event_batches(batches, event_count, now, expected_profiles)
     client = s3_client or _build_demo_s3_client()
-    for source_slug in sorted(set(BEHAVIORAL_SOURCE_SLUGS.values())):
-        source_id = str(uuid.uuid5(DEMO_NAMESPACE, f"sys_data_source:{source_slug}"))
+    for source_id in sorted(set(source_ids.values())):
         bucket = f"data-tracking-{source_id}"
         _ensure_demo_s3_bucket(client, bucket)
-        _clear_demo_event_objects(client, bucket)
+        _clear_demo_event_objects(client, bucket, source_id)
 
     for (source_id, event_hour), envelopes in sorted(batches.items()):
         bucket = f"data-tracking-{source_id}"
@@ -1837,7 +1925,7 @@ def seed_behavioral_events(
             ).encode("utf-8"),
             ContentType="application/json",
         )
-    statistics_by_source = _calculate_event_statistics(batches)
+    statistics_by_source = _calculate_event_statistics(batches, source_ids)
     if sum(item["total_tracked_event"] for item in statistics_by_source.values()) != event_count:
         raise RuntimeError("S3 event totals do not match generated event count")
     logger.info(
@@ -1846,7 +1934,7 @@ def seed_behavioral_events(
         len(batches),
         BEHAVIORAL_EVENT_LOOKBACK_DAYS,
     )
-    return statistics_by_source
+    return statistics_by_source, profile_statistics
 
 
 @dataclass(frozen=True)
@@ -1863,6 +1951,8 @@ class FullDemoSeeder:
 
     def __init__(self, connection: DatabaseConnection) -> None:
         self.connection = connection
+        self.source_ids: dict[str, str] = {}
+        self.expected_profiles: set[str] = set()
 
     def seed_database(self, cursor) -> tuple[SeedResult, list]:
         """Seed fixtures in dependency order and return profiles for S3 events."""
@@ -1878,10 +1968,9 @@ class FullDemoSeeder:
 
         seed_relation_types(cursor)
         crm_ids = seed_crm_entities(cursor)
-        seed_data_sources(cursor)
+        self.source_ids = seed_data_sources(cursor)
         seed_ai_agents(cursor)
         reset_tenant_scoped_demo_tables(cursor)
-        event_profiles = fetch_event_profiles(cursor)
         experiment_variants = seed_campaign_experiments(cursor, crm_ids["campaign"])
         seed_campaign_performance_daily(cursor, crm_ids["campaign"], experiment_variants)
         seed_relations(cursor, detail_profiles)
@@ -1890,6 +1979,8 @@ class FullDemoSeeder:
         seed_graph_edges(cursor, crm_ids, detail_profiles)
         enrich_master_profiles(cursor, master_profiles)
         master_profiles = fetch_master_profiles(cursor)
+        self.expected_profiles = {str(profile["master_profile_id"]) for profile in master_profiles}
+        event_profiles = fetch_event_profiles(cursor)
         if os.environ.get("CIR_VALIDATE_DEMO_COVERAGE") == "1":
             domains = {profile["domain"] for profile in master_profiles}
             missing = RESET_DEMO_DOMAINS - domains
@@ -1909,9 +2000,14 @@ class FullDemoSeeder:
         try:
             with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
                 result, event_profiles = self.seed_database(cursor)
-            statistics = seed_behavioral_events(event_profiles)
+            statistics, profile_statistics = seed_behavioral_events(
+                event_profiles,
+                source_ids=self.source_ids,
+                expected_profiles=self.expected_profiles,
+            )
             with self.connection.cursor() as cursor:
                 update_data_source_statistics(cursor, statistics)
+                update_profile_event_statistics(cursor, profile_statistics)
             self.connection.commit()
             self.log_result(result)
             return result

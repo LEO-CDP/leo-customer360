@@ -44,12 +44,11 @@ Safe to re-run: every step is idempotent / scoped to ``DEMO_TENANT_ID``.
 import logging
 import os
 import random
-import uuid
 from datetime import datetime, timedelta
 
 import psycopg2
 from dotenv import load_dotenv
-from psycopg2.extras import Json
+from psycopg2.extras import Json, RealDictCursor
 
 from leo_customer360_dao.utils.tenant_context import set_tenant_context
 from utils import HASHED_PII_FIELDS, hash_pii
@@ -69,8 +68,6 @@ DB_SCHEMA = os.environ.get("DB_SCHEMA", "customer360")
 # Fixed tenant used for the demo so this script is safe to re-run: only rows
 # belonging to this tenant are ever deleted/re-seeded.
 DEMO_TENANT_ID = "11111111-1111-1111-1111-111111111111"
-DEMO_NAMESPACE = uuid.UUID("12345678-1234-5678-1234-567812345678")
-
 SOURCE_SLUGS = {
     "Adjust": "adjust-mobile-attribution",
     "OneSignal": "c360-tracker",
@@ -392,7 +389,7 @@ def reset_demo_data(cursor) -> None:
     )
 
 
-def seed_raw_profiles(cursor, raw_profiles: list[dict]) -> None:
+def seed_raw_profiles(cursor, raw_profiles: list[dict], source_ids: dict[str, str]) -> None:
     """Inserts the sample raw profiles, SHA-256 hashing every PII field
     (see HASHED_PII_FIELDS) so no plaintext name/email/phone/national_id is
     ever written to the database."""
@@ -406,8 +403,12 @@ def seed_raw_profiles(cursor, raw_profiles: list[dict]) -> None:
     for profile in raw_profiles:
         source_system = str(profile.get("source_system") or "Adjust")
         source_slug = SOURCE_SLUGS.get(source_system, SOURCE_SLUGS["Adjust"])
-        data_source_id = str(uuid.uuid5(DEMO_NAMESPACE, f"sys_data_source:{source_slug}"))
-        profile.setdefault("data_source_id", data_source_id)
+        if source_slug not in source_ids:
+            raise ValueError(f"No registered demo data source for {source_slug}")
+        data_source_id = source_ids[source_slug]
+        if profile.get("data_source_id") not in (None, data_source_id):
+            raise ValueError(f"Raw profile data source does not match {source_slug}")
+        profile["data_source_id"] = data_source_id
         profile.setdefault(
             "data_source_analytics",
             {data_source_id: {"total_tracked_events": 1}},
@@ -425,17 +426,20 @@ def seed_raw_profiles(cursor, raw_profiles: list[dict]) -> None:
 
 
 def main() -> None:
+    from seed_full_demo_data import seed_data_sources
+
     conn = psycopg2.connect(
         host=DB_HOST, dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD, port=DB_PORT
     )
     try:
         raw_profiles = generate_raw_profiles()
-        with conn.cursor() as cursor:
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             set_tenant_context(cursor, DEMO_TENANT_ID)
             ensure_extensions(cursor)
             ensure_demo_tenant(cursor)
+            source_ids = seed_data_sources(cursor)
             reset_demo_data(cursor)
-            seed_raw_profiles(cursor, raw_profiles)
+            seed_raw_profiles(cursor, raw_profiles, source_ids)
         conn.commit()
         logger.info(
             "Sample data ready: %d raw profiles staged with status_code=1 for tenant_id=%s.",

@@ -16,6 +16,9 @@ On an empty database, `./dev-c360.sh reset -y` runs the backend demo seed:
 8,000 raw records represent 5,600 synthetic customers across retail,
 education, real estate, travel, banking, and media. It resolves the records
 and checks for more than 5,000 master profiles with every domain represented.
+The full demo writes at least 11 events per master profile in the last 30 days
+to the buckets of the tenant's registered data sources. The dashboard's total
+reflects its selected time period. See the [backend seeding guide](dev-backend-seeding/README.md).
 Reset deletes the development volumes; `no-seed` skips the demo seed.
 
 The web simulator does not publish to Kafka. It sends one ordered event batch

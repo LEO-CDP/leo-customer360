@@ -2,14 +2,16 @@
 
 Run this once after enabling the master-profile projection, and again after a
 historical replay or source-link correction. Normal CIR batches rebuild only
-the masters changed in that batch.
+the masters changed in that batch. Use ``--tenant-id`` to limit a rebuild.
 """
 
-from collections import defaultdict
+import argparse
 import logging
 import os
 import sys
+from collections import defaultdict
 from pathlib import Path
+from uuid import UUID
 
 import psycopg2
 from dotenv import load_dotenv
@@ -34,6 +36,15 @@ DB_SCHEMA = os.environ.get("DB_SCHEMA", "customer360")
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--tenant-id",
+        type=UUID,
+        help="Rebuild projections only for this tenant (default: all tenants).",
+    )
+    args = parser.parse_args()
+    tenant_id_filter = str(args.tenant_id) if args.tenant_id else None
+
     connection = psycopg2.connect(
         host=DB_HOST,
         dbname=DB_NAME,
@@ -43,14 +54,17 @@ def main() -> None:
     )
     try:
         with connection.cursor(cursor_factory=RealDictCursor) as cursor:
-            set_tenant_context(cursor, None)
+            set_tenant_context(cursor, tenant_id_filter)
+            tenant_filter = "AND tenant_id = %s" if tenant_id_filter else ""
             cursor.execute(
                 f"""
                 SELECT tenant_id, master_profile_id
                 FROM {DB_SCHEMA}.cdp_master_profiles
                 WHERE status_code = 1
+                  {tenant_filter}
                 ORDER BY tenant_id, master_profile_id
-                """
+                """,
+                (tenant_id_filter,) if tenant_id_filter else (),
             )
             grouped: dict[str, set[str]] = defaultdict(set)
             for row in cursor.fetchall():
