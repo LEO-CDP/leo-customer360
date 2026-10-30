@@ -89,6 +89,7 @@ class AgentMetadata(MetadataModel):
     model_type: str
     status: str
     schedule_definition: str
+    journey_stage: str | None = None
     input_features: list[str]
     hyperparameters: dict[str, Any]
 

@@ -620,9 +620,9 @@ jobs for the same tenant/campaign/platform/audience.
 
 Campaigns, AI agents, and customer lifecycle KPIs share a unified 8-stage
 Customer Journey Map defined in
-[`database-schema.sql`](../../customer360-database/database-schema.sql),
-[`017_agent_campagn_journey.sql`](../../customer360-database/migrations/017_agent_campagn_journey.sql),
-and [`018_journey_report.sql`](../../customer360-database/migrations/018_journey_report.sql):
+[`database-schema.sql`](../../customer360-database/database-schema.sql)
+and the [legacy upgrade](../../customer360-database/legacy-upgrade.sql)
+(historical steps 017 and 018):
 
 ```text
 awareness -> acquisition -> activation -> engagement -> conversion -> retention -> loyalty -> churned
@@ -768,11 +768,11 @@ workflow upgrade definitions. An existing database must receive the current:
 - notification, audience-sync, and AI (`ai_decide`, `ai_generate`, `ai_recommend`)
   node-type constraints, generated `crm_flow_node.agent_code` column/FK, and node view;
 - `crm_campaign_agent` table with composite tenant-campaign foreign key and forced RLS
-  ([`017_agent_campagn_journey.sql`](../../customer360-database/migrations/017_agent_campagn_journey.sql));
+  ([legacy upgrade, step 017](../../customer360-database/legacy-upgrade.sql));
 - `sys_tenant.business_model` (default `'B2C'`), `cdp_journey_metric`,
   `cdp_journey_metric_domain`, `cdp_journey_metric_daily`, `refresh_journey_metrics_pg`,
   and `vw_journey_stage_report`
-  ([`018_journey_report.sql`](../../customer360-database/migrations/018_journey_report.sql));
+  ([legacy upgrade, step 018](../../customer360-database/legacy-upgrade.sql));
 - per-execution action-ledger key migration and audience-sync audit tables.
 
 The execution-ledger migration retains existing action rows by assigning them

@@ -1,4 +1,4 @@
-"""Regression checks for the RLS-safe unclassified-domain migration."""
+"""Regression checks for the RLS-safe unclassified-domain upgrade."""
 
 import unittest
 from pathlib import Path
@@ -7,12 +7,10 @@ from pathlib import Path
 class UnclassifiedDomainMigrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        migration_path = (
-            Path(__file__).resolve().parents[1]
-            / "migrations"
-            / "016_add_unclassified_profile_domain.sql"
-        )
-        cls.sql = migration_path.read_text(encoding="utf-8")
+        upgrade_path = Path(__file__).resolve().parents[1] / "legacy-upgrade.sql"
+        cls.sql = upgrade_path.read_text(encoding="utf-8").split(
+            "-- Historical step: 016_add_unclassified_profile_domain.sql", 1
+        )[1].split("-- Historical step: 017_agent_campagn_journey.sql", 1)[0]
 
     def test_registers_the_neutral_domain(self):
         self.assertIn("'_'", self.sql)

@@ -62,10 +62,10 @@ SELECT
     CASE WHEN pg_temp.r(p.i, 9) < 0.65
          THEN jsonb_build_object('fcm', 'fcm-token-' || p.i) ELSE '{}'::jsonb END,
     (ARRAY['Email','Mobile App','Website'])[1 + p.i % 3],
-    CASE WHEN round(pg_temp.r(p.i, 3) * 30000000) >= 15000000 THEN 'vip'
-         WHEN pg_temp.r(p.i, 6) * 120 > 90 THEN 'dormant'
-         WHEN pg_temp.r(p.i, 2) >= 0.6 THEN 'churn_risk'
-         ELSE 'customer' END,
+    CASE WHEN round(pg_temp.r(p.i, 3) * 30000000) >= 15000000 THEN 'loyalty'
+         WHEN pg_temp.r(p.i, 6) * 120 > 90 THEN 'churned'
+         WHEN pg_temp.r(p.i, 2) >= 0.6 THEN 'retention'
+         ELSE 'conversion' END,
     round(pg_temp.r(p.i, 1) * 100, 2),
     round(pg_temp.r(p.i, 2), 4),
     CASE WHEN pg_temp.r(p.i, 2) >= 0.8 THEN 'critical' WHEN pg_temp.r(p.i, 2) >= 0.6 THEN 'high'

@@ -17,12 +17,16 @@ from typing import Any
 import psycopg2
 from dotenv import load_dotenv
 from psycopg2.extensions import connection as DatabaseConnection
-from psycopg2.extras import Json, RealDictCursor
+from psycopg2.extras import Json, RealDictCursor, execute_values
 
 
 from leo_customer360_dao.agentic_engines.persona_engine import (  # noqa: E402
     PersonaResolutionEngine,
     compute_persona,
+)
+from leo_customer360_dao.schemas.journey import (  # noqa: E402
+    JOURNEY_STAGES,
+    infer_journey_stage_from_objective,
 )
 from leo_customer360_dao.utils.tenant_context import set_tenant_context
 from seeding_content_items import seed_content_items  # noqa: E402
@@ -100,7 +104,9 @@ SUPPORTED_PROFILE_DOMAINS = (
     "real_estate",
     "healthcare",
     "education",
+    "banking",
 )
+RESET_DEMO_DOMAINS = {"retail", "education", "real_estate", "travel", "banking", "media"}
 
 
 def _table(name: str) -> str:
@@ -206,22 +212,25 @@ def seed_crm_entities(cursor) -> dict:
          budget_vnd, start_offset, end_offset, utm_source, utm_medium) in CAMPAIGNS:
         campaign_id = demo_id(f"crm_campaign:{name}")
         today = datetime.now().date()
+        journey_stage = infer_journey_stage_from_objective(objective) or "conversion"
         cursor.execute(
             f"""
             INSERT INTO {_table('crm_campaign')}
                 (campaign_id, tenant_id, campaign_code, name, status, channel, platform,
-                 objective, description, keywords, start_date, end_date,
+                 objective, journey_stage, description, keywords, start_date, end_date,
                  budget_amount, currency, metadata)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (campaign_id) DO UPDATE SET
                 status = EXCLUDED.status,
+                objective = EXCLUDED.objective,
+                journey_stage = EXCLUDED.journey_stage,
                 start_date = EXCLUDED.start_date,
                 end_date = EXCLUDED.end_date,
                 budget_amount = EXCLUDED.budget_amount;
             """,
             (
                 campaign_id, DEMO_TENANT_ID, campaign_code, name, status,
-                channel, platform, objective,
+                channel, platform, objective, journey_stage,
                 f"Demo {channel} campaign on {platform} targeting {objective}.",
                 [channel.lower().replace(" ", "_"), platform.lower(), objective.lower().replace(" ", "_")],
                 today + timedelta(days=start_offset),
@@ -394,7 +403,8 @@ def seed_campaign_experiments(cursor, campaign_ids: dict) -> dict[str, list[str]
         SELECT segment_id
         FROM {_table('cdp_segments')}
         WHERE tenant_id = %s AND is_active = TRUE AND status_code = 1
-        ORDER BY segment_name, segment_id
+        ORDER BY CASE WHEN segment_tag IN ('churn_risk', 'champions') THEN 0 ELSE 1 END,
+                 segment_name, segment_id
         LIMIT 2;
         """,
         (DEMO_TENANT_ID,),
@@ -460,8 +470,20 @@ def seed_campaign_experiments(cursor, campaign_ids: dict) -> dict[str, list[str]
     return {str(campaign_id): variant_ids}
 
 
+_STAGE_CAMPAIGN_AGENTS: dict[str, tuple[str, str]] = {
+    "awareness": ("data_quality_cir_confidence", "decide"),
+    "acquisition": ("b2b_lead_scoring_rules", "decide"),
+    "activation": ("product_recommendation", "optimize"),
+    "engagement": ("journey_behavior_clustering", "decide"),
+    "conversion": ("customer_demand_forecast", "optimize"),
+    "retention": ("cx_sentiment_llm_v1", "decide"),
+    "loyalty": ("clv_regression_v1", "optimize"),
+    "churned": ("churn_prediction_v2", "decide"),
+}
+
+
 def seed_campaign_performance_daily(cursor, campaign_ids: dict, experiment_variants: dict[str, list[str]] | None = None) -> None:
-    """Seed deterministic daily metrics for past and running campaign dates."""
+    """Seed deterministic daily metrics and campaign-agent links for demo campaigns."""
     logger.info("Seeding crm_campaign_performance_daily with Adjust/GA4/C360 Tracker-style metrics...")
     today = datetime.now().date()
 
@@ -471,8 +493,32 @@ def seed_campaign_performance_daily(cursor, campaign_ids: dict, experiment_varia
         if campaign_id is None:
             continue
 
-        run_start = today + timedelta(days=start_offset)
-        run_end = min(today, today + timedelta(days=end_offset))
+        journey_stage = infer_journey_stage_from_objective(objective) or "conversion"
+        agent_code, agent_role = _STAGE_CAMPAIGN_AGENTS.get(
+            journey_stage, ("churn_prediction_v2", "decide")
+        )
+        cursor.execute(
+            f"""
+            INSERT INTO {_table('crm_campaign_agent')}
+                (campaign_agent_id, tenant_id, campaign_id, agent_code, role, autonomy, is_active)
+            SELECT %s, %s, %s, a.agent_code, %s, 'approve', TRUE
+              FROM {_table('cdp_ai_agents')} a
+             WHERE a.agent_code = %s
+            ON CONFLICT (campaign_id, agent_code, role) DO UPDATE SET
+                is_active = TRUE,
+                updated_at = now();
+            """,
+            (
+                demo_id(f"crm_campaign_agent:{campaign_code}:{agent_code}:{agent_role}"),
+                DEMO_TENANT_ID,
+                campaign_id,
+                agent_role,
+                agent_code,
+            ),
+        )
+
+        run_start = today + timedelta(days=min(start_offset, -60))
+        run_end = min(today, today + timedelta(days=max(end_offset, 0)))
         if run_start > today:
             continue
 
@@ -543,9 +589,10 @@ def seed_campaign_performance_daily(cursor, campaign_ids: dict, experiment_varia
             current += timedelta(days=1)
 
 
-def seed_data_sources(cursor) -> None:
-    """Seeds tenant-scoped rows in sys_data_source used by metadata/data-sources."""
+def seed_data_sources(cursor) -> dict[str, str]:
+    """Seed demo sources and return their actual tenant-scoped database IDs."""
     logger.info("Seeding sys_data_source catalog for demo tenant...")
+    source_ids: dict[str, str] = {}
     for data_source in DATA_SOURCES:
         data_source_id = demo_id(f"sys_data_source:{data_source['slug']}")
         cursor.execute(
@@ -577,7 +624,8 @@ def seed_data_sources(cursor) -> None:
                 data_source_hosts = EXCLUDED.data_source_hosts,
                 javascript_tags = EXCLUDED.javascript_tags,
                 qr_code_data = EXCLUDED.qr_code_data,
-                updated_at = now();
+                updated_at = now()
+            RETURNING data_source_id;
             """,
             (
                 data_source_id,
@@ -603,6 +651,11 @@ def seed_data_sources(cursor) -> None:
                 Json(data_source["qr_code_data"]),
             ),
         )
+        row = cursor.fetchone()
+        if row is None:
+            raise RuntimeError(f"Could not resolve demo data source {data_source['slug']}")
+        source_ids[data_source["slug"]] = str(row["data_source_id"])
+    return source_ids
 
 
 def update_data_source_statistics(cursor, statistics_by_source: dict[str, dict[str, Any]]) -> None:
@@ -627,6 +680,47 @@ def update_data_source_statistics(cursor, statistics_by_source: dict[str, dict[s
                 source_id,
             ),
         )
+        if cursor.rowcount != 1:
+            raise RuntimeError(f"Active demo data source {source_id} was not found")
+
+
+def update_profile_event_statistics(
+    cursor, statistics_by_profile: dict[str, dict[str, dict[str, int]]]
+) -> None:
+    """Persist seeded event counts on the tenant's master profiles."""
+    rows = [
+        (DEMO_TENANT_ID, profile_id, Json(statistics))
+        for profile_id, statistics in statistics_by_profile.items()
+    ]
+    for start in range(0, len(rows), 1000):
+        batch = rows[start : start + 1000]
+        execute_values(
+            cursor,
+            f"""
+            UPDATE {_table('cdp_master_profiles')} AS m
+            SET data_source_analytics = COALESCE(m.data_source_analytics, '{{}}'::jsonb) || (
+                SELECT jsonb_object_agg(
+                    entry.key,
+                    COALESCE(m.data_source_analytics -> entry.key, '{{}}'::jsonb) || entry.value
+                )
+                FROM jsonb_each(v.statistics) AS entry
+            )
+            FROM (VALUES %s) AS v(tenant_id, master_profile_id, statistics)
+            WHERE m.tenant_id = v.tenant_id
+              AND m.master_profile_id = v.master_profile_id
+              AND (m.data_source_analytics IS NULL OR jsonb_typeof(m.data_source_analytics) = 'object')
+              AND NOT EXISTS (
+                  SELECT 1 FROM jsonb_each(v.statistics) AS entry
+                  WHERE m.data_source_analytics ? entry.key
+                    AND jsonb_typeof(m.data_source_analytics -> entry.key) <> 'object'
+              );
+            """,
+            batch,
+            template="(%s::uuid, %s::uuid, %s::jsonb)",
+            page_size=len(batch),
+        )
+        if cursor.rowcount != len(batch):
+            raise RuntimeError("Could not update all demo profile event statistics")
 
 
 def seed_ai_agents(cursor) -> None:
@@ -637,14 +731,15 @@ def seed_ai_agents(cursor) -> None:
             f"""
             INSERT INTO {_table('cdp_ai_agents')}
                 (agent_code, display_name, description, model_type, status,
-                 schedule_definition, input_features, hyperparameters)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                 schedule_definition, journey_stage, input_features, hyperparameters)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (agent_code) DO UPDATE SET
                 display_name = EXCLUDED.display_name,
                 description = EXCLUDED.description,
                 model_type = EXCLUDED.model_type,
                 status = EXCLUDED.status,
                 schedule_definition = EXCLUDED.schedule_definition,
+                journey_stage = EXCLUDED.journey_stage,
                 input_features = EXCLUDED.input_features,
                 hyperparameters = EXCLUDED.hyperparameters,
                 updated_at = now();
@@ -656,10 +751,33 @@ def seed_ai_agents(cursor) -> None:
                 model["model_type"],
                 model["status"],
                 model["schedule_definition"],
+                model.get("journey_stage"),
                 model["input_features"],
                 Json(model["hyperparameters"]),
             ),
         )
+    cursor.execute(
+        f"""
+        UPDATE {_table('cdp_ai_agents')} AS a
+        SET journey_stage = v.journey_stage,
+            status = CASE WHEN v.activate THEN 'ACTIVE' ELSE a.status END,
+            schedule_definition = COALESCE(a.schedule_definition, v.default_schedule),
+            updated_at = now()
+        FROM (
+            VALUES
+                ('eligibility_policy', 'awareness', TRUE, '0 */6 * * *'),
+                ('lead_scoring', 'acquisition', TRUE, '0 */4 * * *'),
+                ('product_recommendation', 'activation', TRUE, '0 */2 * * *'),
+                ('journey_behavior_clustering', 'engagement', TRUE, '0 3 * * *'),
+                ('behavior_anomaly_detector', 'engagement', FALSE, '0 4 * * *'),
+                ('customer_demand_forecast', 'conversion', TRUE, '0 5 * * *'),
+                ('campaign_uplift', 'retention', TRUE, '0 6 * * *'),
+                ('clv_prediction', 'loyalty', TRUE, '0 2 * * 0'),
+                ('next_best_action', 'churned', TRUE, '0 1 * * *')
+        ) AS v(agent_code, journey_stage, activate, default_schedule)
+        WHERE a.agent_code = v.agent_code;
+        """
+    )
 
 
 def reset_tenant_scoped_demo_tables(cursor) -> None:
@@ -670,6 +788,8 @@ def reset_tenant_scoped_demo_tables(cursor) -> None:
     cursor.execute(f"DELETE FROM {_table('crm_campaign_performance_daily')} WHERE tenant_id = %s;", (DEMO_TENANT_ID,))
     cursor.execute(f"DELETE FROM {_table('crm_campaign_experiment_variants')} WHERE tenant_id = %s;", (DEMO_TENANT_ID,))
     cursor.execute(f"DELETE FROM {_table('crm_campaign_experiments')} WHERE tenant_id = %s;", (DEMO_TENANT_ID,))
+    cursor.execute(f"DELETE FROM {_table('crm_campaign_agent')} WHERE tenant_id = %s;", (DEMO_TENANT_ID,))
+    cursor.execute(f"DELETE FROM {_table('cdp_journey_metric_daily')} WHERE tenant_id = %s;", (DEMO_TENANT_ID,))
     cursor.execute(f"DELETE FROM {_table('graph_edges')} WHERE metadata->>'demo_tenant' = %s;", (DEMO_TENANT_ID,))
 
 
@@ -738,15 +858,27 @@ DOMAIN_TRANSACTION_CATALOG = METADATA.domain_transaction_catalog
 
 def seed_transactions(cursor, master_profiles: list) -> None:
     logger.info("Seeding crm_transactions per domain...")
-    for m in master_profiles:
+    now = datetime.now()
+    for idx, m in enumerate(master_profiles):
         rng = stable_rng(f"transactions:{m['master_profile_id']}")
         domain = _profile_domain(m["master_profile_id"], m["domain"])
         catalog = DOMAIN_TRANSACTION_CATALOG.get(domain)
         if catalog is None:
             continue
 
+        stage = JOURNEY_STAGES[idx % len(JOURNEY_STAGES)]
+        if stage == "loyalty":
+            day_offsets = [0, 0, 1, 2, 4, 8, 12, 20, 35, 50, 75, 110]
+        elif stage == "retention":
+            day_offsets = [0, 1, 3, 9, 18, 40, 65, 120]
+        elif stage == "churned":
+            day_offsets = [1, 2, 8, 10, 35, 45, 95, 130]
+        elif stage in ("conversion", "engagement"):
+            day_offsets = [0, 2, 6, 15, 28]
+        else:
+            day_offsets = [rng.randint(1, 25), rng.randint(26, 85), rng.randint(86, 175)]
 
-        for _ in range(rng.randint(2, 5)):
+        for day_ago in day_offsets:
             source_system, txn_type, entity_type, entity_name, amount_range, channel = rng.choice(catalog)
             cursor.execute(
                 f"""
@@ -759,7 +891,7 @@ def seed_transactions(cursor, master_profiles: list) -> None:
                 (
                     str(uuid.uuid4()), DEMO_TENANT_ID, m["master_profile_id"], source_system, txn_type,
                     "completed", entity_type, entity_name, rng.randint(*amount_range), "VND", channel,
-                    datetime.now() - timedelta(days=realistic_event_days_ago(rng), hours=rng.randint(0, 23)),
+                    now - timedelta(days=day_ago, hours=rng.randint(1, 20)),
                 ),
             )
 
@@ -893,6 +1025,83 @@ def link_crm_contacts_to_master_profiles(cursor, crm_ids: dict, master_profiles:
             (Json({"linked_master_profile_id": master_id}), contact_id),
         )
 
+    _seed_journey_metric_snapshots(cursor, master_profiles)
+
+
+def _seed_journey_metric_snapshots(cursor, master_profiles: list) -> None:
+    """Populate cdp_journey_metric_daily for all 8 journey stages across 1/7/30/90d windows."""
+    logger.info("Computing 8-stage Customer Journey Map KPI snapshots (current + prior windows)...")
+    today = datetime.now().date()
+    total_profiles = max(len(master_profiles), 100)
+
+    for day_offset in (90, 30, 7, 1, 0):
+        cursor.execute(
+            f"SELECT {_table('refresh_journey_metrics_pg')}(%s::uuid, %s::date);",
+            (DEMO_TENANT_ID, today - timedelta(days=day_offset)),
+        )
+
+    window_factors = {1: 0.08, 7: 0.35, 30: 1.0, 90: 2.4}
+    for window_days, factor in window_factors.items():
+        for is_prior, report_date in (
+            (True, today - timedelta(days=window_days)),
+            (False, today),
+        ):
+            prior_scale = 0.88 if is_prior else 1.0
+            visitors = max(12, round(total_profiles * 3.2 * factor * prior_scale))
+            new_leads = max(6, round(total_profiles * 0.92 * factor * prior_scale))
+            activated_users = max(4, round(total_profiles * 0.56 * factor * prior_scale))
+            orders_est = max(3, round(total_profiles * 0.34 * factor * prior_scale))
+
+            awareness_conv = round(min(95.0, 100.0 * new_leads / max(visitors, 1)), 2)
+            acquisition_conv = round(min(95.0, 100.0 * activated_users / max(new_leads, 1)), 2)
+            activation_conv = round(min(95.0, 100.0 * orders_est / max(activated_users, 1)), 2)
+            conversion_rate = round((14.2 if not is_prior else 12.6) * (0.95 + 0.02 * (window_days / 30)), 2)
+            referral_rate = round(18.4 if not is_prior else 16.1, 2)
+            winback_rate = round(22.5 if not is_prior else 19.0, 2)
+            churn_risk_rate = round(14.8 if not is_prior else 16.5, 2)
+
+            event_lake_rows = [
+                ("awareness", "visitors", float(visitors), None, float(visitors)),
+                ("awareness", "awareness_conversion", float(new_leads), float(visitors), awareness_conv),
+                ("acquisition", "new_leads", float(new_leads), None, float(new_leads)),
+                ("acquisition", "acquisition_conversion", float(activated_users), float(new_leads), acquisition_conv),
+                ("activation", "activated_users", float(activated_users), None, float(activated_users)),
+                ("activation", "activation_conversion", float(orders_est), float(activated_users), activation_conv),
+                ("conversion", "conversion_rate", float(orders_est), float(visitors), conversion_rate),
+                ("retention", "churn_risk_rate", round(total_profiles * churn_risk_rate / 100.0, 2), float(total_profiles), churn_risk_rate),
+                ("loyalty", "referral_rate", round(activated_users * referral_rate / 100.0, 2), float(activated_users), referral_rate),
+                ("churned", "winback_rate", round(total_profiles * 0.12 * winback_rate / 100.0, 2), round(total_profiles * 0.12, 2), winback_rate),
+            ]
+            for stage, metric_code, numerator, denominator, value in event_lake_rows:
+                cursor.execute(
+                    f"""
+                    INSERT INTO {_table('cdp_journey_metric_daily')}
+                        (tenant_id, report_date, window_days, business_model, domain_code,
+                         journey_stage, metric_code, dim_type, dim_value,
+                         numerator, denominator, value, currency)
+                    SELECT %s, %s, %s, 'B2C', NULL, %s, m.metric_code, 'all', '', %s, %s, %s, ''
+                      FROM {_table('cdp_journey_metric')} m
+                     WHERE m.metric_code = %s AND m.is_active
+                    ON CONFLICT (tenant_id, report_date, window_days, business_model, domain_code,
+                                 journey_stage, metric_code, dim_type, dim_value, currency)
+                    DO UPDATE SET
+                        numerator = EXCLUDED.numerator,
+                        denominator = EXCLUDED.denominator,
+                        value = EXCLUDED.value,
+                        computed_at = now();
+                    """,
+                    (
+                        DEMO_TENANT_ID,
+                        report_date,
+                        window_days,
+                        stage,
+                        numerator,
+                        denominator,
+                        value,
+                        metric_code,
+                    ),
+                )
+
 
 LIFECYCLE_STAGES = METADATA.lifecycle_stages
 OCCUPATIONS = METADATA.occupations
@@ -914,48 +1123,87 @@ def _make_persona_summary(domain: str, lifecycle_stage: str, preferred_channel: 
 
 def enrich_master_profiles(cursor, master_profiles: list) -> None:
     logger.info("Enriching %d master profiles with lifecycle/ML-scoring/domain-specific fields...", len(master_profiles))
-    for m in master_profiles:
+    for idx, m in enumerate(master_profiles):
         master_id = m["master_profile_id"]
         domain = _profile_domain(m["master_profile_id"], m["domain"])
         rng = stable_rng(f"enrich:{master_id}")
 
-        lifecycle_stage = rng.choice(LIFECYCLE_STAGES)
-        is_established_customer = lifecycle_stage in ("customer", "vip", "dormant", "churn_risk")
+        lifecycle_stage = LIFECYCLE_STAGES[idx % len(LIFECYCLE_STAGES)]
+        is_established_customer = lifecycle_stage in (
+            "engagement", "conversion", "retention", "loyalty", "churned",
+        )
         preferred_channel = rng.choice(
             DOMAIN_PREFERRED_CHANNELS.get(domain, DOMAIN_PREFERRED_CHANNELS["retail"])
         )
 
-        customer_since = (
-            (m["created_at"] - timedelta(days=rng.randint(0, 365))).date() if is_established_customer else None
-        )
-        last_activity_at = datetime.now() - timedelta(days=rng.randint(0, 30), hours=rng.randint(0, 23))
+        if lifecycle_stage == "loyalty":
+            customer_since = (m["created_at"] - timedelta(days=rng.randint(370, 720))).date()
+            last_activity_at = datetime.now() - timedelta(days=rng.randint(0, 7), hours=rng.randint(0, 23))
+            churn_probability = round(rng.uniform(0.02, 0.18), 4)
+            lead_conversion_probability = round(rng.uniform(0.75, 0.98), 4)
+            engagement_score = round(rng.uniform(78, 99), 2)
+        elif lifecycle_stage == "churned":
+            customer_since = (m["created_at"] - timedelta(days=rng.randint(120, 420))).date()
+            last_activity_at = datetime.now() - timedelta(days=rng.randint(45, 150), hours=rng.randint(0, 23))
+            churn_probability = round(rng.uniform(0.75, 0.98), 4)
+            lead_conversion_probability = round(rng.uniform(0.10, 0.45), 4)
+            engagement_score = round(rng.uniform(5, 32), 2)
+        elif lifecycle_stage == "retention":
+            customer_since = (m["created_at"] - timedelta(days=rng.randint(60, 360))).date()
+            last_activity_at = datetime.now() - timedelta(days=rng.randint(1, 21), hours=rng.randint(0, 23))
+            churn_probability = round(rng.uniform(0.15, 0.55), 4)
+            lead_conversion_probability = round(rng.uniform(0.55, 0.88), 4)
+            engagement_score = round(rng.uniform(60, 88), 2)
+        elif lifecycle_stage == "conversion":
+            customer_since = (m["created_at"] - timedelta(days=rng.randint(1, 28))).date()
+            last_activity_at = datetime.now() - timedelta(days=rng.randint(0, 10), hours=rng.randint(0, 23))
+            churn_probability = round(rng.uniform(0.08, 0.32), 4)
+            lead_conversion_probability = round(rng.uniform(0.70, 0.96), 4)
+            engagement_score = round(rng.uniform(65, 92), 2)
+        elif lifecycle_stage == "engagement":
+            customer_since = (m["created_at"] - timedelta(days=rng.randint(15, 180))).date()
+            last_activity_at = datetime.now() - timedelta(days=rng.randint(0, 14), hours=rng.randint(0, 23))
+            churn_probability = round(rng.uniform(0.10, 0.40), 4)
+            lead_conversion_probability = round(rng.uniform(0.50, 0.85), 4)
+            engagement_score = round(rng.uniform(55, 90), 2)
+        elif lifecycle_stage == "activation":
+            customer_since = None
+            last_activity_at = datetime.now() - timedelta(days=rng.randint(0, 14), hours=rng.randint(0, 23))
+            churn_probability = round(rng.uniform(0.15, 0.45), 4)
+            lead_conversion_probability = round(rng.uniform(0.45, 0.80), 4)
+            engagement_score = round(rng.uniform(45, 78), 2)
+        elif lifecycle_stage == "acquisition":
+            customer_since = None
+            last_activity_at = datetime.now() - timedelta(days=rng.randint(1, 25), hours=rng.randint(0, 23))
+            churn_probability = round(rng.uniform(0.20, 0.50), 4)
+            lead_conversion_probability = round(rng.uniform(0.40, 0.85), 4)
+            engagement_score = round(rng.uniform(35, 70), 2)
+        else:  # awareness
+            customer_since = (
+                (m["created_at"] - timedelta(days=rng.randint(0, 365))).date() if is_established_customer else None
+            )
+            last_activity_at = datetime.now() - timedelta(days=rng.randint(0, 30), hours=rng.randint(0, 23))
+            churn_probability = round(rng.uniform(0.10, 0.45), 4)
+            lead_conversion_probability = round(rng.uniform(0.15, 0.65), 4)
+            engagement_score = round(rng.uniform(20, 60), 2)
 
         num_sources = len(m.get("source_systems") or [])
         identity_confidence_score = min(1.0, round(0.5 + 0.15 * num_sources, 4))
 
-        churn_rand = rng.random()
-        if churn_rand < 0.65:
-            churn_probability = round(rng.uniform(0.0, 0.25), 4)
-        elif churn_rand < 0.85:
-            churn_probability = round(rng.uniform(0.25, 0.55), 4)
-        elif churn_rand < 0.95:
-            churn_probability = round(rng.uniform(0.55, 0.80), 4)
-        else:
-            churn_probability = round(rng.uniform(0.80, 1.0), 4)
         churn_risk_tier = (
             "critical" if churn_probability >= 0.85 else
             "high" if churn_probability >= 0.6 else
             "medium" if churn_probability >= 0.3 else "low"
         )
-        lead_conversion_probability = round(rng.uniform(0, 1), 4)
         lead_grade = "Hot" if lead_conversion_probability >= 0.7 else "Warm" if lead_conversion_probability >= 0.4 else "Cold"
         clv_config = DOMAIN_CLV_CONFIG.get(domain, DOMAIN_CLV_CONFIG["retail"])
         historical_clv = round(rng.uniform(500, 5000) * clv_config["multiplier"], 2)
+        if lifecycle_stage == "loyalty":
+            historical_clv = round(max(historical_clv, clv_config["high"] * 1.15), 2)
         predictive_clv = round(historical_clv * rng.uniform(1.0, 1.8), 2)
         clv_high_threshold = clv_config["high"]
         clv_medium_threshold = clv_config["medium"]
         clv_segment = "high" if predictive_clv > clv_high_threshold else "medium" if predictive_clv > clv_medium_threshold else "low"
-        engagement_score = round(rng.uniform(0, 100), 2)
         latest_nps_score = rng.randint(0, 10)
         average_csat = round(rng.uniform(1, 5), 2)
         overall_sentiment_score = round(rng.uniform(-1, 1), 4)
@@ -968,7 +1216,11 @@ def enrich_master_profiles(cursor, master_profiles: list) -> None:
                 "push_opt_in": rng.random() < 0.8,
             }
         )
-        attributes = Json({"occupation": rng.choice(OCCUPATIONS), "income_segment": rng.choice(INCOME_SEGMENTS)})
+        attributes = Json({
+            "occupation": rng.choice(OCCUPATIONS),
+            "income_segment": rng.choice(INCOME_SEGMENTS),
+            "journey_stage": lifecycle_stage,
+        })
         model_versions = Json({
             "churn_model": "v1", "clv_model": "v1", "lead_scoring_model": "v1",
             "cx_scoring_model": "v1", "data_quality_model": "v1",
@@ -1320,7 +1572,6 @@ def fetch_event_profiles(cursor) -> list:
           ON r.tenant_id = l.tenant_id
          AND r.raw_profile_id = l.raw_profile_id
         WHERE m.tenant_id = %s
-          AND m.status_code = 1
         ORDER BY m.master_profile_id, r.raw_profile_id;
         """,
         (DEMO_TENANT_ID,),
@@ -1376,7 +1627,7 @@ def _ensure_demo_s3_bucket(client: Any, bucket: str) -> None:
             raise RuntimeError(f"Could not create demo event bucket {bucket}") from exc
 
 
-def _clear_demo_event_objects(client: Any, bucket: str) -> None:
+def _clear_demo_event_objects(client: Any, bucket: str, source_id: str) -> None:
     from botocore.exceptions import BotoCoreError, ClientError
 
     try:
@@ -1385,16 +1636,23 @@ def _clear_demo_event_objects(client: Any, bucket: str) -> None:
             str(item["Key"])
             for page in paginator.paginate(Bucket=bucket, Prefix="events/")
             for item in page.get("Contents", [])
-            if "-demo-behavioral-" in str(item.get("Key", ""))
+            if str(item.get("Key", "")).rsplit("/", 1)[-1]
+            == f"demo-behavioral-{source_id}.jsonl.gz"
         ]
-        for start in range(0, len(keys), 1000):
-            client.delete_objects(
+        object_keys = keys + [
+            f"_processed/{uuid.uuid5(uuid.NAMESPACE_URL, f's3://{bucket}/{key}')}.json"
+            for key in keys
+        ]
+        for start in range(0, len(object_keys), 1000):
+            response = client.delete_objects(
                 Bucket=bucket,
                 Delete={
-                    "Objects": [{"Key": key} for key in keys[start : start + 1000]],
+                    "Objects": [{"Key": key} for key in object_keys[start : start + 1000]],
                     "Quiet": True,
                 },
             )
+            if response.get("Errors"):
+                raise RuntimeError(f"Could not clear prior demo event objects from {bucket}")
     except (BotoCoreError, ClientError) as exc:
         raise RuntimeError(f"Could not clear prior demo event objects from {bucket}") from exc
 
@@ -1419,6 +1677,8 @@ def _build_behavioral_event(
     raw_profile: dict,
     event_index: int,
     event_time: datetime,
+    source_id: str,
+    session_index: int,
 ) -> dict[str, Any]:
     domain = _profile_domain(str(profile["master_profile_id"]), profile.get("domain"))
     templates = BEHAVIORAL_EVENT_TEMPLATES.get(domain, BEHAVIORAL_EVENT_TEMPLATES["retail"])
@@ -1427,7 +1687,7 @@ def _build_behavioral_event(
     device_type = "mobile" if channel == "mobile_app" else "desktop"
     source_system = _event_output_source(raw_profile.get("source_system"))
     event_id = str(uuid.uuid5(DEMO_NAMESPACE, f"behavioral-event:{DEMO_TENANT_ID}:{event_index}"))
-    session_id = f"demo-session-{event_index // 5:06d}"
+    session_id = f"demo-{profile['master_profile_id']}-{session_index // 5}"
     entity_id = f"demo-{entity_type}-{rng.randint(1, 5000):05d}"
     event_value = round(rng.uniform(150_000, 3_000_000), 2) if is_conversion else None
     payload = {
@@ -1459,7 +1719,7 @@ def _build_behavioral_event(
         "schema_version": 1,
         "ingestion_version": "demo-1.0",
         "event_id": event_id,
-        "data_source_id": str(uuid.uuid5(DEMO_NAMESPACE, f"sys_data_source:{_event_source_slug(raw_profile.get('source_system'))}")),
+        "data_source_id": source_id,
         "tenant_id": DEMO_TENANT_ID,
         "event_time": event_time.isoformat(),
         "received_at": (event_time + timedelta(seconds=rng.randint(1, 90))).isoformat(),
@@ -1483,6 +1743,7 @@ def _build_behavioral_event(
 
 def _calculate_event_statistics(
     batches: dict[tuple[str, str], list[dict[str, Any]]],
+    source_ids: dict[str, str],
 ) -> dict[str, dict[str, Any]]:
     """Calculate data-source metrics from the event envelopes queued for S3."""
     source_totals: dict[str, int] = defaultdict(int)
@@ -1499,8 +1760,7 @@ def _calculate_event_statistics(
         )
 
     statistics_by_source: dict[str, dict[str, Any]] = {}
-    for source_slug in sorted(set(BEHAVIORAL_SOURCE_SLUGS.values())):
-        source_id = str(uuid.uuid5(DEMO_NAMESPACE, f"sys_data_source:{source_slug}"))
+    for source_id in sorted(set(source_ids.values())):
         total_events = source_totals[source_id]
         statistics_by_source[source_id] = {
             "total_tracked_event": total_events,
@@ -1522,6 +1782,7 @@ def _validate_event_batches(
     batches: dict[tuple[str, str], list[dict[str, Any]]],
     expected_event_count: int,
     now: datetime,
+    expected_profiles: set[str],
 ) -> None:
     """Validate S3 batch counts, partitions, and the enforced 30-day timeline."""
     actual_event_count = sum(len(envelopes) for envelopes in batches.values())
@@ -1531,8 +1792,12 @@ def _validate_event_batches(
         )
 
     window_start = now - timedelta(days=BEHAVIORAL_EVENT_LOOKBACK_DAYS)
+    profile_counts: dict[str, int] = defaultdict(int)
     for (source_id, event_hour), envelopes in batches.items():
         for envelope in envelopes:
+            profile_counts[str(envelope["master_profile_id"])] += 1
+            if envelope["data_source_id"] != source_id:
+                raise RuntimeError(f"Event {envelope['event_id']} is in the wrong source bucket")
             event_time = datetime.fromisoformat(envelope["event_time"])
             received_at = datetime.fromisoformat(envelope["received_at"])
             if not window_start <= event_time <= now:
@@ -1547,14 +1812,20 @@ def _validate_event_batches(
                 raise RuntimeError(
                     f"Event {envelope['event_id']} is in the wrong S3 timeline partition"
                 )
+    if set(profile_counts) != expected_profiles:
+        raise RuntimeError("Generated events do not cover exactly the seeded master profiles")
+    if any(count < MIN_EVENTS_PER_MASTER_PROFILE for count in profile_counts.values()):
+        raise RuntimeError("A seeded master profile has too few behavioral events")
 
 
 def seed_behavioral_events(
     event_profiles: list,
     *,
+    source_ids: dict[str, str],
+    expected_profiles: set[str],
     event_count: int = BEHAVIORAL_EVENT_COUNT,
     s3_client: Any | None = None,
-) -> dict[str, dict[str, Any]]:
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, dict[str, int]]]]:
     if not event_profiles:
         raise RuntimeError("No raw/master profile links found for behavioral events")
     if event_count < 1:
@@ -1563,32 +1834,53 @@ def seed_behavioral_events(
     for row in event_profiles:
         profiles_by_master[str(row["master_profile_id"])].append(row)
     masters = sorted(profiles_by_master)
+    if set(masters) != expected_profiles:
+        missing = len(expected_profiles - set(masters))
+        unexpected = len(set(masters) - expected_profiles)
+        raise RuntimeError(
+            f"Cannot seed events: {missing} master profiles lack an active raw link; "
+            f"{unexpected} linked profiles are unexpected"
+        )
+    missing_sources = set(BEHAVIORAL_SOURCE_SLUGS.values()) - set(source_ids)
+    if missing_sources:
+        raise RuntimeError(f"Missing registered demo data sources: {sorted(missing_sources)}")
+    event_count = max(event_count, len(masters) * MIN_EVENTS_PER_MASTER_PROFILE)
     now = datetime.now(timezone.utc)
-    start = now - timedelta(days=BEHAVIORAL_EVENT_LOOKBACK_DAYS)
+    start = now - timedelta(days=BEHAVIORAL_EVENT_LOOKBACK_DAYS) + timedelta(hours=1)
     rng = stable_rng(f"behavioral-events:{DEMO_TENANT_ID}:{event_count}:{BEHAVIORAL_EVENT_LOOKBACK_DAYS}")
     latest_event_time = now - timedelta(seconds=90)
     span_seconds = max(1, int((latest_event_time - start).total_seconds()))
     batches: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    profile_statistics: dict[str, dict[str, dict[str, int]]] = {
+        master_id: {
+            source_id: {"total_tracked_events": 0}
+            for source_id in set(source_ids.values())
+        }
+        for master_id in masters
+    }
     for event_index in range(event_count):
         master_id = masters[event_index % len(masters)]
-        raw_profile = profiles_by_master[master_id][event_index % len(profiles_by_master[master_id])]
+        profile_event_index = event_index // len(masters)
+        raw_profile = profiles_by_master[master_id][profile_event_index % len(profiles_by_master[master_id])]
+        source_id = source_ids[_event_source_slug(raw_profile.get("source_system"))]
         event_time = start + timedelta(seconds=rng.randint(0, span_seconds))
         envelope = _build_behavioral_event(
             {"master_profile_id": master_id, "domain": raw_profile.get("domain")},
             raw_profile,
             event_index,
             event_time,
+            source_id,
+            profile_event_index,
         )
-        source_id = str(uuid.uuid5(DEMO_NAMESPACE, f"sys_data_source:{_event_source_slug(raw_profile.get('source_system'))}"))
+        profile_statistics[master_id][source_id]["total_tracked_events"] += 1
         batches[(source_id, _behavioral_event_hour(event_time))].append(envelope)
 
-    _validate_event_batches(batches, event_count, now)
+    _validate_event_batches(batches, event_count, now, expected_profiles)
     client = s3_client or _build_demo_s3_client()
-    for source_slug in sorted(set(BEHAVIORAL_SOURCE_SLUGS.values())):
-        source_id = str(uuid.uuid5(DEMO_NAMESPACE, f"sys_data_source:{source_slug}"))
+    for source_id in sorted(set(source_ids.values())):
         bucket = f"data-tracking-{source_id}"
         _ensure_demo_s3_bucket(client, bucket)
-        _clear_demo_event_objects(client, bucket)
+        _clear_demo_event_objects(client, bucket, source_id)
 
     for (source_id, event_hour), envelopes in sorted(batches.items()):
         bucket = f"data-tracking-{source_id}"
@@ -1633,7 +1925,7 @@ def seed_behavioral_events(
             ).encode("utf-8"),
             ContentType="application/json",
         )
-    statistics_by_source = _calculate_event_statistics(batches)
+    statistics_by_source = _calculate_event_statistics(batches, source_ids)
     if sum(item["total_tracked_event"] for item in statistics_by_source.values()) != event_count:
         raise RuntimeError("S3 event totals do not match generated event count")
     logger.info(
@@ -1642,7 +1934,7 @@ def seed_behavioral_events(
         len(batches),
         BEHAVIORAL_EVENT_LOOKBACK_DAYS,
     )
-    return statistics_by_source
+    return statistics_by_source, profile_statistics
 
 
 @dataclass(frozen=True)
@@ -1659,6 +1951,8 @@ class FullDemoSeeder:
 
     def __init__(self, connection: DatabaseConnection) -> None:
         self.connection = connection
+        self.source_ids: dict[str, str] = {}
+        self.expected_profiles: set[str] = set()
 
     def seed_database(self, cursor) -> tuple[SeedResult, list]:
         """Seed fixtures in dependency order and return profiles for S3 events."""
@@ -1674,10 +1968,9 @@ class FullDemoSeeder:
 
         seed_relation_types(cursor)
         crm_ids = seed_crm_entities(cursor)
-        seed_data_sources(cursor)
+        self.source_ids = seed_data_sources(cursor)
         seed_ai_agents(cursor)
         reset_tenant_scoped_demo_tables(cursor)
-        event_profiles = fetch_event_profiles(cursor)
         experiment_variants = seed_campaign_experiments(cursor, crm_ids["campaign"])
         seed_campaign_performance_daily(cursor, crm_ids["campaign"], experiment_variants)
         seed_relations(cursor, detail_profiles)
@@ -1686,6 +1979,16 @@ class FullDemoSeeder:
         seed_graph_edges(cursor, crm_ids, detail_profiles)
         enrich_master_profiles(cursor, master_profiles)
         master_profiles = fetch_master_profiles(cursor)
+        self.expected_profiles = {str(profile["master_profile_id"]) for profile in master_profiles}
+        event_profiles = fetch_event_profiles(cursor)
+        if os.environ.get("CIR_VALIDATE_DEMO_COVERAGE") == "1":
+            domains = {profile["domain"] for profile in master_profiles}
+            missing = RESET_DEMO_DOMAINS - domains
+            if len(master_profiles) <= 5000 or missing:
+                raise RuntimeError(
+                    f"Demo requires more than 5000 resolved profiles in all six domains; "
+                    f"found {len(master_profiles)}, missing domains: {sorted(missing)}"
+                )
         archetypes = seed_persona_archetypes(cursor)
         personas_computed = seed_customer_personas(cursor, master_profiles, archetypes)
         seed_content_items(cursor)
@@ -1697,9 +2000,14 @@ class FullDemoSeeder:
         try:
             with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
                 result, event_profiles = self.seed_database(cursor)
-            statistics = seed_behavioral_events(event_profiles)
+            statistics, profile_statistics = seed_behavioral_events(
+                event_profiles,
+                source_ids=self.source_ids,
+                expected_profiles=self.expected_profiles,
+            )
             with self.connection.cursor() as cursor:
                 update_data_source_statistics(cursor, statistics)
+                update_profile_event_statistics(cursor, profile_statistics)
             self.connection.commit()
             self.log_result(result)
             return result
@@ -1722,6 +2030,7 @@ class FullDemoSeeder:
 
 def main() -> None:
     """Run the existing full-demo CLI without changing its launch commands."""
+    logging.getLogger("leo_customer360_dao.agentic_engines.persona_engine").setLevel(logging.WARNING)
     if len(sys.argv) > 1 and sys.argv[1] == "--new-data":
         raise SystemExit(
             "--new-data moved to customer360-seeding/seed_api_data.py; "

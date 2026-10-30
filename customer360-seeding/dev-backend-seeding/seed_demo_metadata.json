@@ -397,7 +397,7 @@
       "Active",
       "Paid Search",
       "Google",
-      "Conversions",
+      "App Install",
       250000000,
       -60,
       30,
@@ -462,7 +462,7 @@
       "Completed",
       "Email",
       "Google",
-      "Conversions",
+      "Win-back",
       80000000,
       -120,
       -30,
@@ -488,7 +488,7 @@
       "Draft",
       "Paid Search",
       "Google",
-      "Conversions",
+      "Loyalty",
       400000000,
       5,
       90,
@@ -851,6 +851,7 @@
       "model_type": "classification",
       "status": "ACTIVE",
       "schedule_definition": "0 2 * * *",
+      "journey_stage": "churned",
       "input_features": [
         "last_activity_at",
         "total_spend",
@@ -869,6 +870,7 @@
       "model_type": "regression",
       "status": "ACTIVE",
       "schedule_definition": "0 3 * * 0",
+      "journey_stage": "loyalty",
       "input_features": [
         "historical_clv",
         "average_order_value",
@@ -886,6 +888,7 @@
       "model_type": "rules_engine",
       "status": "ACTIVE",
       "schedule_definition": "*/15 * * * *",
+      "journey_stage": "acquisition",
       "input_features": [
         "email_opens",
         "website_visits",
@@ -906,6 +909,7 @@
       "model_type": "generative_llm",
       "status": "ACTIVE",
       "schedule_definition": "0 * * * *",
+      "journey_stage": "retention",
       "input_features": [
         "feedback_text",
         "support_notes",
@@ -923,6 +927,7 @@
       "model_type": "classification",
       "status": "ACTIVE",
       "schedule_definition": "0 1 * * *",
+      "journey_stage": "awareness",
       "input_features": [
         "email_normalized",
         "phone_normalized",
@@ -1199,12 +1204,14 @@
     ]
   },
   "lifecycle_stages": [
-    "prospect",
-    "lead",
-    "customer",
-    "vip",
-    "dormant",
-    "churn_risk"
+    "awareness",
+    "acquisition",
+    "activation",
+    "engagement",
+    "conversion",
+    "retention",
+    "loyalty",
+    "churned"
   ],
   "occupations": [
     "engineer",

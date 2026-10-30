@@ -165,8 +165,14 @@ window.C360 = window.C360 || {};
 
   function lifecycleBadgeClass(stage) {
     var map = {
-      vip: "bg-purple-100 text-purple-700", customer: "bg-green-100 text-green-700", lead: "bg-blue-100 text-blue-700",
-      prospect: "bg-slate-100 text-slate-600", dormant: "bg-yellow-100 text-yellow-700", churn_risk: "bg-red-100 text-red-700"
+      awareness: "bg-sky-100 text-sky-700",
+      acquisition: "bg-indigo-100 text-indigo-700",
+      activation: "bg-violet-100 text-violet-700",
+      engagement: "bg-blue-100 text-blue-700",
+      conversion: "bg-emerald-100 text-emerald-700",
+      retention: "bg-teal-100 text-teal-700",
+      loyalty: "bg-purple-100 text-purple-700",
+      churned: "bg-rose-100 text-rose-700"
     };
     return map[stage] || "bg-slate-100 text-slate-600";
   }

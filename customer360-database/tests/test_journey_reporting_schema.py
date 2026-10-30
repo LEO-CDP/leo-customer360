@@ -4,11 +4,11 @@ from pathlib import Path
 DATABASE_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_journey_reporting_is_in_canonical_schema_and_upgrade_migration():
+def test_journey_reporting_is_in_canonical_schema_and_upgrade():
     schema = (DATABASE_ROOT / "database-schema.sql").read_text(encoding="utf-8")
-    migration = (
-        DATABASE_ROOT / "migrations" / "018_journey_report.sql"
-    ).read_text(encoding="utf-8")
+    migration = (DATABASE_ROOT / "legacy-upgrade.sql").read_text(encoding="utf-8").split(
+        "-- Historical step: 018_journey_report.sql", 1
+    )[1]
 
     for sql in (schema, migration):
         assert "CREATE TABLE IF NOT EXISTS customer360.cdp_journey_metric (" in sql

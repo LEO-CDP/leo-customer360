@@ -38,7 +38,7 @@ def _profile(**overrides):
     base = {
         "master_profile_id": "11111111-1111-1111-1111-111111111111",
         "domain": "retail",
-        "lifecycle_stage": "customer",
+        "lifecycle_stage": "conversion",
         "membership_tier": "gold",
         "customer_since": date.today() - timedelta(days=365),
         "last_activity_at": datetime.now() - timedelta(days=1),
@@ -71,11 +71,17 @@ def _reset_persona_engine_config():
 
 class TestComponentScores:
     def test_behavior_score_uses_lifecycle_base(self):
-        assert compute_behavior_score(_profile(lifecycle_stage="vip", engagement_score=None)) == 95.0
-        assert compute_behavior_score(_profile(lifecycle_stage="prospect", engagement_score=None)) == 20.0
+        assert compute_behavior_score(_profile(lifecycle_stage="loyalty", engagement_score=None)) == 95.0
+        assert compute_behavior_score(_profile(lifecycle_stage="awareness", engagement_score=None)) == 20.0
+        assert compute_behavior_score(_profile(lifecycle_stage="acquisition", engagement_score=None)) == 40.0
+        assert compute_behavior_score(_profile(lifecycle_stage="activation", engagement_score=None)) == 50.0
+        assert compute_behavior_score(_profile(lifecycle_stage="engagement", engagement_score=None)) == 60.0
+        assert compute_behavior_score(_profile(lifecycle_stage="conversion", engagement_score=None)) == 65.0
+        assert compute_behavior_score(_profile(lifecycle_stage="retention", engagement_score=None)) == 75.0
+        assert compute_behavior_score(_profile(lifecycle_stage="churned", engagement_score=None)) == 30.0
 
     def test_behavior_score_blends_with_existing_engagement_score(self):
-        score = compute_behavior_score(_profile(lifecycle_stage="customer", engagement_score=100.0))
+        score = compute_behavior_score(_profile(lifecycle_stage="conversion", engagement_score=100.0))
         assert score == (65.0 + 100.0) / 2.0
 
     def test_behavior_score_defaults_for_unknown_lifecycle(self):
@@ -210,15 +216,15 @@ class TestPersonaScoreAggregation:
         assert compute_risk_level(30) == "low"
 
     def test_next_best_action_prioritizes_churn_retention(self):
-        action = compute_next_best_action(lifecycle_stage="customer", value_tier="high_value", risk_level="high")
+        action = compute_next_best_action(lifecycle_stage="conversion", value_tier="high_value", risk_level="high")
         assert "retention" in action.lower() or "win-back" in action.lower()
 
-    def test_next_best_action_dormant(self):
-        action = compute_next_best_action(lifecycle_stage="dormant", value_tier="standard", risk_level="low")
+    def test_next_best_action_churned(self):
+        action = compute_next_best_action(lifecycle_stage="churned", value_tier="standard", risk_level="low")
         assert "re-engagement" in action.lower() or "win-back" in action.lower()
 
     def test_next_best_action_default_cadence(self):
-        action = compute_next_best_action(lifecycle_stage="customer", value_tier="standard", risk_level="low")
+        action = compute_next_best_action(lifecycle_stage="engagement", value_tier="standard", risk_level="low")
         assert action == "Continue standard engagement cadence."
 
     def test_persona_category_combines_tier_and_domain_role(self):
@@ -226,8 +232,8 @@ class TestPersonaScoreAggregation:
         assert "Banking" in category or "Client" in category
 
     def test_persona_code_is_stable_slug(self):
-        code = compute_persona_code("retail", "high_value", "customer")
-        assert code == "retail_high_value_customer"
+        code = compute_persona_code("retail", "high_value", "conversion")
+        assert code == "retail_high_value_conversion"
 
     def test_persona_code_handles_missing_lifecycle(self):
         code = compute_persona_code("retail", "standard", None)

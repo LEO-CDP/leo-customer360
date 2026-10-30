@@ -86,12 +86,22 @@ fail() {
 }
 
 if [[ "$E2E_APPLY_LOCAL_MIGRATIONS" == "true" ]]; then
-	MIGRATION_FILE="$ROOT_DIR/customer360-database/migrations/009_data_source_analytics.sql"
-	[[ -f "$MIGRATION_FILE" ]] || fail "missing analytics migration: $MIGRATION_FILE"
-	log "Applying idempotent local analytics schema migration"
+	UPGRADE_FILE="$ROOT_DIR/customer360-database/legacy-upgrade.sql"
+	[[ -f "$UPGRADE_FILE" ]] || fail "missing database upgrade: $UPGRADE_FILE"
+	log "Checking the consolidated local database upgrade"
 	docker exec -i "$POSTGRES_CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" \
-		-v ON_ERROR_STOP=1 < "$MIGRATION_FILE" >/dev/null || \
-		fail "could not apply $MIGRATION_FILE"
+		-v ON_ERROR_STOP=1 < "$UPGRADE_FILE" >/dev/null || \
+		fail "could not apply $UPGRADE_FILE"
+	analytics_columns="$(docker exec -i "$POSTGRES_CONTAINER" psql -X -qAt \
+		-U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -v schema_name="$DB_SCHEMA" <<'SQL'
+SELECT count(*) FROM information_schema.columns
+WHERE table_schema = :'schema_name'
+  AND table_name IN ('cdp_raw_profiles_stage', 'cdp_master_profiles')
+  AND column_name = 'data_source_analytics';
+SQL
+	)" || fail "could not verify analytics schema"
+	[[ "$analytics_columns" == "2" ]] || \
+		fail "analytics columns are missing; initialize the current database schema"
 fi
 
 [[ -x "$CIR_PYTHON" ]] || fail "identity-resolution virtualenv is missing: $CIR_PYTHON"

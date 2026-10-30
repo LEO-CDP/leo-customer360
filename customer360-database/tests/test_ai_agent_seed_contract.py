@@ -15,6 +15,14 @@ class AiAgentSeedContractTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         cls.repository_root = repository_root
 
+    def historical_step(self, filename):
+        upgrade = (
+            self.repository_root / "customer360-database" / "legacy-upgrade.sql"
+        ).read_text(encoding="utf-8")
+        return upgrade.split(f"-- Historical step: {filename}", 1)[1].split(
+            "-- Historical step: ", 1
+        )[0]
+
     def test_pandas_guidance_is_valid_python(self):
         expressions = re.findall(
             r"\$pandas\$(.*?)\$pandas\$", self.seed_sql, re.DOTALL
@@ -140,12 +148,7 @@ class AiAgentSeedContractTests(unittest.TestCase):
         schema = (
             self.repository_root / "customer360-database" / "database-schema.sql"
         ).read_text(encoding="utf-8")
-        migration = (
-            self.repository_root
-            / "customer360-database"
-            / "migrations"
-            / "006_cdp_agent_workflow.sql"
-        ).read_text(encoding="utf-8")
+        migration = self.historical_step("006_cdp_agent_workflow.sql")
         for sql in (schema, migration):
             self.assertIn(
                 "CREATE TABLE IF NOT EXISTS customer360.cdp_profile_recommendation_runs",
@@ -164,12 +167,7 @@ class AiAgentSeedContractTests(unittest.TestCase):
         schema = (
             self.repository_root / "customer360-database" / "database-schema.sql"
         ).read_text(encoding="utf-8")
-        workflow_migration = (
-            self.repository_root
-            / "customer360-database"
-            / "migrations"
-            / "006_cdp_agent_workflow.sql"
-        ).read_text(encoding="utf-8")
+        workflow_migration = self.historical_step("006_cdp_agent_workflow.sql")
         self.assertIn("embedding VECTOR,", schema)
         self.assertIn("embedding_model TEXT", schema)
         self.assertIn("ADD COLUMN IF NOT EXISTS embedding VECTOR", workflow_migration)
@@ -260,12 +258,7 @@ class AiAgentSeedContractTests(unittest.TestCase):
         )
 
     def test_graph_agent_type_removal_is_guarded_for_existing_databases(self):
-        migration = (
-            self.repository_root
-            / "customer360-database"
-            / "migrations"
-            / "013_remove_graph_ml_agent_type.sql"
-        ).read_text(encoding="utf-8")
+        migration = self.historical_step("013_remove_graph_ml_agent_type.sql")
         schema = (
             self.repository_root / "customer360-database" / "database-schema.sql"
         ).read_text(encoding="utf-8")
@@ -277,12 +270,7 @@ class AiAgentSeedContractTests(unittest.TestCase):
         self.assertIn("DELETE FROM customer360.cdp_ai_agents", migration)
 
     def test_semantic_embedding_agent_removal_is_guarded_for_existing_databases(self):
-        migration = (
-            self.repository_root
-            / "customer360-database"
-            / "migrations"
-            / "015_remove_semantic_embedding_agent_type.sql"
-        ).read_text(encoding="utf-8")
+        migration = self.historical_step("015_remove_semantic_embedding_agent_type.sql")
         schema = (
             self.repository_root / "customer360-database" / "database-schema.sql"
         ).read_text(encoding="utf-8")
@@ -295,12 +283,7 @@ class AiAgentSeedContractTests(unittest.TestCase):
         self.assertIn("DELETE FROM customer360.cdp_ai_agents", migration)
 
     def test_eligibility_activation_migration_preserves_operator_statuses(self):
-        migration = (
-            self.repository_root
-            / "customer360-database"
-            / "migrations"
-            / "014_activate_eligibility_policy.sql"
-        ).read_text(encoding="utf-8")
+        migration = self.historical_step("014_activate_eligibility_policy.sql")
         self.assertIn("agent_code = 'eligibility_policy'", migration)
         self.assertIn("status = 'INACTIVE'", migration)
         self.assertNotIn("status = 'FAILED'", migration)

@@ -312,8 +312,8 @@ class TrackingLogClient:
 		self,
 		*,
 		data_source_id: UUID,
-		session_id: str,
-		user_id: str,
+		session_id: str | None,
+		user_id: str | None,
 		events: list[dict[str, Any]],
 		user_agent: str | None = None,
 	) -> dict[str, Any]:

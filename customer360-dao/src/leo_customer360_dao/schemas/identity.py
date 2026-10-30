@@ -75,12 +75,13 @@ class MasterProfileBase(BaseModel):
     source_systems: Optional[list[str]] = None
     first_seen_raw_profile_id: Optional[uuid.UUID] = None
 
-    # Customer lifecycle & engagement tracking (prospect -> lead -> customer).
+    # Customer lifecycle & engagement tracking (8-stage Customer Journey Map).
     customer_since: Optional[date] = None
     last_activity_at: Optional[datetime] = None
     preferred_channel: Optional[str] = None
     lifecycle_stage: Optional[str] = Field(
-        default=None, pattern="^(prospect|lead|customer|vip|dormant|churn_risk)$"
+        default=None,
+        pattern="^(awareness|acquisition|activation|engagement|conversion|retention|loyalty|churned)$",
     )
     persona_summary: Optional[str] = None
 
@@ -155,7 +156,8 @@ class MasterProfileUpdate(BaseModel):
     last_activity_at: Optional[datetime] = None
     preferred_channel: Optional[str] = None
     lifecycle_stage: Optional[str] = Field(
-        default=None, pattern="^(prospect|lead|customer|vip|dormant|churn_risk)$"
+        default=None,
+        pattern="^(awareness|acquisition|activation|engagement|conversion|retention|loyalty|churned)$",
     )
     persona_summary: Optional[str] = None
     lead_conversion_probability: Optional[Decimal] = None
@@ -619,7 +621,8 @@ class CustomerPersonaBase(BaseModel):
     risk_score: Optional[Decimal] = None
 
     lifecycle_stage: Optional[str] = Field(
-        default=None, pattern="^(prospect|lead|customer|vip|dormant|churn_risk)$"
+        default=None,
+        pattern="^(awareness|acquisition|activation|engagement|conversion|retention|loyalty|churned)$",
     )
     customer_value_tier: Optional[str] = None
     risk_level: Optional[str] = Field(default=None, pattern="^(low|medium|high|critical)$")
@@ -645,7 +648,8 @@ class CustomerPersonaUpdate(BaseModel):
     relationship_score: Optional[Decimal] = None
     risk_score: Optional[Decimal] = None
     lifecycle_stage: Optional[str] = Field(
-        default=None, pattern="^(prospect|lead|customer|vip|dormant|churn_risk)$"
+        default=None,
+        pattern="^(awareness|acquisition|activation|engagement|conversion|retention|loyalty|churned)$",
     )
     customer_value_tier: Optional[str] = None
     risk_level: Optional[str] = Field(default=None, pattern="^(low|medium|high|critical)$")

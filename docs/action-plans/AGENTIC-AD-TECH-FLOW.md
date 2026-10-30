@@ -95,7 +95,7 @@ Implication: this story must convert `campaign_activation` and `data_synch` into
 
 ### SUBTASK-01: Schema and Migration Foundation for Ad Tech
 
-Component: `customer360-database/migrations` + `customer360-promotions/sql-scripts`
+Component: `customer360-database/legacy-upgrade.sql` + `customer360-promotions/sql-scripts`
 Priority: P0 Blocker  
 Depends on: none  
 Blocks: SUBTASK-02..08  

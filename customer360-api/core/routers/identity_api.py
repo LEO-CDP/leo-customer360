@@ -114,7 +114,8 @@ def list_master_profiles(
     data_source_id: Optional[uuid.UUID] = Query(default=None),
     domain: Optional[str] = Query(default=None),
     lifecycle_stage: Optional[str] = Query(
-        default=None, pattern="^(prospect|lead|customer|vip|dormant|churn_risk)$"
+        default=None,
+        pattern="^(awareness|acquisition|activation|engagement|conversion|retention|loyalty|churned)$",
     ),
     domain_attribute_key: Optional[str] = Query(
         default=None,

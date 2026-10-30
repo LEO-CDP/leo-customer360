@@ -56,7 +56,7 @@ The suite runs against a **shared** UAT tenant, so every case cleans up after it
 
 ## 4. SCRUM-93 — Schema & Migration Foundation
 
-**ACs:** (a) migrations apply & rollback cleanly; (b) new FKs enforce consistency
+**ACs:** (a) schema and legacy upgrade apply cleanly; (b) new FKs enforce consistency
 (lead-source, campaign↔template/segment/content); (c) RLS on all new tenant-scoped
 tables; (d) SQLAlchemy models + Pydantic schemas updated.
 
@@ -71,15 +71,15 @@ tables; (d) SQLAlchemy models + Pydantic schemas updated.
 | S93-07 | b | `crm_lead.lead_source_id` → non-existent lead-source | Integrity | E2E | 4xx FK violation | delete lead if created |
 | S93-08 | c/d | `crm_segment_sync_runs` list endpoint queryable + tenant-scoped | Positive | E2E | 200 list (`[]` for empty tenant) | none |
 | S93-09 | c | RLS: a sync-run created under tenant A not visible/editable to tenant B | Isolation | E2E | GET run as other tenant → 404 | segment delete cascades run |
-| S93-10 | a | Forward migration `002_*.sql` applies (idempotent, re-runnable) | Positive | DB smoke | tables/columns/FK/index/RLS present; second run no-op | scratch DB dropped |
-| S93-11 | a | Rollback `002_*.down.sql` reverses cleanly | Positive | DB smoke | all objects dropped in dependency-safe order | scratch DB dropped |
+| S93-10 | a | Consolidated legacy upgrade applies and reruns safely | Positive | DB smoke | tables/columns/FK/index/RLS present; second run skips completed steps | scratch DB dropped |
+| S93-11 | a | Recovery after upgrade failure | Recovery | DB smoke | failure leaves completion marker unset; repair and retry succeeds | scratch DB dropped |
 | S93-12 | c | RLS `ENABLE`+`FORCE`+`tenant_policy` on the 3 new tables | Integrity | DB smoke | `pg_policies` shows `tenant_policy`; blank `app.tenant_id` → 0 rows | scratch DB dropped |
 | S93-13 | d | Models importable & mapped (`MessageTemplate`, `CampaignContentItem`, `SegmentSyncRun`) | Positive | Unit | import + metadata assert | n/a |
 | S93-14 | b | `crm_campaign_content_items` unique `(campaign_id, content_item_id)` | Integrity | DB smoke / Unit | duplicate link rejected | scratch DB |
 
-> **Not E2E-automatable:** S93-10/11/12/14 have **no HTTP surface** (migrations run via
+> **Not E2E-automatable:** S93-10/11/12/14 have **no HTTP surface** (upgrades run via
 > `run-sql.sh`; `crm_campaign_content_items` has no router). They are covered by a
-> **DB smoke** (`psql` apply-then-rollback on a scratch DB — see §6) and by the unit
+> **DB smoke** (scratch database — see §6) and by the unit
 > suite. S93-13 is covered by `models/__init__.py` import + existing unit tests.
 
 ---
@@ -139,23 +139,25 @@ Referenced here so §5.2 opt-in tests stay small and low-footprint.
 
 ## 6. Cases requiring DB access (not HTTP)
 
-Run once on a scratch Postgres (or a UAT maintenance window) — not part of the
-per-run E2E suite:
+Run on a disposable Postgres database initialized with the schema and both
+seeds — not part of the per-run E2E suite. The upgrade regression modifies
+schema and data; it is not safe for UAT or production.
 
 ```bash
-# apply-then-rollback smoke (S93-10/11/12)
-psql "$DB" -f customer360-database/migrations/002_email_marketing_schema_foundation.sql   # apply (idempotent)
-psql "$DB" -f customer360-database/migrations/002_email_marketing_schema_foundation.sql   # re-apply: no-op
-psql "$DB" -c "\d+ customer360.crm_segment_sync_runs"                              # columns/index present
-psql "$DB" -c "SELECT polname FROM pg_policies WHERE tablename='crm_segment_sync_runs';"  # tenant_policy
-psql "$DB" -f customer360-database/migrations/002_email_marketing_schema_foundation.down.sql     # rollback clean
+psql "$DB" -v ON_ERROR_STOP=1 -f customer360-database/tests/legacy_upgrade.sql
+psql "$DB" -c "\d+ customer360.crm_segment_sync_runs"
+psql "$DB" -c "SELECT policyname FROM pg_policies WHERE schemaname='customer360' AND tablename='crm_segment_sync_runs';"
 ```
+
+There is no consolidated rollback script. Back up before upgrading and use a
+reviewed restore procedure if rollback is required. Failure/retry testing must
+use a separate disposable fixture.
 
 ## 7. Coverage summary
 
 | AC | Covered by |
 |----|-----------|
-| S93-a migrations apply/rollback | DB smoke (§6) |
+| S93-a upgrade and recovery | DB smoke (§6) |
 | S93-b FK consistency | E2E S93-05/07 + DB smoke S93-14 |
 | S93-c RLS on new tables | E2E S93-08/09 + DB smoke S93-12 |
 | S93-d models/schemas updated | E2E S93-01..08 + unit S93-13 |

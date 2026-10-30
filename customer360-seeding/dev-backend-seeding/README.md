@@ -49,6 +49,19 @@ commits once the stages complete. A failure rolls back the database and is
 reported explicitly; S3 writes are external side effects and are not rolled
 back by PostgreSQL.
 
+For the default demo tenant, source rows are resolved by tenant and slug; the
+seeder uses their actual database IDs for staged profiles, S3 buckets, and
+statistics. The full demo creates at least 11 events per master profile within
+the last 30 days, increasing `DEMO_BEHAVIORAL_EVENT_COUNT` when needed. It
+fails if a master profile lacks an active raw-profile link or a required
+source is unavailable. Event counts are also written to each master profile's
+per-source analytics. Other tenants are not seeded.
+
+The analytics dashboard reads event objects from the registered data-source
+buckets and filters by the selected time period. Existing orphaned buckets
+created by older seeders are not migrated or deleted; a fresh local reset
+recreates the demo storage. PostgreSQL rollback does not undo S3 changes.
+
 Metadata is loaded relative to `seeding_utils.py`, not the working directory.
 Missing files, unknown keys, or invalid catalog shapes fail before seeding.
 The Docker image and deployment bundle copy the entire `dev-backend-seeding`

@@ -18,8 +18,8 @@ Connects to the PostgreSQL database configured via environment variables /
    upsert-if-missing) -- ``database-schema.sql`` never seeds tenants, and
    every tenant-scoped table has a NOT NULL FK to ``sys_tenant.tenant_id``.
 5. Clears any previous demo data (scoped to ``DEMO_TENANT_ID`` only, so it
-   never touches other tenants) and inserts 1,000 generated raw profiles for
-    both the education and retail domains: each customer's anonymous first
+   never touches other tenants) and inserts 8,000 generated raw profiles for
+   six business domains: each customer's anonymous first
    touch is an Adjust install (across Facebook Ads, TikTok Ads, Google
    Ads, Grab Ads, FPT Play Ads, and offline PR events at shopping malls),
    and ~30% of the rows are additional PII-revealing duplicate touches
@@ -44,12 +44,11 @@ Safe to re-run: every step is idempotent / scoped to ``DEMO_TENANT_ID``.
 import logging
 import os
 import random
-import uuid
 from datetime import datetime, timedelta
 
 import psycopg2
 from dotenv import load_dotenv
-from psycopg2.extras import Json
+from psycopg2.extras import Json, RealDictCursor
 
 from leo_customer360_dao.utils.tenant_context import set_tenant_context
 from utils import HASHED_PII_FIELDS, hash_pii
@@ -69,8 +68,6 @@ DB_SCHEMA = os.environ.get("DB_SCHEMA", "customer360")
 # Fixed tenant used for the demo so this script is safe to re-run: only rows
 # belonging to this tenant are ever deleted/re-seeded.
 DEMO_TENANT_ID = "11111111-1111-1111-1111-111111111111"
-DEMO_NAMESPACE = uuid.UUID("12345678-1234-5678-1234-567812345678")
-
 SOURCE_SLUGS = {
     "Adjust": "adjust-mobile-attribution",
     "OneSignal": "c360-tracker",
@@ -122,9 +119,9 @@ VIETNAMESE_GIVEN_NAMES = (
 RETAIL_TOUCH_EVENTS = ("login", "app_open", "purchase")
 EDUCATION_TOUCH_EVENTS = ("login", "course_started", "assignment_submitted")
 
-# Share of synthetic customers whose app belongs to the education domain
-# (the rest are retail). Tune here if you want a different domain mix.
-EDUCATION_DOMAIN_SHARE = 0.4
+DEMO_DOMAINS = ("retail", "education", "real_estate", "travel", "banking", "media")
+DEFAULT_RAW_PROFILE_COUNT = 8_000
+DEFAULT_DUPLICATE_RATE = 0.3
 
 
 def _random_full_name(rng: random.Random) -> str:
@@ -133,26 +130,20 @@ def _random_full_name(rng: random.Random) -> str:
     )
 
 
-def _build_customer(rng: random.Random, index: int, used_names: set, used_phones: set) -> dict:
+def _build_customer(rng: random.Random, index: int, used_phones: set) -> dict:
     """Creates one synthetic person's stable identity (device + PII), shared
     across every raw-profile row generated for that person.
 
     phone_number is regenerated on collision since it IS an active CIR
     matching rule -- a coincidental collision would make identity resolution
-    incorrectly merge two distinct people into one profile. full_name is also
-    kept collision-free purely for demo realism/readability; it is NOT a CIR
-    matching key (common/shared names are too collision-prone to trust for
-    identity matching -- see init-core-database.sql's is_identity_resolution
-    seed for full_name).
+    incorrectly merge two distinct people into one profile. Names can repeat;
+    they are not CIR matching keys. The email includes the customer index.
     """
-    domain = "education" if rng.random() < EDUCATION_DOMAIN_SHARE else "retail"
+    domain = DEMO_DOMAINS[index % len(DEMO_DOMAINS)]
     platform = "ios" if rng.random() < 0.5 else "android"
     channel = rng.choice(ADJUST_CHANNELS)
 
     full_name = _random_full_name(rng)
-    while full_name in used_names:
-        full_name = _random_full_name(rng)
-    used_names.add(full_name)
 
     phone_number = f"09{rng.randint(10000000, 99999999)}"
     while phone_number in used_phones:
@@ -268,9 +259,12 @@ def _touch_event(rng: random.Random, customer: dict, event_time: datetime, sourc
     return base
 
 
-def generate_raw_profiles(count: int = 1000, duplicate_rate: float = 0.3, seed: int = 42) -> list[dict]:
-    """Generates ``count`` synthetic raw-profile events for the retail and
-    education domains, spread across all 3 documented ingestion source systems
+def generate_raw_profiles(
+    count: int = DEFAULT_RAW_PROFILE_COUNT,
+    duplicate_rate: float = DEFAULT_DUPLICATE_RATE,
+    seed: int = 42,
+) -> list[dict]:
+    """Generate ``count`` raw-profile events across six domains and three sources
     (Adjust mobile attribution, OneSignal push engagement, Web Tracking/
     GA4-style browsing -- see TOUCH_SOURCE_SYSTEMS).
 
@@ -286,14 +280,17 @@ def generate_raw_profiles(count: int = 1000, duplicate_rate: float = 0.3, seed: 
     Uses a fixed ``seed`` so re-running this script produces the exact same
     dataset (consistent with the rest of this script being idempotent).
     """
+    if count < 1:
+        raise ValueError("count must be at least 1")
+    if not 0 <= duplicate_rate < 1:
+        raise ValueError("duplicate_rate must be at least 0 and less than 1")
     rng = random.Random(seed)
     num_unique = max(1, round(count * (1 - duplicate_rate)))
     num_duplicates = count - num_unique
 
     base_time = datetime.now() - timedelta(days=60)
-    used_names: set = set()
     used_phones: set = set()
-    customers = [_build_customer(rng, i, used_names, used_phones) for i in range(num_unique)]
+    customers = [_build_customer(rng, i, used_phones) for i in range(num_unique)]
     profiles = [_install_event(customer, base_time + timedelta(minutes=i)) for i, customer in enumerate(customers)]
 
     for i in range(num_duplicates):
@@ -392,7 +389,7 @@ def reset_demo_data(cursor) -> None:
     )
 
 
-def seed_raw_profiles(cursor, raw_profiles: list[dict]) -> None:
+def seed_raw_profiles(cursor, raw_profiles: list[dict], source_ids: dict[str, str]) -> None:
     """Inserts the sample raw profiles, SHA-256 hashing every PII field
     (see HASHED_PII_FIELDS) so no plaintext name/email/phone/national_id is
     ever written to the database."""
@@ -406,8 +403,12 @@ def seed_raw_profiles(cursor, raw_profiles: list[dict]) -> None:
     for profile in raw_profiles:
         source_system = str(profile.get("source_system") or "Adjust")
         source_slug = SOURCE_SLUGS.get(source_system, SOURCE_SLUGS["Adjust"])
-        data_source_id = str(uuid.uuid5(DEMO_NAMESPACE, f"sys_data_source:{source_slug}"))
-        profile.setdefault("data_source_id", data_source_id)
+        if source_slug not in source_ids:
+            raise ValueError(f"No registered demo data source for {source_slug}")
+        data_source_id = source_ids[source_slug]
+        if profile.get("data_source_id") not in (None, data_source_id):
+            raise ValueError(f"Raw profile data source does not match {source_slug}")
+        profile["data_source_id"] = data_source_id
         profile.setdefault(
             "data_source_analytics",
             {data_source_id: {"total_tracked_events": 1}},
@@ -425,17 +426,20 @@ def seed_raw_profiles(cursor, raw_profiles: list[dict]) -> None:
 
 
 def main() -> None:
+    from seed_full_demo_data import seed_data_sources
+
     conn = psycopg2.connect(
         host=DB_HOST, dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD, port=DB_PORT
     )
     try:
-        raw_profiles = generate_raw_profiles(count=1000, duplicate_rate=0.3)
-        with conn.cursor() as cursor:
+        raw_profiles = generate_raw_profiles()
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             set_tenant_context(cursor, DEMO_TENANT_ID)
             ensure_extensions(cursor)
             ensure_demo_tenant(cursor)
+            source_ids = seed_data_sources(cursor)
             reset_demo_data(cursor)
-            seed_raw_profiles(cursor, raw_profiles)
+            seed_raw_profiles(cursor, raw_profiles, source_ids)
         conn.commit()
         logger.info(
             "Sample data ready: %d raw profiles staged with status_code=1 for tenant_id=%s.",

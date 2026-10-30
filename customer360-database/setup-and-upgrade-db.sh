@@ -2,7 +2,7 @@
 # Initialize or upgrade a local Customer 360 PostgreSQL database.
 #
 # Usage:
-#   ./setup-and-upgrade-db.sh [--dry-run] [--skip-migrations]
+#   ./setup-and-upgrade-db.sh [--dry-run] [--skip-legacy-upgrade]
 #
 # Connection values are read from the repository .env file when present:
 #   DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
@@ -14,7 +14,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ENV_FILE="$PROJECT_ROOT/.env"
 
 DRY_RUN=false
-SKIP_MIGRATIONS=false
+SKIP_LEGACY_UPGRADE=false
 
 usage() {
 	sed -n '2,10p' "$0" | sed 's/^#\{0,1\}[[:space:]]*//'
@@ -23,7 +23,7 @@ usage() {
 for argument in "$@"; do
 	case "$argument" in
 		--dry-run) DRY_RUN=true ;;
-		--skip-migrations) SKIP_MIGRATIONS=true ;;
+		--skip-legacy-upgrade|--skip-migrations) SKIP_LEGACY_UPGRADE=true ;;
 		--help|-h) usage; exit 0 ;;
 		*) printf 'Unknown argument: %s\n\n' "$argument" >&2; usage >&2; exit 2 ;;
 	esac
@@ -79,10 +79,8 @@ sql_files=(
 	"$SCRIPT_DIR/data-view-for-llm.sql"
 )
 
-if [[ "$SKIP_MIGRATIONS" == false ]]; then
-	while IFS= read -r migration; do
-		sql_files+=("$migration")
-	done < <(find "$SCRIPT_DIR/migrations" -maxdepth 1 -type f -name '*.sql' ! -name '*.down.sql' | sort)
+if [[ "$SKIP_LEGACY_UPGRADE" == false ]]; then
+	sql_files+=("$SCRIPT_DIR/legacy-upgrade.sql")
 fi
 
 for sql_file in "${sql_files[@]}"; do

@@ -17,8 +17,8 @@
 #      contains every key currently in '.env.example'.
 #   2. Starts (or resets) postgres/redis/keycloak/customer360-agent/minio/
 #      Mailpit via `docker compose -f dev-docker-compose.yml`.
-#   3. Waits for PostgreSQL, applies every SQL file in
-#      customer360-database/migrations in lexical order, then builds the
+#   3. Waits for PostgreSQL, applies any pending consolidated legacy upgrade,
+#      then builds the
 #      docs-vector-search index against the local PostgreSQL service
 #      and starts the AI service on DOCS_SEARCH_HOST_PORT.
 #   4. Waits for postgres/redis/keycloak/customer360-agent/minio/Mailpit/
@@ -36,9 +36,9 @@
 #                                    seed-demo only when DB is empty; otherwise
 #                                    print DB status counts.
 #   ./dev-c360.sh no-seed           Same, but skip the CIR demo data seed step.
-#   ./dev-c360.sh seed-new-data     Generate fresh synthetic traffic locally and
-#                                    POST it only to the running customer360-event-api;
-#                                    never starts Docker or touches DB/S3 directly.
+#   ./dev-c360.sh seed-new-data     Send events for 6,000 synthetic identities in
+#                                    six domains to the running event API only;
+#                                    downstream profile creation is asynchronous.
 #   ./dev-c360.sh upgrade           Local DEV upgrade: refresh images/containers
 #                                    with current repo code and restart core
 #                                    host services (non-destructive).
@@ -141,6 +141,7 @@ if [ "$ACTION" = "seed-new-data" ]; then
   (cd "$SIMULATOR_DIR" && "$SIMULATOR_PYTHON" seed_api_data.py \
     --tracking-url "$seed_tracking_url" \
     --data-source-id "$seed_data_source_id" \
+    --min-profiles 6000 \
     --verbose)
   exit $?
 fi
@@ -587,67 +588,48 @@ wait_for_database_relation() {
   echo "🟢 PostgreSQL schema initialization completed."
 }
 
-apply_database_migrations() {
-  local migration_dir="$SCRIPT_DIR/customer360-database/migrations"
-  local migration
-  local migrations=()
+apply_database_upgrade() {
+  local upgrade="$SCRIPT_DIR/customer360-database/legacy-upgrade.sql"
+  local attempt=1
+  local max_attempts=15
+  local upgrade_output=""
 
-  if [ ! -d "$migration_dir" ]; then
-    echo "ℹ️  No database migrations directory found at '$migration_dir'."
-    return 0
-  fi
+  echo "🗃️  Checking the consolidated database upgrade..."
+  while true; do
+    if upgrade_output="$(docker exec -i -u postgres "$POSTGRES_CONTAINER" \
+      psql -v ON_ERROR_STOP=1 \
+        -U "${DB_USER:-postgres}" \
+        -d "${DB_NAME:-customer360}" < "$upgrade" 2>&1)"; then
+      printf '%s\n' "$upgrade_output"
+      break
+    fi
 
-  while IFS= read -r migration; do
-    migrations+=("$migration")
-  done < <(find "$migration_dir" -maxdepth 1 -type f -name '*.sql' -print | sort)
-
-  if [ "${#migrations[@]}" -eq 0 ]; then
-    echo "ℹ️  No database migrations found in '$migration_dir'."
-    return 0
-  fi
-
-  echo "🗃️  Applying ${#migrations[@]} database migration(s) in lexical order..."
-  for migration in "${migrations[@]}"; do
-    echo "   ▶ $(basename "$migration")"
-    local attempt=1
-    local max_attempts=15
-    local migration_output=""
-    while true; do
-      if migration_output="$(docker exec -i -u postgres "$POSTGRES_CONTAINER" \
-        psql -v ON_ERROR_STOP=1 \
-          -U "${DB_USER:-postgres}" \
-          -d "${DB_NAME:-customer360}" < "$migration" 2>&1)"; then
-        printf '%s\n' "$migration_output"
-        break
+    if [[ "$upgrade_output" =~ "database system is shutting down" ||
+          "$upgrade_output" =~ "the database system is starting up" ||
+          "$upgrade_output" =~ "could not connect to server" ]]; then
+      if (( attempt >= max_attempts )); then
+        printf '%s\n' "$upgrade_output" >&2
+        echo "❌ Database upgrade could not connect after ${max_attempts} attempts." >&2
+        exit 1
       fi
+      echo "   ⏳ PostgreSQL is temporarily unavailable; retrying upgrade in 2s (${attempt}/${max_attempts})..."
+      sleep 2
+      attempt=$((attempt + 1))
+      continue
+    fi
 
-      if [[ "$migration_output" =~ "database system is shutting down" ||
-            "$migration_output" =~ "the database system is starting up" ||
-            "$migration_output" =~ "could not connect to server" ]]; then
-        if (( attempt >= max_attempts )); then
-          printf '%s\n' "$migration_output" >&2
-          echo "❌ Migration '$(basename "$migration")' could not connect to PostgreSQL after ${max_attempts} attempts." >&2
-          exit 1
-        fi
-        echo "   ⏳ PostgreSQL is temporarily unavailable; retrying migration in 2s (${attempt}/${max_attempts})..."
-        sleep 2
-        attempt=$((attempt + 1))
-        continue
-      fi
-
-      printf '%s\n' "$migration_output" >&2
-      echo "❌ Migration '$(basename "$migration")' failed." >&2
-      exit 1
-    done
+    printf '%s\n' "$upgrade_output" >&2
+    echo "❌ Database upgrade failed." >&2
+    exit 1
   done
-  echo "🟢 Database migrations applied successfully."
+  echo "🟢 Database upgrade check completed."
 }
 
 wait_for_healthy "$POSTGRES_CONTAINER"
 if [ "$ACTION" = "reset" ]; then
   wait_for_database_relation "crm_campaign_content_items"
 fi
-apply_database_migrations
+apply_database_upgrade
 wait_for_healthy "$REDIS_CONTAINER"
 wait_for_healthy "$MAILPIT_CONTAINER"
 wait_for_healthy "$MINIO_CONTAINER"

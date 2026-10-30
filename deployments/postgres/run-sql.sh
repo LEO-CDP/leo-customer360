@@ -3,8 +3,8 @@
 #   1) repo  postgres/**/*.sql   (extensions, keycloak db — filename order)
 #   2) repo  customer360-database/*.sql (the app schema) AFTER the init, in the order the
 #      project's own postgres/Dockerfile uses: database-schema -> init-cdp-ai-agents,
-#      then init-core-database, then data-view-for-llm (materialized views)
-#      LAST since it reads those tables.
+#      then init-core-database and data-view-for-llm (materialized views).
+#      The consolidated legacy upgrade runs last and skips fresh databases.
 #   3) repo  customer360-promotions/sql-scripts/db-schema-init.sql (the leo_ads schema)
 #      LAST, because it is independent of everything above: leo_ads has no RLS and no
 #      foreign keys into the customer360 schema. It lives here rather than in
@@ -35,8 +35,7 @@ esac
 
 PG_SQL_DIR="../../postgres"       # repo-root/postgres/**  (extensions, keycloak db) — filename order
 APP_SQL_DIR="../../customer360-database" # the app schema; ORDER MATTERS, so run these known files first:
-APP_ORDER=(database-schema.sql init-cdp-ai-agents.sql init-core-database.sql data-view-for-llm.sql)
-MIGRATIONS_DIR="$APP_SQL_DIR/migrations"
+APP_ORDER=(database-schema.sql init-cdp-ai-agents.sql init-core-database.sql data-view-for-llm.sql legacy-upgrade.sql)
 PROMOTIONS_SQL_DIR="../../customer360-promotions/sql-scripts" # leo_ads (customer360-promotions); independent of the above
 
 # --- creds/config: overlay (non-secret) + .env/terraform.tfvars (secret) ---
@@ -97,10 +96,6 @@ if [[ -d "$APP_SQL_DIR" ]]; then
   while IFS= read -r f; do
     printf '%s\n' "${APP_ORDER[@]}" | grep -qxF "$(basename "$f")" || FILES+=("$f")
   done < <(find "$APP_SQL_DIR" -maxdepth 1 -type f -iname '*.sql' | sort)
-fi
-if [[ -d "$MIGRATIONS_DIR" ]]; then
-  # Forward migrations only; *.down.sql are rollbacks, run by hand, never on deploy.
-  while IFS= read -r f; do FILES+=("$f"); done < <(find "$MIGRATIONS_DIR" -type f -iname '*.sql' ! -iname '*.down.sql' | sort)
 fi
 # leo_ads last: independent of the customer360 schema, and the service that owns it runs
 # in Kubernetes with no box of its own to bootstrap from.

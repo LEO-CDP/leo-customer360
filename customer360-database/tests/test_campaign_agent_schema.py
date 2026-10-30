@@ -4,11 +4,11 @@ from pathlib import Path
 DATABASE_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_campaign_to_ai_agents_contract_is_in_canonical_schema_and_migration():
+def test_campaign_to_ai_agents_contract_is_in_canonical_schema_and_upgrade():
     schema = (DATABASE_ROOT / "database-schema.sql").read_text(encoding="utf-8")
-    migration = (
-        DATABASE_ROOT / "migrations" / "017_agent_campagn_journey.sql"
-    ).read_text(encoding="utf-8")
+    migration = (DATABASE_ROOT / "legacy-upgrade.sql").read_text(encoding="utf-8").split(
+        "-- Historical step: 017_agent_campagn_journey.sql", 1
+    )[1].split("-- Historical step: 018_journey_report.sql", 1)[0]
 
     for sql in (schema, migration):
         assert "chk_cdp_ai_agents_journey_stage" in sql
@@ -36,3 +36,22 @@ def test_campaign_to_ai_agents_contract_is_in_canonical_schema_and_migration():
     assert "'crm_campaign_agent'" in schema
     assert "ENABLE ROW LEVEL SECURITY" in migration
     assert "FORCE ROW LEVEL SECURITY" in migration
+
+
+def test_legacy_and_invalid_profile_lifecycle_values_are_normalized_before_constraint():
+    migration = (DATABASE_ROOT / "legacy-upgrade.sql").read_text(encoding="utf-8").split(
+        "-- Historical step: 017_agent_campagn_journey.sql", 1
+    )[1].split("-- Historical step: 018_journey_report.sql", 1)[0]
+    loop_start = migration.index("FOR current_tenant_id IN")
+    constraint_start = migration.index(
+        "ADD CONSTRAINT cdp_master_profiles_lifecycle_stage_check"
+    )
+    normalization = migration[loop_start:constraint_start]
+
+    assert "set_config('app.tenant_id', current_tenant_id::text, true)" in normalization
+    assert "WHERE tenant_id = current_tenant_id" in normalization
+    assert "set_config('app.tenant_id', '', true)" in normalization
+    for legacy_stage in ("prospect", "lead", "customer", "vip", "dormant", "churn_risk"):
+        assert f"WHEN '{legacy_stage}' THEN" in normalization
+    assert "ELSE NULL" in normalization
+    assert "AND lifecycle_stage IS NOT NULL" in normalization
