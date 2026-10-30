@@ -224,11 +224,14 @@ echo ">> Waiting for the rollout ..."
 "${KUBECTL[@]}" -n "$NAMESPACE" get pods -l app=dagster -o wide
 
 # --- verification from INSIDE the pod ---
-echo ">> Renderer log:"
-LOG="$("${KUBECTL[@]}" -n "$NAMESPACE" logs deploy/dagster 2>/dev/null | grep 'render-instance' || true)"
-printf '%s\n' "$LOG" | sed 's/^/   /'
-grep -q 'storage: PostgreSQL' <<<"$LOG" || { echo "   ERROR: Dagster is not on shared PostgreSQL storage."; exit 1; }
-[[ "$REQUIRE_S3" == "true" ]] && { grep -q 'compute logs: S3' <<<"$LOG" || { echo "   ERROR: compute logs are not on S3."; exit 1; }; }
+# Read the rendered instance file, not the pod log: on an unchanged pod the startup
+# [render-instance] lines have rotated out of `kubectl logs`.
+echo ">> Rendered dagster.yaml (secrets are env refs):"
+CONF="$("${KUBECTL[@]}" -n "$NAMESPACE" exec deploy/dagster -- sh -c 'cat "${DAGSTER_HOME:-/dagster_home}/dagster.yaml"' 2>&1)" \
+  || { printf '%s\n' "$CONF" | sed 's/^/   /'; echo "   ERROR: could not read dagster.yaml from the pod."; exit 1; }
+printf '%s\n' "$CONF" | sed 's/^/   /'
+grep -q 'postgres_db:' <<<"$CONF" || { echo "   ERROR: Dagster is not on shared PostgreSQL storage."; exit 1; }
+[[ "$REQUIRE_S3" == "true" ]] && { grep -q 'S3ComputeLogManager' <<<"$CONF" || { echo "   ERROR: compute logs are not on S3."; exit 1; }; }
 
 echo ">> GraphQL + code locations (from the pod):"
 "${KUBECTL[@]}" -n "$NAMESPACE" exec -i deploy/dagster -- python - <<PY
