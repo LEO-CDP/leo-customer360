@@ -1,6 +1,15 @@
 # Customer 360 database schema
 
-`database-schema.sql` is the source of truth for this diagram. The diagrams below cover its 62 base tables, the 15 partitions of `graph_edges`, and both views. They show primary keys, tenant keys, important identifying columns, and declared foreign-key relationships; types are abbreviated for readability. They are not a substitute for the SQL definitions, which contain every exact type, column, check, index, trigger, and function.
+`database-schema.sql` is the source of truth for these diagrams. It currently
+declares 71 logical tables, 15 `graph_edges` child partitions, and three
+ordinary views. The diagrams below cover most, but not all, of these objects;
+see [Other schema objects](#other-schema-objects) for omissions and the
+[README inventory](README.md#database-schema-by-platform-capability) for the
+complete feature-oriented inventory. The diagrams show primary keys, tenant
+keys, important identifying columns, and selected declared foreign-key
+relationships; types are abbreviated for readability. They are not a
+substitute for the SQL definitions, which contain every exact type, column,
+check, index, trigger, and function.
 
 All names are exact table or view names in the `customer360` schema. Where a relationship is tenant-scoped, the SQL uses a composite foreign key containing `tenant_id`; the diagram draws that relationship once rather than repeating `tenant_id` as a separate edge to `sys_tenant` in every subject area. Global dictionaries/catalogs that are not tenant-owned do not have a tenant edge.
 
@@ -781,6 +790,14 @@ erDiagram
 | Object | SQL definition |
 | --- | --- |
 | `vw_campaign_performance_metrics` | View joining `crm_campaign` to `crm_campaign_performance_daily` to calculate campaign-level totals and KPIs. |
+| `vw_journey_stage_report` | Invoker-security view comparing current and prior customer journey metric snapshots. |
 | `crm_vw_flow_node` | View over `crm_flow_node` deriving message channel and wait duration. |
+
+The diagrams do not currently include `sys_schema_upgrade_history`,
+`cdp_audience_tags`, `crm_campaign_agent`, `cdp_journey_metric`,
+`cdp_journey_metric_domain`, `cdp_journey_metric_daily`, or
+`cdp_customer_valuation`. Their definitions and relationships are documented
+in the [README capability inventory](README.md#database-schema-by-platform-capability)
+and the canonical SQL.
 
 `database-schema.sql` also defines functions for saving/publishing/loading flow JSON, persona and embedding maintenance triggers, tenant-consistent composite foreign keys, indexes, and row-level security policies. Those implementation objects are omitted from the ER diagrams. For exact column definitions, check constraints, uniqueness, delete behavior, indexes, and functions, consult [`database-schema.sql`](./database-schema.sql).

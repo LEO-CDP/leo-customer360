@@ -13,6 +13,8 @@ documents or backups.
 ## Contents
 
 - [Schema inventory and capability summary](#database-schema-by-platform-capability)
+- [Data modeller's overview map](#data-modellers-overview-map) and
+  [metadata discovery](#schema-metadata-discovery)
 - [Database requirements](#database-requirements) and [installation](#installation-order)
 - [Initialization and seeds](#initialization-and-seeds)
 - [Detailed schema notes](#detailed-schema-notes)
@@ -256,6 +258,173 @@ the file, including the tenant-aware foreign-key and RLS blocks near its end.
 The [schema diagrams](full-schema-diagram.md) provide supplementary relationship
 visualizations; use the SQL for the current inventory. Product capability
 status does not imply that every feature is implemented in PostgreSQL.
+
+## Data modeller's overview map
+
+This is a **conceptual capability map**, not an ER diagram: arrows indicate
+data flow or usage, not necessarily a foreign key or synchronous processing.
+The [capability inventory](#database-schema-by-platform-capability) below
+links every canonical table and view to its SQL definition. For detailed
+foreign-key diagrams, see [full-schema-diagram.md](full-schema-diagram.md);
+its diagrams omit some newer objects and do not replace the SQL.
+
+```mermaid
+flowchart LR
+    TEN["Tenant, domains and access<br/>sys_tenant, sys_domain, sys_user"]
+    ING["Sources and event vocabulary<br/>sys_data_source, cdp_event_catalog"]
+    RAW["Raw identities<br/>cdp_raw_profiles_stage"]
+    ID["Identity resolution and history<br/>cdp_profile_links, cdp_identity_index,<br/>cdp_profile_merge_history"]
+    PROF["Customer 360<br/>cdp_master_profiles, cdp_domain_profiles"]
+    CRM["CRM and customer activity<br/>crm_lead, crm_transactions,<br/>crm_customer_contacts"]
+    PER["Personas and valuation<br/>cdp_customer_personas,<br/>cdp_persona_archetypes, cdp_customer_valuation"]
+    GRAPH["Relationships<br/>cdp_relations, graph_edges"]
+    SEG["Audiences and segments<br/>cdp_audience_tags, cdp_segments"]
+    AI["AI and feature catalog<br/>cdp_ai_agents, cdp_ai_feature_catalog,<br/>cdp_agent_workflow"]
+    REC["Content and recommendations<br/>cdp_content_items, cdp_product_items,<br/>cdp_profile_recommendations"]
+    CAMP["Campaigns and journeys<br/>crm_campaign, crm_flow, crm_flow_version"]
+    ACT["Outbound activation<br/>crm_connector_config, crm_suppression_list,<br/>cdp_campaign_dispatch_logs"]
+    KPI["Reporting<br/>crm_campaign_performance_daily,<br/>cdp_journey_metric_daily"]
+    LAKE["External event storage<br/>S3 / MinIO"]
+
+    TEN -. "scope and access" .-> ING
+    TEN -. "scope and access" .-> PROF
+    TEN -. "scope and access" .-> CAMP
+    ING --> RAW --> ID --> PROF
+    ING -. "asynchronous events" .-> LAKE
+    CRM --> PROF
+    PROF --> PER
+    PROF --> GRAPH
+    PROF --> SEG
+    SEG --> AI
+    AI --> REC
+    SEG --> CAMP
+    REC --> CAMP
+    CAMP --> ACT
+    CAMP --> KPI
+    CRM --> KPI
+    LAKE -. "separate metric processing" .-> KPI
+```
+
+### Modelling anchors and grain
+
+The following are navigation aids, not an exhaustive constraint listing.
+Join tenant-owned records using their tenant context, including both columns
+where a tenant-aware composite foreign key is declared. Do not infer a
+foreign key from an arrow, an array of IDs, or a conceptual association.
+
+| Capability | Modelling anchor and grain | Important relationships and caveats |
+| --- | --- | --- |
+| Tenant and governance | [`sys_tenant`](database-schema.sql#L49) is the tenant anchor; [`sys_domain`](database-schema.sql#L100) is a global dictionary; [`sys_tenant_domain`](database-schema.sql#L138) associates the two. | Users, organizations and roles are tenant-owned. Permissions are global; `sys_role_permission` has no tenant column. See [Tenant Isolation](#tenant-isolation). |
+| Ingestion and identity | [`cdp_raw_profiles_stage`](database-schema.sql#L1309) stores source identities; [`cdp_profile_links`](database-schema.sql#L1449) records a raw-to-master link, unique by tenant and raw profile. | The link carries status and unlink metadata. [`cdp_profile_merge_history`](database-schema.sql#L2578) preserves merge snapshots; do not model identity changes as destructive overwrites. |
+| Golden and domain profiles | [`cdp_master_profiles`](database-schema.sql#L765) is the golden record; [`cdp_domain_profiles`](database-schema.sql#L1020) holds domain-specific data for a master profile and domain. | Raw identities can resolve to a master. Domain JSONB, tags and channel identifiers are attributes, not separate normalized entity tables. |
+| CRM activity | [`crm_transactions`](database-schema.sql#L2650) and [`crm_customer_contacts`](database-schema.sql#L2636) represent transaction and contact records. | A transaction's `master_profile_id` can be null before resolution; event-lake records are external to this DDL. |
+| Personas and value | [`cdp_customer_personas`](database-schema.sql#L1562) stores assignments between profiles and reusable [`cdp_persona_archetypes`](database-schema.sql#L1517); [`cdp_customer_valuation`](database-schema.sql#L4847) stores dated, model-versioned valuation snapshots. | Persona features, score details and history belong to a persona; they do not have their own `tenant_id`. Valuations include domain and currency. |
+| Graph | [`cdp_relations`](database-schema.sql#L2617) relates master profiles using [`cdp_relation_types`](database-schema.sql#L2608). [`graph_edges`](database-schema.sql#L3260) stores general typed edges, with primary key `(edge_id, relation)`. | Graph edge endpoints are typed IDs, not declared foreign keys to every possible entity. The parent is partitioned by relation. |
+| Segmentation and AI | [`cdp_segments`](database-schema.sql#L3042) stores a tenant's segment rules; [`cdp_agent_workflow`](database-schema.sql#L3102) configures an ordered agent per tenant and segment. | Segment tags are mirrored into profiles during recomputation; this is not a segment membership join table. The AI agent and feature catalogs are global. |
+| Recommendations | [`cdp_profile_recommendation_runs`](database-schema.sql#L5009) is keyed by tenant, segment and run; [`cdp_profile_recommendations`](database-schema.sql#L5027) adds profile, agent and content item to that key. | Results reference the run, profile and content within the tenant. Product embeddings are reserved; current ranking uses linked content embeddings. |
+| Campaigns and workflows | [`crm_campaign`](database-schema.sql#L434) owns campaign configuration. [`crm_flow_version`](database-schema.sql#L5268) has key `(flow_id, version)`; nodes and edges are versioned projections. | A campaign can pin a flow version; execution, review, suppression and dispatch records have distinct grains. Workflow snapshot content is immutable after creation. |
+| Reporting | [`crm_campaign_performance_daily`](database-schema.sql#L510) is unique per tenant, campaign and date, separately for the base row and each experiment variant. [`cdp_journey_metric_daily`](database-schema.sql#L4319) stores windowed metric snapshots. | Journey snapshot uniqueness also includes business model, domain, stage, metric, dimension and currency. Do not aggregate different currencies together. |
+
+### Schema metadata discovery
+
+The linked SQL definitions, including later `ALTER TABLE` statements, are the
+complete checked-in metadata for every column, default, constraint, index,
+policy, trigger and function. The following **read-only PostgreSQL 16** queries
+inspect the actual deployed `customer360` schema, which may differ from the
+repository after migrations. They return schema metadata, not customer rows;
+run them with a role permitted to inspect the relevant objects. The separate
+`leo_ads` schema is excluded. If the separate LLM script has been applied,
+its `customer360` materialized views also appear in the deployed results.
+
+Columns, data types, nullability, defaults, generated expressions, and comments:
+
+```sql
+SELECT c.relname AS relation_name, c.relkind AS relation_kind,
+       a.attnum AS ordinal_position, a.attname AS column_name,
+       pg_catalog.format_type(a.atttypid, a.atttypmod) AS data_type,
+       NOT a.attnotnull AS is_nullable, a.attidentity AS identity_kind,
+       a.attgenerated AS generated_kind,
+       pg_catalog.pg_get_expr(d.adbin, d.adrelid) AS default_or_generation_expression,
+       pg_catalog.col_description(c.oid, a.attnum) AS column_comment
+FROM pg_catalog.pg_class AS c
+JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+JOIN pg_catalog.pg_attribute AS a ON a.attrelid = c.oid
+LEFT JOIN pg_catalog.pg_attrdef AS d ON d.adrelid = c.oid AND d.adnum = a.attnum
+WHERE n.nspname = 'customer360'
+  AND c.relkind IN ('r', 'p', 'v', 'm')
+  AND a.attnum > 0 AND NOT a.attisdropped
+ORDER BY c.relname, a.attnum;
+```
+
+`relkind` distinguishes ordinary tables (`r`), partitioned tables (`p`),
+views (`v`) and materialized views (`m`); physical partitions appear as
+relations too. Table comments, partition parents, RLS flags and view definitions:
+
+```sql
+SELECT c.relname AS relation_name, c.relkind AS relation_kind,
+       parent.relname AS partition_parent,
+       pg_catalog.obj_description(c.oid, 'pg_class') AS relation_comment,
+       c.relrowsecurity AS rls_enabled, c.relforcerowsecurity AS rls_forced,
+       CASE WHEN c.relkind IN ('v', 'm')
+            THEN pg_catalog.pg_get_viewdef(c.oid, true) END AS view_definition
+FROM pg_catalog.pg_class AS c
+JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+LEFT JOIN pg_catalog.pg_inherits AS i ON i.inhrelid = c.oid
+LEFT JOIN pg_catalog.pg_class AS parent ON parent.oid = i.inhparent
+WHERE n.nspname = 'customer360' AND c.relkind IN ('r', 'p', 'v', 'm')
+ORDER BY c.relname, parent.relname;
+```
+
+Keys, foreign keys with delete/update actions, unique, check and exclusion
+constraints, followed by all index definitions (including partial indexes):
+
+```sql
+SELECT c.relname AS relation_name, con.conname AS constraint_name,
+       con.contype AS constraint_type, con.convalidated AS is_validated,
+       pg_catalog.pg_get_constraintdef(con.oid, true) AS definition
+FROM pg_catalog.pg_constraint AS con
+JOIN pg_catalog.pg_class AS c ON c.oid = con.conrelid
+JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+WHERE n.nspname = 'customer360'
+ORDER BY c.relname, con.conname;
+
+SELECT tablename, indexname, indexdef
+FROM pg_catalog.pg_indexes
+WHERE schemaname = 'customer360'
+ORDER BY tablename, indexname;
+```
+
+Policies, application-defined triggers and routines:
+
+```sql
+SELECT tablename, policyname, permissive, roles, cmd, qual, with_check
+FROM pg_catalog.pg_policies
+WHERE schemaname = 'customer360'
+ORDER BY tablename, policyname;
+
+SELECT c.relname AS relation_name, t.tgname AS trigger_name,
+       t.tgenabled AS enabled,
+       pg_catalog.pg_get_triggerdef(t.oid, true) AS definition
+FROM pg_catalog.pg_trigger AS t
+JOIN pg_catalog.pg_class AS c ON c.oid = t.tgrelid
+JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+WHERE n.nspname = 'customer360' AND NOT t.tgisinternal
+ORDER BY c.relname, t.tgname;
+
+SELECT p.proname AS routine_name, p.prokind AS routine_kind,
+       pg_catalog.pg_get_function_identity_arguments(p.oid) AS arguments,
+       pg_catalog.pg_get_function_result(p.oid) AS result_type,
+       pg_catalog.obj_description(p.oid, 'pg_proc') AS routine_comment
+FROM pg_catalog.pg_proc AS p
+JOIN pg_catalog.pg_namespace AS n ON n.oid = p.pronamespace
+WHERE n.nspname = 'customer360'
+ORDER BY p.proname, arguments;
+```
+
+The catalog can include objects created by migrations or extensions as well as
+the canonical DDL. Inspect function bodies in the SQL source or, for a
+specific deployed routine, with `pg_get_functiondef` and its `regprocedure`.
+Policies and RLS flags alone do not describe grants or bypass privileges.
 
 ### Customer 360
 
