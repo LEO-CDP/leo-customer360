@@ -1,0 +1,15 @@
+diff --git a/quartz/styles/variables.scss b/quartz/styles/variables.scss
+index f61adfc..de655c6 100644
+--- a/quartz/styles/variables.scss
++++ b/quartz/styles/variables.scss
+@@ -12,8 +12,8 @@ $breakpoints: (
+   desktop: 1200px,
+ );
+ 
+-$mobile: "(max-width: #{map.get($breakpoints, mobile)})";
+-$tablet: "(min-width: #{map.get($breakpoints, mobile)}) and (max-width: #{map.get($breakpoints, desktop)})";
++$mobile: "(max-width: 799px)";
++$tablet: "(min-width: #{map.get($breakpoints, mobile)}) and (max-width: 1199px)";
+ $desktop: "(min-width: #{map.get($breakpoints, desktop)})";
+ 
+ $pageWidth: #{map.get($breakpoints, mobile)};
