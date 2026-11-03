@@ -2699,4 +2699,20 @@ INSERT INTO customer360.sys_schema_upgrade_history (upgrade_key) VALUES ('legacy
 \else
 \echo Legacy database upgrade already applied.
 \endif
+-- This constraint is independent of the historical bootstrap marker.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'customer360.crm_ad_sync_runs'::regclass
+          AND conname = 'chk_crm_ad_sync_runs_platform'
+          AND pg_get_constraintdef(oid) LIKE '%leo_ads%'
+    ) THEN
+        ALTER TABLE customer360.crm_ad_sync_runs
+            DROP CONSTRAINT IF EXISTS chk_crm_ad_sync_runs_platform;
+        ALTER TABLE customer360.crm_ad_sync_runs
+            ADD CONSTRAINT chk_crm_ad_sync_runs_platform
+            CHECK (platform IN ('meta_ads', 'google_ads', 'tiktok_ads', 'leo_ads'));
+    END IF;
+END $$;
 SELECT pg_advisory_unlock(hashtextextended('customer360.legacy_upgrade_through_018', 0));

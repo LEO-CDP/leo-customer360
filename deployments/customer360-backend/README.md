@@ -40,6 +40,36 @@ logs, and GraphQL reports every code location `LOADED`. A failed rollout prints 
 descriptions and recent cluster events to distinguish image-pull or scheduling failures
 from application startup failures.
 
+### LEO Ads audience sync readiness
+
+Apply the [`db-schema` step](../postgres/run-sql.sh) before deploying the
+backend. It upgrades the Customer 360 audit constraint and the shared
+`leo_ads` schema. For a separate promotions database, apply
+[`upgrade-audience-sync.sql`](../../customer360-promotions/sql-scripts/upgrade-audience-sync.sql)
+there as well, and provide `LEO_ADS_DATABASE_URL` as a libpq connection
+string through the environment or the GitHub Environment secret of that
+name. The deployment script writes it only to the generated Kubernetes
+Secret; omit it when both schemas share the Customer 360 database.
+
+Promotions is a separate service: a backend-only deployment does not require
+it to be installed. To require the sync readiness check, set
+`LEO_ADS_CHECK_READINESS=true` in the deployment environment or GitHub
+Environment variable. The opt-in post-rollout check connects from the worker
+using its real credentials and fails the deployment command if either database is unreachable, PostgreSQL is
+older than 16, required schema objects or tenant-integrity constraints are
+missing, required table/TEMP privileges are absent, or no active
+tenant mapping exists. An operator must provision one for each intended
+tenant, as described in the [sync guide](../../customer360-backend/README.md#leo-ads-audience-synchronization).
+The check is read-only and does not execute a campaign, verify every tenant's
+mapping, or test real audience delivery. A failed post-rollout check does not
+automatically roll back the Kubernetes Deployment.
+
+When sync is enabled, **version blocker:** both checked-in managed PostgreSQL overlays currently
+specify version 15. Confirm and upgrade the actual managed database to
+PostgreSQL 16 or newer through an approved infrastructure change before
+expecting this readiness check to pass; do not assume editing the overlay
+upgrades a running database safely.
+
 ## Differences from the other VKS services (and why)
 
 - **No HPA, no PDB, `Recreate`.** `dagster dev` embeds the daemon; two pods = duplicate schedule and

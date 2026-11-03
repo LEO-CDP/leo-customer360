@@ -648,12 +648,16 @@ WHERE a.ad_key = 'ad-coolmate-banner-01'
 - `membership_version` (BIGINT): Version for tracking updates
 - `member_count_estimate` (BIGINT, nullable): Size estimate (not exact)
 - `definition` (JSONB): How audience is defined (event, metrics, behavior)
+- `customer360_tenant_id` (UUID, nullable): Source tenant for synchronized
+  audiences; the composite foreign key prevents remapping a tenant while its
+  synchronized audience exists.
 - `status` (VARCHAR): `'active' | 'paused' | 'archived'`
 
 **Data Contract:**
 - Audience = named segment (e.g., "High-Value Retargeting", "Mobile Users")
 - Definition stores: event type, lookback days, predicates (e.g., `ltv > 3M VND`)
-- DO NOT store 40M user membership rows here; use external audience system
+- Customer 360 campaign sync stores compact memberships in
+  `leo_ads.audience_member`; size this table and its indexes for the audience.
 - member_count_estimate is advisory only
 
 **Admin Workflow (Dagster):**
@@ -672,11 +676,12 @@ VALUES (1, 'mobile_users_vn', 'Mobile Users (Vietnam)', 'internal',
   1, 285000, 
   '{"event":"device_context","device":"mobile","country":"VN","lookbackDays":7}'::jsonb)
 
--- Sync audience membership from CDP (Dagster task)
--- SELECT user_id FROM cdp.segments WHERE segment_key = 'high_value_ltv'
--- THEN UPDATE leo_ads.audience SET membership_version = (version + 1)
--- Membership management typically external via feature store
-```
+-```
+
+`leo_ads.customer360_tenant_map` is provisioned by a database operator.
+`leo_ads.audience_member` associates an audience and a serving-key hash through
+tenant-aware foreign keys. See the [sync guide](../../customer360-backend/README.md#leo-ads-audience-synchronization)
+for consent, suppression, replacement, migrations and configuration.
 
 #### **Table: `leo_ads.ad_audience`**
 
@@ -689,8 +694,8 @@ VALUES (1, 'mobile_users_vn', 'Mobile Users (Vietnam)', 'internal',
 
 **Data Contract:**
 - Many-to-many: ad can use multiple audiences
-- Include rules = who can see ad
-- Exclude rules = who cannot see ad (negative targeting)
+- Include/exclude relations describe intended targeting; the current serving
+  implementation does not enforce them.
 - Both can apply (include A but exclude B)
 
 **Admin Workflow (Dagster):**
@@ -728,34 +733,11 @@ WHERE a.ad_key = 'ad-coolmate-banner-01' AND a.tenant_id = 1
 
 **Data Contract:**
 - Compact, serving-optimized user data (not the full CDP profile)
-- Hash-based to avoid storing PII
+- The hash and `profile_ref` can still be personal data and require access
+  controls.
 - Attributes stored in JSONB: `{segment, ltv, device, interests, purchase_count, ...}`
-- Synced from CDP on schedule
-
-**Admin Workflow (Dagster):**
-```python
--- Sync user data from CDP (Dagster sync task)
--- This runs periodically to refresh serving profiles
-DELETE FROM leo_ads.user_serving_key WHERE tenant_id = 1;
-
-INSERT INTO leo_ads.user_serving_key 
-  (user_key_hash, tenant_id, profile_ref, first_seen_at, last_seen_at, attributes)
-SELECT 
-  digest(up.user_id, 'sha256'),
-  1,
-  up.cdp_profile_id,
-  up.first_visit_at,
-  up.last_activity_at,
-  jsonb_build_object(
-    'segment', up.segment_name,
-    'device', up.preferred_device,
-    'ltv', up.lifetime_value_vnd,
-    'purchase_count', up.total_purchases,
-    'interests', up.interests::jsonb
-  )
-FROM cdp.user_profiles up
-WHERE up.tenant_id = 1 AND up.active = true
-```
+- Customer 360 campaign sync is triggered by its workflow; it does not
+  automatically run on a schedule or populate these optional attributes.
 
 ---
 

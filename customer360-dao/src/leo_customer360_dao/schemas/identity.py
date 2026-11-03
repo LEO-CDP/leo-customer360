@@ -21,6 +21,7 @@ _SOURCE_CONSENT_FIELDS = {
     "meta_ads_opt_in",
     "google_ads_opt_in",
     "tiktok_ads_opt_in",
+    "leo_ads_opt_in",
 }
 
 

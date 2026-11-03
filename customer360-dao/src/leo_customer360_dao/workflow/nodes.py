@@ -16,7 +16,7 @@ HOURS = {"minutes": 1 / 60, "hours": 1.0, "days": 24.0}
 TRIGGER_EVENTS = frozenset({"signup", "cart_abandoned", "purchase", "inactive_30d", "birthday"})
 WAIT_EVENTS = frozenset({"purchase", "email_opened", "email_clicked"})
 MESSAGE_VARIABLES = frozenset({"first_name"})
-AUDIENCE_PLATFORMS = frozenset({"meta_ads", "google_ads", "tiktok_ads"})
+AUDIENCE_PLATFORMS = frozenset({"meta_ads", "google_ads", "tiktok_ads", "leo_ads"})
 NOTIFICATION_PROVIDERS = frozenset({"sms", "zalo_oa", "whatsapp", "mobile_native"})
 NUMERIC_PROFILE_FIELDS = {
     "engagement_score",

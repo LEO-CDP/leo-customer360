@@ -45,14 +45,20 @@ jobs:
         with:
           filters: |
             customer360-promotions: 'customer360-promotions/**'
-            customer360-backend: 'customer360-backend/**'
+            customer360-backend:
+              - 'customer360-backend/**'
+              - 'customer360-dao/**'
             customer360-dao: 'customer360-dao/**'
-            customer360-api: 'customer360-api/**'
+            customer360-api:
+              - 'customer360-api/**'
+              - 'customer360-dao/**'
             customer360-agent: 'customer360-agent/**'
             customer360-event-api: 'customer360-event-api/**'
             customer360-frontend: 'customer360-frontend/**'
             docs-vector-search: 'tools/docs-vector-search/**'
-            postgres: 'postgres/**'
+            postgres:
+              - 'postgres/**'
+              - 'customer360-database/**'
             redis: 'redis/**'
 
       # On main and version tags, build ALL services so automatic UAT and
@@ -110,7 +116,7 @@ jobs:
             customer360-agent) runners="customer360-agent/run_unit_tests.sh" ;;
             customer360-dao)   runners="customer360-dao/run_tests.sh" ;;
             customer360-event-api) runners="customer360-event-api/run_unit_tests.sh" ;;
-            customer360-backend)    runners="customer360-backend/identity_resolution/run_tests.sh customer360-backend/segmentation/run_tests.sh customer360-backend/campaign_activation/run_tests.sh customer360-backend/email_engine/run_tests.sh customer360-backend/notification_engine/run_tests.sh" ;;
+            customer360-backend)    runners="customer360-backend/identity_resolution/run_tests.sh customer360-backend/segmentation/run_tests.sh customer360-backend/campaign_activation/run_tests.sh customer360-backend/data_synch/run_tests.sh customer360-backend/email_engine/run_tests.sh customer360-backend/notification_engine/run_tests.sh" ;;
             docs-vector-search) runners="tools/docs-vector-search/run_unit_tests.sh" ;;
             *)                 runners="" ;;
           esac

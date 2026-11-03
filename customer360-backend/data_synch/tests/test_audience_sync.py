@@ -61,6 +61,8 @@ class FakeCursor:
                     "communication_preferences": self.profile_preferences,
                 }
             ]
+            if "leo_ads_opt_in" in lowered and self.profile_preferences.get("leo_ads_opt_in") is not True:
+                self.rows = []
         else:
             self.result = None
             self.rows = []
@@ -88,7 +90,7 @@ class FakeConnection:
         self.commits = 0
         self.rollbacks = 0
 
-    def cursor(self, **_kwargs):
+    def cursor(self, *_args, **_kwargs):
         return self.cursor_instance
 
     def commit(self):
@@ -114,6 +116,9 @@ def test_platform_aliases_are_normalized():
     assert audience_sync.normalize_platform("Facebook") == "meta_ads"
     assert audience_sync.normalize_platform("Google Ads") == "google_ads"
     assert audience_sync.normalize_platform("tiktok_ads") == "tiktok_ads"
+    assert audience_sync.normalize_platform("leo_ads") == "leo_ads"
+    with pytest.raises(audience_sync.AudienceSyncError, match="database destination"):
+        audience_sync.build_provider("leo_ads", {}, {})
     with pytest.raises(audience_sync.AudienceSyncError):
         audience_sync.normalize_platform("unknown")
 
@@ -144,6 +149,64 @@ def test_provider_consent_requires_literal_true_for_exact_platform(
         {"communication_preferences": preferences},
         "meta_ads",
     ) is expected
+
+
+@pytest.mark.parametrize("consent, expected", [(True, 1), (False, 0), ("true", 0), (None, 0)])
+def test_leo_ads_sync_replaces_members_even_when_none_are_eligible(monkeypatch, consent, expected):
+    connection = FakeConnection()
+    connection.cursor_instance.profile_preferences = {"leo_ads_opt_in": consent}
+    calls = []
+    monkeypatch.setattr(audience_sync, "_connect", lambda: connection)
+
+    def sync(tenant_id, campaign_id, segment_id, name, members, batch_size):
+        members = list(members)
+        calls.append((tenant_id, campaign_id, segment_id, members))
+        return audience_sync.ProviderResult("42", len(members))
+
+    monkeypatch.setattr(audience_sync, "_sync_leo_ads", sync)
+    result = audience_sync.run_data_synch_job(
+        tenant_id=TENANT_ID, campaign_id=CAMPAIGN_ID, segment_id=SEGMENT_ID,
+        platform="leo_ads",
+    )
+    assert result["eligible_count"] == expected
+    assert result["uploaded_count"] == expected
+    assert len(calls) == 1
+    assert len(calls[0][3]) == expected
+    assert calls[0][:3] == (TENANT_ID, CAMPAIGN_ID, SEGMENT_ID)
+
+
+def test_leo_ads_mapping_error_fails_and_marks_run_failed(monkeypatch):
+    connection = FakeConnection()
+    connection.cursor_instance.profile_preferences = {"leo_ads_opt_in": True}
+    monkeypatch.setattr(audience_sync, "_connect", lambda: connection)
+
+    def fail(*_args):
+        raise audience_sync.AudienceSyncError("No active LEO Ads tenant mapping")
+
+    monkeypatch.setattr(audience_sync, "_sync_leo_ads", fail)
+    with pytest.raises(audience_sync.AudienceSyncError, match="tenant mapping"):
+        audience_sync.run_data_synch_job(
+            tenant_id=TENANT_ID, campaign_id=CAMPAIGN_ID, platform="leo_ads"
+        )
+    assert any(
+        isinstance(values, dict) and values.get("status") == "Failed"
+        for _, values in connection.cursor_instance.statements
+    )
+
+
+def test_leo_ads_dry_run_counts_without_writing_destination(monkeypatch):
+    connection = FakeConnection()
+    connection.cursor_instance.profile_preferences = {"leo_ads_opt_in": True}
+    monkeypatch.setattr(audience_sync, "_connect", lambda: connection)
+
+    def unexpected_sync(*_args):
+        raise AssertionError("dry run must not write the destination")
+
+    monkeypatch.setattr(audience_sync, "_sync_leo_ads", unexpected_sync)
+    result = audience_sync.run_data_synch_job(
+        tenant_id=TENANT_ID, campaign_id=CAMPAIGN_ID, platform="leo_ads", dry_run=True
+    )
+    assert (result["eligible_count"], result["uploaded_count"], result["reason"]) == (1, 0, "dry_run")
 
 
 def test_missing_provider_consent_prevents_audience_upload(monkeypatch):

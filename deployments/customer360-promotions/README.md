@@ -69,6 +69,14 @@ Both files are idempotent (`CREATE ... IF NOT EXISTS`, `ON CONFLICT DO NOTHING`)
 is safe to re-run. `PROMOTIONS_SEED_SAMPLE` defaults to `true` on uat and `false` on prod, which
 is what the old `ads_seed_sample` overlay flag did.
 
+The bootstrap includes the LEO Ads audience-sync tables and tenant-integrity
+constraint. If `leo_ads` is in a separate database, run
+[`upgrade-audience-sync.sql`](../../customer360-promotions/sql-scripts/upgrade-audience-sync.sql)
+against that database separately; the shared `db-schema` step cannot migrate a
+different destination. Provision tenant mappings explicitly and verify
+readiness using the [backend deployment guide](../customer360-backend/README.md#leo-ads-audience-sync-readiness).
+Audience membership is not yet enforced by promotions ad serving.
+
 Run it **before** the first deploy into a fresh database: the app raises on startup when it
 cannot reach Postgres, so missing tables surface as `CrashLoopBackOff`, not as a 500.
 

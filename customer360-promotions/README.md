@@ -62,6 +62,30 @@ cp .env.example .env
 
 ### Running the Server
 
+**Independent Docker container on a Linux development machine:**
+
+```bash
+cd customer360-promotions
+cp -n .env.example .env
+# Edit .env with the PostgreSQL and optional Redis credentials.
+docker build -t customer360-promotions:local .
+docker run --rm --name customer360-promotions --network host \
+  --env-file .env customer360-promotions:local
+```
+
+Host networking lets this separate container use services bound to
+`localhost` on the same machine; it is not part of the platform's
+`docker-compose.yml`. Initialize the promotions database separately with
+[`db-schema-init.sql`](sql-scripts/db-schema-init.sql), or apply
+[`upgrade-audience-sync.sql`](sql-scripts/upgrade-audience-sync.sql) to an
+existing promotions schema. The backend needs a tenant mapping and, when
+using different database credentials or hosts, `LEO_ADS_DATABASE_URL`; see
+the [audience synchronization guide](../customer360-backend/README.md#leo-ads-audience-synchronization).
+In production the service is deployed independently on
+[Kubernetes](../deployments/customer360-promotions/README.md).
+
+**Host-process alternative:**
+
 **Basic startup:**
 ```bash
 ./start.sh

@@ -1,9 +1,10 @@
 """Tenant-scoped campaign audience synchronization.
 
 The job exports only eligible, matched ``cdp_master_profiles`` identifiers.
-Identifiers are normalized and SHA-256 hashed before leaving Customer 360.
-Provider credentials and endpoint versions live in the tenant's ADS connector
-row; this module never logs credentials or raw profile identifiers.
+External provider identifiers are normalized and SHA-256 hashed; LEO Ads
+stores a tenant-scoped serving hash and the profile UUID reference. Provider
+credentials and endpoint versions live in the tenant's ADS connector row;
+this module never logs credentials or raw profile identifiers.
 """
 
 from __future__ import annotations
@@ -11,11 +12,13 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import itertools
 import json
 import logging
 import os
 import re
 import uuid
+from contextlib import closing
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Protocol
 from urllib.error import HTTPError, URLError
@@ -23,17 +26,18 @@ from urllib.request import Request, urlopen
 
 import psycopg2
 from dotenv import load_dotenv
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import RealDictCursor, execute_values
 
 load_dotenv()
 
 DB_SCHEMA = os.environ.get("DB_SCHEMA", "customer360")
 logger = logging.getLogger(__name__)
-SUPPORTED_PLATFORMS = frozenset({"meta_ads", "google_ads", "tiktok_ads"})
+SUPPORTED_PLATFORMS = frozenset({"meta_ads", "google_ads", "tiktok_ads", "leo_ads"})
 PLATFORM_CONSENT_KEYS = {
     "meta_ads": "meta_ads_opt_in",
     "google_ads": "google_ads_opt_in",
     "tiktok_ads": "tiktok_ads_opt_in",
+    "leo_ads": "leo_ads_opt_in",
 }
 PLATFORM_ALIASES = {
     "facebook": "meta_ads",
@@ -45,6 +49,7 @@ PLATFORM_ALIASES = {
     "google_ads": "google_ads",
     "tiktok": "tiktok_ads",
     "tiktok_ads": "tiktok_ads",
+    "leo_ads": "leo_ads",
 }
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -56,7 +61,7 @@ class AudienceSyncError(RuntimeError):
 
 @dataclass(frozen=True)
 class AudienceMember:
-    """A privacy-safe audience row. Raw identifiers never leave this module."""
+    """A profile reference and hashed identifiers for an audience export."""
 
     profile_id: str
     email_hash: str | None
@@ -83,6 +88,7 @@ class AudienceProvider(Protocol):
         external_audience_id: str | None = None,
     ) -> ProviderResult:
         """Create/update one external audience and upload its members."""
+        ...
 
 
 def _has_explicit_platform_consent(profile: dict[str, Any], platform: str) -> bool:
@@ -334,7 +340,7 @@ def normalize_platform(value: str) -> str:
     platform = PLATFORM_ALIASES.get(key)
     if platform is None:
         raise AudienceSyncError(
-            f"Unsupported audience platform {value!r}; expected Meta, Google Ads, or TikTok Ads"
+            f"Unsupported audience platform {value!r}; expected Meta, Google Ads, TikTok Ads, or LEO Ads"
         )
     return platform
 
@@ -421,7 +427,10 @@ def build_provider(
         "google_ads": GoogleAdsAudienceProvider,
         "tiktok_ads": TikTokAudienceProvider,
     }
-    return providers[normalize_platform(platform)](config, credentials, client)
+    platform_code = normalize_platform(platform)
+    if platform_code not in providers:
+        raise AudienceSyncError(f"{platform_code} is a database destination, not an external provider")
+    return providers[platform_code](config, credentials, client)
 
 
 def _connect():
@@ -472,6 +481,119 @@ def _update_run(cursor, run_id: str, status: str, **values: Any) -> None:
         f"UPDATE {DB_SCHEMA}.crm_ad_sync_runs SET {assignments}, updated_at = now() WHERE sync_run_id = %(run_id)s",
         fields,
     )
+
+
+def _sync_leo_ads(
+    tenant_id: str,
+    campaign_id: str,
+    segment_id: str,
+    audience_name: str,
+    members: Iterable[AudienceMember],
+    batch_size: int,
+) -> ProviderResult:
+    """Atomically replace one campaign's segment membership in the ads schema."""
+    audience_key = f"customer360:{tenant_id}:{campaign_id}:{segment_id}"
+    destination_url = os.environ.get("LEO_ADS_DATABASE_URL")
+    destination = psycopg2.connect(destination_url) if destination_url else _connect()
+    with closing(destination) as conn, conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (f"leo-ads-sync:{tenant_id}",),
+            )
+            cursor.execute(
+                """
+                SELECT m.tenant_id
+                FROM leo_ads.customer360_tenant_map m
+                JOIN leo_ads.tenant t ON t.tenant_id = m.tenant_id
+                WHERE m.customer360_tenant_id = %s AND t.status = 'active'
+                FOR KEY SHARE OF m FOR SHARE OF t
+                """,
+                (tenant_id,),
+            )
+            mapping = cursor.fetchone()
+            if not mapping:
+                raise AudienceSyncError("No active LEO Ads tenant mapping for Customer 360 tenant")
+            ads_tenant_id = mapping["tenant_id"]
+            cursor.execute(
+                """
+                INSERT INTO leo_ads.audience
+                    (tenant_id, audience_key, name, provider, member_count_estimate,
+                     definition, customer360_tenant_id)
+                VALUES (%s, %s, %s, 'customer360', %s, %s::jsonb, %s)
+                ON CONFLICT (tenant_id, audience_key) DO UPDATE
+                SET name = EXCLUDED.name, member_count_estimate = EXCLUDED.member_count_estimate,
+                    membership_version = leo_ads.audience.membership_version + 1,
+                    definition = EXCLUDED.definition, updated_at = now()
+                WHERE leo_ads.audience.customer360_tenant_id = EXCLUDED.customer360_tenant_id
+                  AND leo_ads.audience.provider = 'customer360'
+                RETURNING audience_id
+                """,
+                (ads_tenant_id, audience_key, audience_name, 0,
+                 json.dumps({"customer360_tenant_id": tenant_id, "campaign_id": campaign_id,
+                             "segment_id": segment_id}), tenant_id),
+            )
+            audience = cursor.fetchone()
+            if not audience:
+                raise AudienceSyncError("LEO Ads audience key is owned by another source")
+            audience_id = audience["audience_id"]
+            cursor.execute("CREATE TEMP TABLE c360_sync_members (user_key_hash bytea PRIMARY KEY, profile_ref text NOT NULL) ON COMMIT DROP")
+            rows = (
+                (bytes.fromhex(_hash_identifier(f"leo_ads:{tenant_id}:{member.profile_id}")), member.profile_id)
+                for member in members
+            )
+            member_count = 0
+            while batch := list(itertools.islice(rows, batch_size)):
+                execute_values(cursor, "INSERT INTO c360_sync_members (user_key_hash, profile_ref) VALUES %s", batch)
+                member_count += len(batch)
+            cursor.execute(
+                """
+                INSERT INTO leo_ads.user_serving_key (user_key_hash, tenant_id, profile_ref)
+                SELECT user_key_hash, %s, profile_ref FROM c360_sync_members
+                ON CONFLICT (user_key_hash) DO UPDATE
+                SET profile_ref = EXCLUDED.profile_ref, updated_at = now()
+                WHERE leo_ads.user_serving_key.tenant_id = EXCLUDED.tenant_id
+                """,
+                (ads_tenant_id,),
+            )
+            cursor.execute("CREATE TEMP TABLE c360_removed_members (user_key_hash bytea PRIMARY KEY) ON COMMIT DROP")
+            cursor.execute(
+                """
+                WITH removed AS (
+                    DELETE FROM leo_ads.audience_member m
+                    WHERE m.tenant_id = %s AND m.audience_id = %s
+                      AND NOT EXISTS (SELECT 1 FROM c360_sync_members s WHERE s.user_key_hash = m.user_key_hash)
+                    RETURNING m.user_key_hash
+                )
+                INSERT INTO c360_removed_members SELECT user_key_hash FROM removed
+                """,
+                (ads_tenant_id, audience_id),
+            )
+            cursor.execute(
+                """
+                INSERT INTO leo_ads.audience_member (tenant_id, audience_id, user_key_hash)
+                SELECT %s, %s, user_key_hash FROM c360_sync_members
+                ON CONFLICT DO NOTHING
+                """,
+                (ads_tenant_id, audience_id),
+            )
+            cursor.execute(
+                """
+                DELETE FROM leo_ads.user_serving_key k
+                USING c360_removed_members r
+                WHERE k.tenant_id = %s AND k.user_key_hash = r.user_key_hash
+                  AND NOT EXISTS (
+                      SELECT 1 FROM leo_ads.audience_member m
+                      WHERE m.tenant_id = k.tenant_id AND m.user_key_hash = k.user_key_hash
+                  )
+                """,
+                (ads_tenant_id,),
+            )
+            cursor.execute(
+                "UPDATE leo_ads.audience SET member_count_estimate = %s WHERE tenant_id = %s AND audience_id = %s",
+                (member_count, ads_tenant_id, audience_id),
+            )
+    return ProviderResult(str(audience_id), member_count)
 
 
 def run_data_synch_job(
@@ -542,7 +664,8 @@ def run_data_synch_job(
                 idempotency_key += f":{execution_id}"
             cursor.execute(
                 "SELECT pg_advisory_lock(hashtextextended(%s, 0))",
-                (f"audience-sync:{tenant_id}:{campaign_id}:{platform_code}:{name.lower()}",),
+                (f"audience-sync:leo_ads:{tenant_id}" if platform_code == "leo_ads"
+                 else f"audience-sync:{tenant_id}:{campaign_id}:{platform_code}:{name.lower()}",),
             )
             cursor.execute(
                 f"""
@@ -589,7 +712,10 @@ def run_data_synch_job(
                         "dry_run": dry_run,
                     },
                 )
-                run_id = str(cursor.fetchone()["sync_run_id"])
+                inserted_run = cursor.fetchone()
+                if not inserted_run:
+                    raise AudienceSyncError("Could not create audience sync run")
+                run_id = str(inserted_run["sync_run_id"])
                 external_audience_id = None
                 if execution_id:
                     cursor.execute(
@@ -613,7 +739,8 @@ def run_data_synch_job(
             conn.commit()
 
             provider_config = (
-                _load_provider_config(cursor, tenant_id, platform_code) if not dry_run else ({}, {})
+                _load_provider_config(cursor, tenant_id, platform_code)
+                if not dry_run and platform_code != "leo_ads" else ({}, {})
             )
             missing_provider = provider_config is None
             if provider_config is None:
@@ -637,6 +764,67 @@ def run_data_synch_job(
                 {"tenant_id": tenant_id, "segment_tag": segment["segment_tag"]},
             )
             matched_count = int((cursor.fetchone() or {}).get("matched_count") or 0)
+            if platform_code == "leo_ads":
+                with conn.cursor(
+                    name=f"leo_ads_{uuid.uuid4().hex}", cursor_factory=RealDictCursor
+                ) as profiles:
+                    profiles.itersize = batch_size
+                    profiles.execute(
+                        f"""
+                        SELECT p.master_profile_id
+                        FROM {DB_SCHEMA}.cdp_master_profiles p
+                        WHERE p.tenant_id = %(tenant_id)s
+                          AND p.status_code = 1
+                          AND %(segment_tag)s = ANY(p.segmentation_tags)
+                          AND p.communication_preferences -> 'leo_ads_opt_in' = 'true'::jsonb
+                          AND NOT EXISTS (
+                              SELECT 1 FROM {DB_SCHEMA}.crm_suppression_list sl
+                              WHERE sl.tenant_id = p.tenant_id AND sl.status = 'ACTIVE'
+                                AND (
+                                    sl.master_profile_id = p.master_profile_id
+                                    OR (sl.identifier_type = 'PROFILE_ID' AND sl.identifier = p.master_profile_id::text)
+                                    OR (sl.identifier_type = 'EMAIL' AND lower(sl.identifier) = lower(p.email))
+                                    OR (sl.identifier_type = 'PHONE' AND sl.identifier = p.phone_number)
+                                )
+                                AND (sl.scope = 'GLOBAL' OR sl.campaign_id = %(campaign_id)s)
+                                AND (sl.expires_at IS NULL OR sl.expires_at > now())
+                          )
+                        """,
+                        {"tenant_id": tenant_id, "segment_tag": segment["segment_tag"],
+                         "campaign_id": campaign_id},
+                    )
+                    internal_members = (
+                        AudienceMember(str(row["master_profile_id"]), None, None)
+                        for row in profiles
+                    )
+                    if dry_run:
+                        eligible_count = sum(1 for _ in internal_members)
+                        result = None
+                    else:
+                        result = _sync_leo_ads(
+                            tenant_id, campaign_id, selected_segment, name, internal_members, batch_size
+                        )
+                        eligible_count = result.uploaded_count
+                _update_run(
+                    cursor, run_id, "Completed",
+                    matched_count=matched_count, eligible_count=eligible_count,
+                    uploaded_count=result.uploaded_count if result else 0,
+                    external_audience_id=result.audience_id if result else None,
+                    dry_run=dry_run,
+                    metadata=json.dumps({"reason": "dry_run"} if dry_run else {}),
+                )
+                conn.commit()
+                response = {
+                    "sync_run_id": run_id, "tenant_id": tenant_id, "campaign_id": campaign_id,
+                    "segment_id": selected_segment, "platform": platform_code,
+                    "matched_count": matched_count, "eligible_count": eligible_count,
+                    "uploaded_count": result.uploaded_count if result else 0, "dry_run": dry_run,
+                }
+                if result:
+                    response["external_audience_id"] = result.audience_id
+                else:
+                    response["reason"] = "dry_run"
+                return response
             cursor.execute(
                 f"""
                 SELECT p.master_profile_id, p.email, p.phone_number,
@@ -653,6 +841,7 @@ def run_data_synch_job(
                         AND sl.status = 'ACTIVE'
                         AND (
                             sl.master_profile_id = p.master_profile_id
+                            OR (sl.identifier_type = 'PROFILE_ID' AND sl.identifier = p.master_profile_id::text)
                             OR (sl.identifier_type = 'EMAIL' AND lower(sl.identifier) = lower(p.email))
                             OR (sl.identifier_type = 'PHONE' AND sl.identifier = p.phone_number)
                         )

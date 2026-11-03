@@ -39,18 +39,19 @@ class CampaignWorkflowError(RuntimeError):
 
 
 def _workflow_sync_targets(
-    workflow: dict[str, Any], reached_node_ids: set[str],
+    workflow: dict[str, Any], reached_node_ids: set[str], *, empty_segment: bool = False,
 ) -> list[dict[str, str]]:
     targets: dict[tuple[str, str], dict[str, str]] = {}
 
     def visit(node: Any) -> None:
         if not isinstance(node, dict):
             return
-        if node.get("type") == "run_data_synch_job" and node.get("id") in reached_node_ids:
+        if node.get("type") == "run_data_synch_job":
             config = node.get("config") or {}
             platform = str(config.get("platform") or "").strip().lower()
             audience_name = str(config.get("audience_name") or "").strip()[:255]
-            if platform and audience_name:
+            reached = node.get("id") in reached_node_ids
+            if platform and audience_name and (reached or (empty_segment and platform == "leo_ads")):
                 targets[(platform, audience_name.lower())] = {
                     "platform": platform,
                     "audience_name": audience_name,
@@ -71,6 +72,7 @@ def _submit_audience_sync_jobs(
     reached_node_ids: set[str],
     execution_id: str,
     log: Any,
+    empty_segment: bool = False,
 ) -> list[str]:
     """Activate each persisted audience-sync action once for this workflow run."""
     host = os.environ.get("DAGSTER_GRAPHQL_HOST", "localhost")
@@ -78,7 +80,7 @@ def _submit_audience_sync_jobs(
     job_name = os.environ.get("DAGSTER_DATA_SYNCH_JOB_NAME", "data_synch_job")
     location = os.environ.get("DAGSTER_DATA_SYNCH_LOCATION_NAME", "data_synch")
     run_ids = []
-    for target in _workflow_sync_targets(workflow, reached_node_ids):
+    for target in _workflow_sync_targets(workflow, reached_node_ids, empty_segment=empty_segment):
         try:
             client = DagsterGraphQLClient(host, port_number=port)
             run_id = client.submit_job_execution(
@@ -1046,6 +1048,7 @@ def run_campaign_workflow(
             reached_node_ids=reached_sync_nodes,
             execution_id=str(current_execution_id),
             log=logger.info,
+            empty_segment=summary["profiles"] == 0,
         )
         finished_at = datetime.now(timezone.utc)
         final_status = "Failed" if summary["errors"] else "Completed"

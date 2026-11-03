@@ -459,6 +459,19 @@ def test_sync_targets_are_reachable_and_deduplicated():
     ]
 
 
+def test_empty_segment_still_submits_leo_ads_cleanup_only():
+    workflow = {"root": {"id": "root", "type": "trigger", "children": [
+        {"id": "internal", "type": "run_data_synch_job",
+         "config": {"platform": "leo_ads", "audience_name": "Local"}},
+        {"id": "external", "type": "run_data_synch_job",
+         "config": {"platform": "meta_ads", "audience_name": "External"}},
+    ]}}
+    assert workflow_runner._workflow_sync_targets(workflow, set()) == []
+    assert workflow_runner._workflow_sync_targets(workflow, set(), empty_segment=True) == [
+        {"platform": "leo_ads", "audience_name": "Local"},
+    ]
+
+
 def test_sync_submission_does_not_contact_dagster_for_unvisited_nodes(monkeypatch):
     client = MagicMock()
     monkeypatch.setattr(workflow_runner, "DagsterGraphQLClient", client)

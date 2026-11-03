@@ -101,7 +101,7 @@ jobs:
             *,frontend,*|*,agent,*)
               _mods="server" ;;
             *,db-schema,*)
-              _mods="postgres" ;;
+              _mods="server postgres" ;;
             *)
               _mods="server postgres cache" ;;
           esac
@@ -152,6 +152,8 @@ jobs:
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+          LEO_ADS_DATABASE_URL: ${{ secrets.LEO_ADS_DATABASE_URL }}
+          LEO_ADS_CHECK_READINESS: ${{ vars.LEO_ADS_CHECK_READINESS }}
           TF_VAR_redis_password: ${{ secrets.REDIS_PASSWORD }}
           BREVO_SMTP_PASSWORD: ${{ secrets.BREVO_SMTP_PASSWORD }}   # uat email_engine SMTP send + /metadata/smtp (absent => mock)
           TF_VAR_access_key: ${{ secrets.VSTORAGE_ACCESS_KEY }}

@@ -36,6 +36,13 @@ function campaignHelpers(jquery, api) {
   return context.window.C360.campaignView;
 }
 
+test("LEO Ads is selectable for campaign and workflow audience sync", () => {
+  const sync = Core.catalog().find((item) => item.type === "run_data_synch_job");
+  assert.ok(sync.config.platform.options.includes("leo_ads"));
+  const source = fs.readFileSync(path.join(__dirname, "../static/js/campaign-view.js"), "utf8");
+  assert.match(source, /value:\s*"leo_ads",\s*label:\s*"LEO Ads"/);
+});
+
 test("studio check action and result panels clearly identify local simulation", () => {
   const context = {
     WorkflowCore: Core,

@@ -215,8 +215,8 @@ particular deployed database, which can differ because of migrations.
 | --- | ---: | ---: | ---: | ---: |
 | Canonical `customer360` DDL | **71** | **15** | **3** | **0** |
 | Separate [`data-view-for-llm.sql`](data-view-for-llm.sql) | 0 | 0 | 0 | 2 |
-| Separate [`leo_ads` DDL](../customer360-promotions/sql-scripts/db-schema-init.sql) | 22 | 2 | 1 | 0 |
-| **Combined, if all scripts are applied** | **93** | **17** | **4** | **2** |
+| Separate [`leo_ads` DDL](../customer360-promotions/sql-scripts/db-schema-init.sql) | 24 | 2 | 1 | 0 |
+| **Combined, if all scripts are applied** | **95** | **17** | **4** | **2** |
 
 The canonical DDL therefore declares 86 table relations when the 15 physical
 partitions are included. Views, materialized views, indexes, and functions
@@ -227,7 +227,7 @@ explicitly listed in that capability's inventory**, not every table the
 capability may use. A table shared by multiple groups is counted once in each
 group but once in the 71-table unique total. Consequently, the 75 table
 references in the capability rows are not additive. The promotions group
-has no tables in the canonical DDL; its independently defined 22 `leo_ads`
+has no tables in the canonical DDL; its independently defined 24 `leo_ads`
 tables are shown separately below.
 
 | Capability | `customer360` tables | `customer360` views |
@@ -318,12 +318,12 @@ foreign key from an arrow, an array of IDs, or a conceptual association.
 | Ingestion and identity | [`cdp_raw_profiles_stage`](database-schema.sql#L1309) stores source identities; [`cdp_profile_links`](database-schema.sql#L1449) records a raw-to-master link, unique by tenant and raw profile. | The link carries status and unlink metadata. [`cdp_profile_merge_history`](database-schema.sql#L2578) preserves merge snapshots; do not model identity changes as destructive overwrites. |
 | Golden and domain profiles | [`cdp_master_profiles`](database-schema.sql#L765) is the golden record; [`cdp_domain_profiles`](database-schema.sql#L1020) holds domain-specific data for a master profile and domain. | Raw identities can resolve to a master. Domain JSONB, tags and channel identifiers are attributes, not separate normalized entity tables. |
 | CRM activity | [`crm_transactions`](database-schema.sql#L2650) and [`crm_customer_contacts`](database-schema.sql#L2636) represent transaction and contact records. | A transaction's `master_profile_id` can be null before resolution; event-lake records are external to this DDL. |
-| Personas and value | [`cdp_customer_personas`](database-schema.sql#L1562) stores assignments between profiles and reusable [`cdp_persona_archetypes`](database-schema.sql#L1517); [`cdp_customer_valuation`](database-schema.sql#L4847) stores dated, model-versioned valuation snapshots. | Persona features, score details and history belong to a persona; they do not have their own `tenant_id`. Valuations include domain and currency. |
+| Personas and value | [`cdp_customer_personas`](database-schema.sql#L1562) stores assignments between profiles and reusable [`cdp_persona_archetypes`](database-schema.sql#L1517); [`cdp_customer_valuation`](database-schema.sql#L4863) stores dated, model-versioned valuation snapshots. | Persona features, score details and history belong to a persona; they do not have their own `tenant_id`. Valuations include domain and currency. |
 | Graph | [`cdp_relations`](database-schema.sql#L2617) relates master profiles using [`cdp_relation_types`](database-schema.sql#L2608). [`graph_edges`](database-schema.sql#L3260) stores general typed edges, with primary key `(edge_id, relation)`. | Graph edge endpoints are typed IDs, not declared foreign keys to every possible entity. The parent is partitioned by relation. |
 | Segmentation and AI | [`cdp_segments`](database-schema.sql#L3042) stores a tenant's segment rules; [`cdp_agent_workflow`](database-schema.sql#L3102) configures an ordered agent per tenant and segment. | Segment tags are mirrored into profiles during recomputation; this is not a segment membership join table. The AI agent and feature catalogs are global. |
-| Recommendations | [`cdp_profile_recommendation_runs`](database-schema.sql#L5009) is keyed by tenant, segment and run; [`cdp_profile_recommendations`](database-schema.sql#L5027) adds profile, agent and content item to that key. | Results reference the run, profile and content within the tenant. Product embeddings are reserved; current ranking uses linked content embeddings. |
-| Campaigns and workflows | [`crm_campaign`](database-schema.sql#L434) owns campaign configuration. [`crm_flow_version`](database-schema.sql#L5268) has key `(flow_id, version)`; nodes and edges are versioned projections. | A campaign can pin a flow version; execution, review, suppression and dispatch records have distinct grains. Workflow snapshot content is immutable after creation. |
-| Reporting | [`crm_campaign_performance_daily`](database-schema.sql#L510) is unique per tenant, campaign and date, separately for the base row and each experiment variant. [`cdp_journey_metric_daily`](database-schema.sql#L4319) stores windowed metric snapshots. | Journey snapshot uniqueness also includes business model, domain, stage, metric, dimension and currency. Do not aggregate different currencies together. |
+| Recommendations | [`cdp_profile_recommendation_runs`](database-schema.sql#L5025) is keyed by tenant, segment and run; [`cdp_profile_recommendations`](database-schema.sql#L5043) adds profile, agent and content item to that key. | Results reference the run, profile and content within the tenant. Product embeddings are reserved; current ranking uses linked content embeddings. |
+| Campaigns and workflows | [`crm_campaign`](database-schema.sql#L434) owns campaign configuration. [`crm_flow_version`](database-schema.sql#L5284) has key `(flow_id, version)`; nodes and edges are versioned projections. | A campaign can pin a flow version; execution, review, suppression and dispatch records have distinct grains. Workflow snapshot content is immutable after creation. |
+| Reporting | [`crm_campaign_performance_daily`](database-schema.sql#L510) is unique per tenant, campaign and date, separately for the base row and each experiment variant. [`cdp_journey_metric_daily`](database-schema.sql#L4335) stores windowed metric snapshots. | Journey snapshot uniqueness also includes business model, domain, stage, metric, dimension and currency. Do not aggregate different currencies together. |
 
 ### Schema metadata discovery
 
@@ -434,7 +434,7 @@ Policies and RLS flags alone do not describe grants or bypass privileges.
 | --- | --- |
 | [`cdp_master_profiles`](database-schema.sql#L765) | Golden customer record with identity, demographics, consent, lifecycle, tags, and scores. Partial unique indexes enforce per-tenant non-null email and phone uniqueness. |
 | [`cdp_domain_profiles`](database-schema.sql#L1020) | Domain-specific attributes and analytics linked to a master profile; the domain-attribute catalog trigger registers new keys. |
-| [`cdp_customer_valuation`](database-schema.sql#L4847) | Tenant-, profile-, domain-, date-, and model-scoped customer valuation snapshots. |
+| [`cdp_customer_valuation`](database-schema.sql#L4863) | Tenant-, profile-, domain-, date-, and model-scoped customer valuation snapshots. |
 | [`crm_customer_contacts`](database-schema.sql#L2636) | Customer interactions associated with master profiles. |
 | [`crm_transactions`](database-schema.sql#L2650) | Cross-domain transaction facts; `master_profile_id` can be null until identity resolution. |
 | [`crm_lead`](database-schema.sql#L630), [`crm_lead_source`](database-schema.sql#L650) | Leads and their sources. |
@@ -546,10 +546,10 @@ psql -v ON_ERROR_STOP=1 -d customer360_test \
 | --- | --- |
 | [`crm_campaign_performance_daily`](database-schema.sql#L510) | Daily campaign performance facts. |
 | [`vw_campaign_performance_metrics`](database-schema.sql#L544) | Campaign-level spend, funnel metrics, CPA, and ROAS. |
-| [`cdp_journey_metric`](database-schema.sql#L4227) | Global journey KPI definitions and business-model applicability. |
-| [`cdp_journey_metric_domain`](database-schema.sql#L4301) | General and domain-specific KPI mappings. |
-| [`cdp_journey_metric_daily`](database-schema.sql#L4319) | Tenant daily windowed KPI snapshots, including dimensions and currency. |
-| [`vw_journey_stage_report`](database-schema.sql#L4795) | Invoker-security view comparing current and prior journey KPI windows. |
+| [`cdp_journey_metric`](database-schema.sql#L4243) | Global journey KPI definitions and business-model applicability. |
+| [`cdp_journey_metric_domain`](database-schema.sql#L4317) | General and domain-specific KPI mappings. |
+| [`cdp_journey_metric_daily`](database-schema.sql#L4335) | Tenant daily windowed KPI snapshots, including dimensions and currency. |
+| [`vw_journey_stage_report`](database-schema.sql#L4811) | Invoker-security view comparing current and prior journey KPI windows. |
 
 `refresh_journey_metrics_pg` refreshes supported PostgreSQL-sourced metrics;
 event-lake metrics are populated separately. The two materialized
@@ -606,10 +606,10 @@ Keycloak itself and bearer-token issuance are external to this DDL.
 
 | Object | Purpose and key relationships |
 | --- | --- |
-| [`sys_assistant_message`](database-schema.sql#L5197) | Tenant-scoped assistant conversation messages and optional customer context. |
-| [`crm_flow`](database-schema.sql#L5255), [`crm_flow_version`](database-schema.sql#L5268) | Workflow identity and versioned snapshots edited through the administration UI. |
-| [`crm_flow_node`](database-schema.sql#L5380), [`crm_flow_edge`](database-schema.sql#L5456) | Persisted workflow graph projections. |
-| [`crm_vw_flow_node`](database-schema.sql#L5539) | Readable workflow-node projection. |
+| [`sys_assistant_message`](database-schema.sql#L5213) | Tenant-scoped assistant conversation messages and optional customer context. |
+| [`crm_flow`](database-schema.sql#L5271), [`crm_flow_version`](database-schema.sql#L5284) | Workflow identity and versioned snapshots edited through the administration UI. |
+| [`crm_flow_node`](database-schema.sql#L5396), [`crm_flow_edge`](database-schema.sql#L5472) | Persisted workflow graph projections. |
+| [`crm_vw_flow_node`](database-schema.sql#L5555) | Readable workflow-node projection. |
 
 Administration also uses the user, role, tenant, catalog, campaign, and
 segment tables documented in their respective sections. The UI itself and
@@ -627,10 +627,10 @@ the docs assistant's search index are not created by this DDL.
 | [`crm_campaign_reviews`](database-schema.sql#L3241) | Campaign review records. |
 | [`crm_campaign_experiments`](database-schema.sql#L3673), [`crm_campaign_experiment_variants`](database-schema.sql#L3692) | Experiment definitions and variants linked to campaigns, segments, and templates. |
 | [`crm_campaign_content_items`](database-schema.sql#L3784) | Campaign-to-content associations. |
-| [`crm_campaign_workflow_action_runs`](database-schema.sql#L3882) | Per-profile workflow action execution/idempotency records. |
-| [`cdp_campaign_dispatch_logs`](database-schema.sql#L3956) | Outbound per-recipient dispatch ledger. |
-| [`crm_connector_config`](database-schema.sql#L3987) | Tenant outbound provider configuration; `credentials` can contain secrets. |
-| [`crm_suppression_list`](database-schema.sql#L4037) | Global or campaign-scoped suppression records and protected time windows. |
+| [`crm_campaign_workflow_action_runs`](database-schema.sql#L3898) | Per-profile workflow action execution/idempotency records. |
+| [`cdp_campaign_dispatch_logs`](database-schema.sql#L3972) | Outbound per-recipient dispatch ledger. |
+| [`crm_connector_config`](database-schema.sql#L4003) | Tenant outbound provider configuration; `credentials` can contain secrets. |
+| [`crm_suppression_list`](database-schema.sql#L4053) | Global or campaign-scoped suppression records and protected time windows. |
 
 Workflow versions, nodes, and edges are listed under [Admin UI](#admin-ui).
 The `crm_save_flow`, `crm_review_flow_version`, `crm_publish_flow`,
@@ -646,13 +646,16 @@ messages.
 [`crm_ad_sync_runs`](database-schema.sql#L3835) records tenant-scoped,
 idempotent audience synchronization runs. Segments, profiles, consent, and
 suppression data provide the inputs; hashing and provider uploads occur in
-the activation service, not in this DDL.
+the activation service, not in this DDL. For the `leo_ads` destination,
+explicit tenant mapping, consent, snapshot replacement, deployment and
+serving limitations are described in the
+[backend synchronization guide](../customer360-backend/README.md#leo-ads-audience-synchronization).
 
 ### AI Campaign Planning
 
 **Inventory: 2 tables; 0 views.**
 
-[`crm_campaign_agent`](database-schema.sql#L4194) assigns agents and
+[`crm_campaign_agent`](database-schema.sql#L4210) assigns agents and
 guardrails to campaigns. [`cdp_ai_agents`](database-schema.sql#L1998) holds
 the shared agent registry and prompt version history; campaign reviews,
 message templates, and content links are documented above. The dedicated
@@ -660,7 +663,7 @@ agent service performs planning; registry rows do not themselves execute it.
 
 ### Promotions API
 
-**Inventory: 0 `customer360` tables; separately, 22 `leo_ads` logical
+**Inventory: 0 `customer360` tables; separately, 24 `leo_ads` logical
 tables, 2 child partitions, and 1 ordinary view.**
 
 The `leo_ads` schema is **not** created by `database-schema.sql`. Its separate
@@ -677,8 +680,9 @@ defines the following objects:
 | [`destination`](../customer360-promotions/sql-scripts/db-schema-init.sql#L286), [`tracking_endpoint`](../customer360-promotions/sql-scripts/db-schema-init.sql#L298) | Creative destinations and tracking endpoints. |
 | [`ad`](../customer360-promotions/sql-scripts/db-schema-init.sql#L349), [`targeting_rule`](../customer360-promotions/sql-scripts/db-schema-init.sql#L377), [`audience`](../customer360-promotions/sql-scripts/db-schema-init.sql#L402), [`ad_audience`](../customer360-promotions/sql-scripts/db-schema-init.sql#L419), [`placement_ad`](../customer360-promotions/sql-scripts/db-schema-init.sql#L436) | Ads, targeting, audience associations, and placement associations. |
 | [`user_serving_key`](../customer360-promotions/sql-scripts/db-schema-init.sql#L457) | Serving-time user identifiers. |
-| [`ad_event`](../customer360-promotions/sql-scripts/db-schema-init.sql#L475) | Partitioned ad telemetry, with [`ad_event_2026_08`](../customer360-promotions/sql-scripts/db-schema-init.sql#L498) and [`ad_event_default`](../customer360-promotions/sql-scripts/db-schema-init.sql#L502) child partitions. |
-| [`v_active_ads`](../customer360-promotions/sql-scripts/db-schema-init.sql#L622) | Ordinary view of active ads. |
+| [`customer360_tenant_map`](../customer360-promotions/sql-scripts/db-schema-init.sql#L468), [`audience_member`](../customer360-promotions/sql-scripts/db-schema-init.sql#L494) | Explicit cross-system tenant mapping and tenant-scoped audience membership. |
+| [`ad_event`](../customer360-promotions/sql-scripts/db-schema-init.sql#L515) | Partitioned ad telemetry, with [`ad_event_2026_08`](../customer360-promotions/sql-scripts/db-schema-init.sql#L538) and [`ad_event_default`](../customer360-promotions/sql-scripts/db-schema-init.sql#L542) child partitions. |
+| [`v_active_ads`](../customer360-promotions/sql-scripts/db-schema-init.sql#L662) | Ordinary view of active ads. |
 
 See the [promotions schema documentation](../customer360-promotions/sql-scripts/README.md)
 for details. This schema has its own tenant model and no foreign keys into
@@ -693,8 +697,8 @@ for details. This schema has its own tenant model and no foreign keys into
 | --- | --- |
 | [`cdp_content_items`](database-schema.sql#L2708) | Tenant content candidates and 384- or 768-dimensional embeddings, with dimension-specific HNSW indexes. |
 | [`cdp_product_items`](database-schema.sql#L2813) | Tenant product catalog with optional content linkage and reserved 384- or 768-dimensional embeddings. |
-| [`cdp_profile_recommendation_runs`](database-schema.sql#L5009) | Tenant/segment recommendation run metadata. |
-| [`cdp_profile_recommendations`](database-schema.sql#L5027) | Ranked per-profile content candidates, scores, and explanations. |
+| [`cdp_profile_recommendation_runs`](database-schema.sql#L5025) | Tenant/segment recommendation run metadata. |
+| [`cdp_profile_recommendations`](database-schema.sql#L5043) | Ranked per-profile content candidates, scores, and explanations. |
 
 Persona archetype centroids use `vector(768)` and IVFFlat; campaign, CRM,
 and graph embeddings include `vector(1536)`. Product-vector columns are

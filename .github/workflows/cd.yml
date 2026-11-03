@@ -47,6 +47,10 @@ name: CD
 # Required repo secrets:
 #   DEPLOY_SSH_KEY   private key for the deploy user on the VNG Cloud VMs
 #   DB_PASSWORD      -> TF_VAR_db_password    (read by the app deploy scripts)
+#   LEO_ADS_DATABASE_URL -> optional Dagster destination connection secret when
+#                           leo_ads is in a separate PostgreSQL database
+#   (var) LEO_ADS_CHECK_READINESS=true -> require the independent promotions
+#                                         database readiness check after backend rollout
 #   REDIS_PASSWORD   -> TF_VAR_redis_password (used by the API cache and the event-api Redis Stream queue; docs-search uses a dedicated no-auth local Redis)
 #   DOCS_OPENAI_API_KEY -> docs-vector-search OpenAI embeddings and LLM
 #   BREVO_SMTP_PASSWORD -> Brevo SMTP password for uat (email_engine real send + /metadata/smtp); absent => uat email stays mock. prod has no smtp.prod.env so stays mock regardless.

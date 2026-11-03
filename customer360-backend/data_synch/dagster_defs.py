@@ -1,7 +1,7 @@
 """Dagster jobs for campaign audience synchronization and TSV catalog imports.
 
 ``data_synch_job`` exports a campaign's eligible segment members to one
-configured Meta, Google Ads, or TikTok custom audience. The export is
+configured Meta, Google Ads, TikTok, or LEO Ads audience. The export is
 tenant-scoped, consent-aware, hashed before transport, and idempotently
 audited in ``crm_ad_sync_runs``. The catalog imports remain separate jobs.
 

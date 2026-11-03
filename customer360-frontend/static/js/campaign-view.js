@@ -67,7 +67,8 @@ window.C360 = window.C360 || {};
     audience_sync: [
       { value: "meta_ads", label: "Meta / Facebook Ads" },
       { value: "google_ads", label: "Google Ads" },
-      { value: "tiktok_ads", label: "TikTok Ads" }
+      { value: "tiktok_ads", label: "TikTok Ads" },
+      { value: "leo_ads", label: "LEO Ads" }
     ]
   };
 

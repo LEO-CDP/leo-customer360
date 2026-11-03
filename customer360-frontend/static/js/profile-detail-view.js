@@ -40,6 +40,7 @@ window.C360 = window.C360 || {};
     { key: "meta_ads_opt_in", label: "Meta Ads audience" },
     { key: "google_ads_opt_in", label: "Google Ads audience" },
     { key: "tiktok_ads_opt_in", label: "TikTok audience" },
+    { key: "leo_ads_opt_in", label: "LEO Ads audience" },
   ];
   var ELIGIBILITY_CHANNELS = [
     { key: "email", label: "Email marketing" },

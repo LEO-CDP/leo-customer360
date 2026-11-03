@@ -394,6 +394,11 @@ class ProductionValidationTests(unittest.TestCase):
             {"platform": "meta_ads", "audience_name": "Spring audience"},
         )
         self.assertEqual(FlowEngine(self._flow(extra=sync)).problems(), [])
+        internal = _node(
+            "n2", "run_data_synch_job",
+            {"platform": "leo_ads", "audience_name": "LEO audience"},
+        )
+        self.assertEqual(FlowEngine(self._flow(extra=internal)).problems(), [])
         invalid = _node("n2", "run_data_synch_job", {"platform": "unknown", "audience_name": ""})
         self.assertEqual(len(FlowEngine(self._flow(extra=invalid)).problems()), 2)
 

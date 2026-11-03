@@ -290,16 +290,17 @@
       label: "Sync custom audience",
       description: "Send the campaign audience to an advertising platform",
       use_when:
-        "Use for approved campaigns that build a matched custom audience on Meta, Google Ads, or TikTok.",
+        "Use for approved campaigns that synchronize the campaign segment to Meta, Google Ads, TikTok, or LEO Ads.",
       config: {
         platform: {
           type: "enum",
           label: "Ad platform",
-          options: ["meta_ads", "google_ads", "tiktok_ads"],
+          options: ["meta_ads", "google_ads", "tiktok_ads", "leo_ads"],
           labels: {
             meta_ads: "Meta / Facebook Ads",
             google_ads: "Google Ads",
             tiktok_ads: "TikTok Ads",
+            leo_ads: "LEO Ads",
           },
           default: "meta_ads",
         },

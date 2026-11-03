@@ -32,7 +32,24 @@ case "$ENV" in uat | prod) ;; *) echo "Usage: ./deploy-backend-vks.sh <uat|prod>
 ACTION="${2:-deploy}"
 case "$ACTION" in deploy | destroy) ;; *) echo "Usage: ./deploy-backend-vks.sh <uat|prod> [deploy|destroy]"; exit 1 ;; esac
 
+_LEO_ADS_DATABASE_URL_FROM_ENV="${LEO_ADS_DATABASE_URL:-}"
+_LEO_ADS_CHECK_READINESS_FROM_ENV="${LEO_ADS_CHECK_READINESS:-}"
 [[ -f .env ]] && { set -a; source ./.env; set +a; }
+if [[ -n "$_LEO_ADS_DATABASE_URL_FROM_ENV" ]]; then
+  LEO_ADS_DATABASE_URL="$_LEO_ADS_DATABASE_URL_FROM_ENV"
+fi
+if [[ -n "$_LEO_ADS_CHECK_READINESS_FROM_ENV" ]]; then
+  LEO_ADS_CHECK_READINESS="$_LEO_ADS_CHECK_READINESS_FROM_ENV"
+fi
+unset _LEO_ADS_DATABASE_URL_FROM_ENV _LEO_ADS_CHECK_READINESS_FROM_ENV
+if [[ "${LEO_ADS_DATABASE_URL:-}" == *$'\n'* || "${LEO_ADS_DATABASE_URL:-}" == *$'\r'* ]]; then
+  echo "ERROR: LEO_ADS_DATABASE_URL must be a single-line PostgreSQL connection string." >&2
+  exit 1
+fi
+case "${LEO_ADS_CHECK_READINESS:-false}" in
+  true|false) ;;
+  *) echo "ERROR: LEO_ADS_CHECK_READINESS must be true or false." >&2; exit 1 ;;
+esac
 NAMESPACE="${BACKEND_NAMESPACE:-customer360}"
 OVERLAY="$MANIFESTS/overlays/$ENV"
 [[ -d "$OVERLAY" ]] || { echo "ERROR: no overlay for '$ENV' at $OVERLAY."; exit 1; }
@@ -130,7 +147,7 @@ GEN="$MANIFESTS/generated/$ENV"
 rm -rf "$GEN"; mkdir -p "$GEN"
 umask 077
 {
-  echo "DB_HOST=$DB_HOST"; echo "DB_PORT=$DB_PORT"; echo "DB_NAME=$DB_NAME"; echo "DB_USER=$DB_USER"; echo "DB_SCHEMA=$DB_NAME"
+  echo "DB_HOST=$DB_HOST"; echo "DB_PORT=$DB_PORT"; echo "DB_NAME=$DB_NAME"; echo "DB_USER=$DB_USER"; echo "DB_SCHEMA=${DB_SCHEMA:-customer360}"
   echo "DAGSTER_PG_DB=$DAGSTER_PG_DB"
   echo "DAGSTER_MAX_CONCURRENT_RUNS=$MAX_RUNS"
   echo "DAGSTER_REQUIRE_S3=$REQUIRE_S3"
@@ -155,6 +172,7 @@ umask 077
 } > "$GEN/config.env"
 {
   echo "DB_PASSWORD=$DB_PASS"
+  [[ -n "${LEO_ADS_DATABASE_URL:-}" ]] && printf 'LEO_ADS_DATABASE_URL=%s\n' "$LEO_ADS_DATABASE_URL"
   echo "AWS_ACCESS_KEY_ID=$S3_ACCESS_KEY"; echo "AWS_SECRET_ACCESS_KEY=$S3_SECRET_KEY"
   echo "S3_ACCESS_KEY_ID=$S3_ACCESS_KEY"; echo "S3_SECRET_ACCESS_KEY=$S3_SECRET_KEY"
   echo "MINIO_ROOT_USER=$S3_ACCESS_KEY"; echo "MINIO_ROOT_PASSWORD=$S3_SECRET_KEY"
@@ -242,12 +260,24 @@ r = urllib.request.Request("http://localhost:$DAGSTER_PORT/graphql", json.dumps(
 d = json.load(urllib.request.urlopen(r, timeout=20))["data"]
 print("   dagster version:", d["version"])
 bad = []
+seen = set()
 for e in d["workspaceOrError"].get("locationEntries", []):
+    seen.add(e["name"])
     ok = e["locationOrLoadError"]["__typename"] == "RepositoryLocation" and e["loadStatus"] == "LOADED"
     print("   %-28s %s" % (e["name"], "OK" if ok else "FAILED (%s)" % e["locationOrLoadError"]["__typename"]))
     if not ok: bad.append(e["name"])
-sys.exit(1 if bad or not d["workspaceOrError"].get("locationEntries") else 0)
+missing = {"campaign_activation", "data_synch"} - seen
+if missing:
+    print("   missing required code locations:", ", ".join(sorted(missing)))
+sys.exit(1 if bad or missing or not seen else 0)
 PY
+if [[ "${LEO_ADS_CHECK_READINESS:-false}" == "true" ]]; then
+  echo ">> LEO Ads audience-sync database readiness (from the worker pod):"
+  "${KUBECTL[@]}" -n "$NAMESPACE" exec deploy/dagster -- \
+    python /app/data_synch/check_leo_ads_readiness.py
+else
+  echo ">> LEO Ads sync readiness not checked (set LEO_ADS_CHECK_READINESS=true to require it)."
+fi
 echo ">> Done. customer360-backend (Dagster) is running on VKS. The Service is a NodePort (private node IP, no auth on the UI):"
 echo "   in-cluster: dagster:$DAGSTER_PORT    node: <node-ip>:30300    local: kubectl -n $NAMESPACE port-forward svc/dagster $DAGSTER_PORT:$DAGSTER_PORT"
 echo "   Cutover consumers (API DAGSTER_HOST/PORT, ../load_balancer, ../proxy) are described in README.md \"Cutover\"."

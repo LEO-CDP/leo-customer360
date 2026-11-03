@@ -1,8 +1,8 @@
 # `data_synch` — Campaign Audience Synchronization
 
 This code location exports approved campaign segment members to configured
-third-party custom audiences. It supports Meta/Facebook Ads, Google Ads
-Customer Match, and TikTok Ads.
+third-party custom audiences and the LEO Ads database. It supports
+Meta/Facebook Ads, Google Ads Customer Match, TikTok Ads, and `leo_ads`.
 
 ## Dagster interface
 
@@ -11,8 +11,8 @@ Customer Match, and TikTok Ads.
 - Audit table: `customer360.crm_ad_sync_runs`
 - Identifiers are normalized and SHA-256 hashed in memory. Raw email and phone
   values are never sent to a provider or written to the audit table.
-- Only active profiles with a valid email or phone, no active global/campaign
-  suppression, and literal-true provider consent are eligible. The required
+- External providers require active profiles with a valid email or phone, no
+  active global/campaign suppression, and literal-true provider consent. The required
   profile keys are `meta_ads_opt_in`, `google_ads_opt_in`, and
   `tiktok_ads_opt_in`; missing, false, or non-boolean values are not consent.
   Consent for email or another provider is never used as a substitute.
@@ -23,6 +23,11 @@ Customer Match, and TikTok Ads.
   audience ID for the same tenant/campaign/platform/audience name.
 - Jobs for the same target are serialized with a session advisory lock to avoid
   overlapping uploads and audit-row races.
+- LEO Ads requires literal `leo_ads_opt_in = true`, applies active
+  suppression, and does not require an email or phone. It streams the
+  campaign's complete segment and atomically replaces its audience membership,
+  including on empty results. An active, explicitly provisioned tenant
+  mapping is required; missing mapping or permissions fail the job.
 
 Run config:
 
@@ -32,20 +37,25 @@ ops:
     config:
       tenant_id: "<uuid>"
       campaign_id: "<uuid>"
-      platform: "meta_ads" # meta_ads | google_ads | tiktok_ads
+      platform: "meta_ads" # meta_ads | google_ads | tiktok_ads | leo_ads
       segment_id: "<uuid>" # must match the campaign audience
       audience_name: "Spring retention"
       dry_run: false
       batch_size: 1000
 ```
 
-Live uploads require an active `crm_connector_config` row with
+External-provider uploads require an active `crm_connector_config` row with
 `connector_type = 'ADS'`. Without one, the job logs that the provider is not
 configured and completes a dry run with zero uploads. The response includes
 `dry_run = true` and `reason = provider_not_configured`; the audit row stores
 the same reason in `metadata` and sets `dry_run = true`. No adapter is called.
 An explicitly requested dry run also avoids provider lookup entirely.
 Invalid settings on an existing connector still fail explicitly.
+
+LEO Ads does not use this connector or its dry-run fallback. See the
+[deployment and tenant mapping guide](../README.md#leo-ads-audience-synchronization)
+for schema upgrades, the optional separate database URL, and the fact that
+the current promotions server does not yet enforce audience targeting.
 
 Provider-specific non-secret settings belong in
 `config`; access tokens and developer tokens belong in `credentials`.
@@ -57,8 +67,8 @@ overrides are supported through connector `config` for provider versioning.
 
 ## Dependencies and local development
 
-The service currently requires only Dagster, as declared in
-`requirements.txt`. From `customer360-backend/`, load it with:
+The dependencies are declared in `requirements.txt`. From
+`customer360-backend/`, load it with:
 
 ```bash
 dagster dev -w workspace.yaml

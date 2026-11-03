@@ -16,6 +16,7 @@ from leo_customer360_dao.schemas.identity import MasterProfileCreate, MasterProf
         "meta_ads_opt_in",
         "google_ads_opt_in",
         "tiktok_ads_opt_in",
+        "leo_ads_opt_in",
     ],
 )
 def test_profile_consent_flags_require_json_booleans(field):

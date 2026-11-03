@@ -216,6 +216,29 @@ services:
   # ---------------------------------------------------------------------------
   # 6) Dagster webserver - all eight customer360-backend code locations.
   # ---------------------------------------------------------------------------
+  schema-upgrade:
+    build:
+      context: .
+      dockerfile: postgres/Dockerfile
+    image: customer360-postgres:local
+    container_name: customer360-schema-upgrade
+    restart: "no"
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGUSER: ${DB_MIGRATION_USER:-${DB_USER:-postgres}}
+      PGPASSWORD: ${DB_MIGRATION_PASSWORD:-${DB_PASSWORD:?Set DB_PASSWORD in .env}}
+      PGDATABASE: ${DB_NAME:-customer360}
+    volumes:
+      - ./customer360-database:/schema/customer360:ro
+      - ./postgres/upgrade-app-schema.sh:/schema/upgrade-app-schema.sh:ro
+    entrypoint: ["/bin/sh", "/schema/upgrade-app-schema.sh"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - customer360-network
+
   dagster:
     build:
       context: .
@@ -230,6 +253,9 @@ services:
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
+      DAGSTER_GRAPHQL_HOST: dagster
+      DAGSTER_GRAPHQL_PORT: 3000
+      LEO_ADS_DATABASE_URL: ${LEO_ADS_DATABASE_URL:-}
       REDIS_HOST: redis
       REDIS_PORT: 6580
       REDIS_DB: ${REDIS_DB:-0}
@@ -253,6 +279,8 @@ services:
       agent:
         condition: service_healthy
       dagster-db-init:
+        condition: service_completed_successfully
+      schema-upgrade:
         condition: service_completed_successfully
     ports:
       - "${DAGSTER_UI_HOST:-127.0.0.1}:${DAGSTER_UI_PORT:-3000}:3000"
@@ -292,6 +320,9 @@ services:
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
+      DAGSTER_GRAPHQL_HOST: dagster
+      DAGSTER_GRAPHQL_PORT: 3000
+      LEO_ADS_DATABASE_URL: ${LEO_ADS_DATABASE_URL:-}
       REDIS_HOST: redis
       REDIS_PORT: 6580
       REDIS_DB: ${REDIS_DB:-0}
@@ -308,6 +339,8 @@ services:
       DAGSTER_HOME: /dagster_home
     command: ["dagster-daemon", "run", "-w", "workspace.yaml"]
     depends_on:
+      dagster:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       redis:
@@ -315,6 +348,8 @@ services:
       agent:
         condition: service_healthy
       dagster-db-init:
+        condition: service_completed_successfully
+      schema-upgrade:
         condition: service_completed_successfully
     networks:
       - customer360-network
@@ -410,6 +445,8 @@ services:
         condition: service_healthy
       dagster:
         condition: service_healthy
+      schema-upgrade:
+        condition: service_completed_successfully
       agent:
         condition: service_healthy
     ports:

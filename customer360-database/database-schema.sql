@@ -862,8 +862,8 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_master_profiles (
     -- Stores explicit channel/provider consent evidence and derived eligibility.
     -- Only literal JSON true grants consent; missing or malformed values fail closed.
     -- Example source flags: email_opt_in, sms_opt_in, push_opt_in, zalo_opt_in,
-    -- whatsapp_opt_in, voice_opt_in, meta_ads_opt_in, google_ads_opt_in, and
-    -- tiktok_ads_opt_in.
+    -- whatsapp_opt_in, voice_opt_in, meta_ads_opt_in, google_ads_opt_in,
+    -- tiktok_ads_opt_in, and leo_ads_opt_in.
     -- eligibility_policy is a separate evaluated result and never replaces consent.
     communication_preferences JSONB DEFAULT '{}'::JSONB,
 
@@ -3855,7 +3855,7 @@ CREATE TABLE IF NOT EXISTS customer360.crm_ad_sync_runs (
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
     CONSTRAINT uq_crm_ad_sync_runs_key UNIQUE (tenant_id, idempotency_key),
     CONSTRAINT chk_crm_ad_sync_runs_platform CHECK (
-        platform IN ('meta_ads', 'google_ads', 'tiktok_ads')
+        platform IN ('meta_ads', 'google_ads', 'tiktok_ads', 'leo_ads')
     ),
     CONSTRAINT chk_crm_ad_sync_runs_status CHECK (
         status IN ('Pending', 'Running', 'Completed', 'Failed')
@@ -3868,7 +3868,23 @@ CREATE TABLE IF NOT EXISTS customer360.crm_ad_sync_runs (
     )
 );
 
-COMMENT ON TABLE customer360.crm_ad_sync_runs IS 'Tenant-scoped, idempotent audit state for campaign segment uploads to Meta, Google Ads, and TikTok custom audiences. Raw profile identifiers are never stored.';
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'customer360.crm_ad_sync_runs'::regclass
+          AND conname = 'chk_crm_ad_sync_runs_platform'
+          AND pg_get_constraintdef(oid) LIKE '%leo_ads%'
+    ) THEN
+        ALTER TABLE customer360.crm_ad_sync_runs
+            DROP CONSTRAINT IF EXISTS chk_crm_ad_sync_runs_platform;
+        ALTER TABLE customer360.crm_ad_sync_runs
+            ADD CONSTRAINT chk_crm_ad_sync_runs_platform
+            CHECK (platform IN ('meta_ads', 'google_ads', 'tiktok_ads', 'leo_ads'));
+    END IF;
+END $$;
+
+COMMENT ON TABLE customer360.crm_ad_sync_runs IS 'Tenant-scoped, idempotent audit state for campaign segment synchronization to advertising audiences, including LEO Ads. Raw profile identifiers are never stored in this ledger.';
 
 CREATE INDEX IF NOT EXISTS idx_crm_ad_sync_runs_tenant_started
     ON customer360.crm_ad_sync_runs (tenant_id, started_at DESC);

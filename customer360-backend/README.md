@@ -65,6 +65,79 @@ The core design principle is:
 
 > **Dagster orchestrates the CDP domain pipelines; Polars performs high-performance data transformation; S3/MinIO stores raw and curated analytical data; PostgreSQL serves the operational Customer 360 layer; and activation services generate new behavioral data that feeds back into analytics.**
 
+## LEO Ads audience synchronization
+
+An approved campaign can select a segment and include a **Sync custom
+audience** workflow action with platform `leo_ads`. When that action is
+reached, `data_synch_job` synchronizes the campaign's entire selected segment,
+not only profiles that traversed the action. An empty segment still submits a
+LEO Ads sync so an earlier membership can be cleared. Other advertising
+providers keep their existing behavior.
+
+Only active, segment-tagged profiles with literal JSON `true` in
+`communication_preferences.leo_ads_opt_in` and no applicable active
+suppression are included. Suppression includes identifier-only profile,
+email and phone records. An email or phone is not required for LEO Ads.
+Syncs are snapshots: rerun the campaign when membership, consent or
+suppression changes. This is not real-time consent revocation.
+
+Each `(Customer 360 tenant, campaign, segment)` has one promotions audience,
+regardless of the action's display name. The target transaction replaces its
+membership, including when it is empty; it removes unreferenced serving keys
+created for removed members while preserving keys still used by another
+audience. The serving key is SHA-256 of
+`leo_ads:<customer360-tenant-uuid>:<master-profile-uuid>`. Only that hash and
+the profile UUID reference are stored, not raw email, phone or the full
+profile. Both hash and reference remain potentially sensitive: restrict
+access and define appropriate retention controls.
+
+Before enabling the action:
+
+1. Apply `customer360-database/database-schema.sql` (or its
+   `legacy-upgrade.sql` for existing Customer 360 databases). Separately
+   initialize the independently deployed promotions database with
+   `customer360-promotions/sql-scripts/db-schema-init.sql`, if it is new.
+   On an existing promotions database apply
+   [`upgrade-audience-sync.sql`](../customer360-promotions/sql-scripts/upgrade-audience-sync.sql).
+2. An authorized database operator must explicitly map the Customer 360 UUID to
+   an **active** promotions tenant; never derive the mapping from a request:
+
+   ```sql
+   INSERT INTO leo_ads.customer360_tenant_map (customer360_tenant_id, tenant_id)
+   VALUES ('<customer360-tenant-uuid>', <leo-ads-tenant-id>);
+   ```
+
+3. Configure `LEO_ADS_DATABASE_URL` on the Dagster worker if promotions uses a
+   different PostgreSQL database or credentials; otherwise the Customer 360 connection is
+   used. Store the connection string as a secret. The worker needs only the
+   required read/write privileges on the mapping, audience, serving-key and
+   membership objects and their sequences; ordinary tenant users must not be
+   able to modify tenant mappings.
+
+Missing or inactive mappings and database errors fail the sync and are
+recorded in `crm_ad_sync_runs`; they do not fall back to a successful dry run.
+The promotions serving implementation does **not** yet enforce these
+audience memberships during ad selection. Syncing data therefore does not, by
+itself, target or exclude ads.
+
+The promotions service runs independently: use its container on the same
+development machine, or its VKS deployment in production. It is not started
+by the Customer 360 Docker Compose stack. Its database schema must be
+provisioned separately when that stack is used. Compose runs the Customer 360
+source upgrade before the API and Dagster; set `DB_MIGRATION_USER` and
+`DB_MIGRATION_PASSWORD` if application credentials cannot apply DDL. For VKS, set
+`LEO_ADS_CHECK_READINESS=true` when deploying the backend to require the
+cross-service database checks described in the
+[backend deployment guide](../deployments/customer360-backend/README.md#leo-ads-audience-sync-readiness).
+
+Run the PostgreSQL integration tests only against a disposable database with
+both schema scripts applied:
+
+```bash
+LEO_ADS_TEST_DSN='<disposable-postgres-dsn>' PYTHONPATH=customer360-backend/data_synch \
+  customer360-backend/.venv/bin/pytest -q customer360-backend/data_synch/tests/test_leo_ads_postgres.py
+```
+
 The diagrams in this document show the intended logical data flow. Today,
 `identity_resolution`, `segmentation`, `analytics`, `campaign_activation`,
 `email_engine`, and `notification_engine` contain implemented processing.

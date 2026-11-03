@@ -415,6 +415,10 @@ seed_database() {
         fi
     else
         log "${GREEN}[SEED] leo_ads schema already exists${NC} | skipping schema initialization"
+        if ! run_sql_file "$SQL_DIR/upgrade-audience-sync.sql"; then
+            log "${RED}[SEED] Failed to apply audience synchronization upgrade${NC}"
+            return 1
+        fi
     fi
 
     ###########################################################################

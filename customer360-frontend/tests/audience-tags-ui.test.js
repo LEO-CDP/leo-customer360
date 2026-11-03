@@ -89,6 +89,7 @@ test("profile and segment templates include IAB audience_tags detail and editor 
     "meta_ads_opt_in",
     "google_ads_opt_in",
     "tiktok_ads_opt_in",
+    "leo_ads_opt_in",
   ].forEach((field) => assert.match(profileDetails, new RegExp(`data-consent-key="${field}"`)));
   assert.match(profileChannels, /{{#each eligibilityPolicyChannels}}/);
   assert.match(profileChannels, /Channel readiness has not been evaluated/);
