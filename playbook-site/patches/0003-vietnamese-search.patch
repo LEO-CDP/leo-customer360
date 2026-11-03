@@ -1,0 +1,14 @@
+diff --git a/quartz/components/scripts/search.inline.ts b/quartz/components/scripts/search.inline.ts
+index 6a84a50..efa5e96 100644
+--- a/quartz/components/scripts/search.inline.ts
++++ b/quartz/components/scripts/search.inline.ts
+@@ -19,6 +19,9 @@ let currentSearchTerm: string = ""
+ const encoder = (str: string) => {
+   return str
+     .toLowerCase()
++    .normalize("NFD")
++    .replace(/[̀-ͯ]/g, "")
++    .replace(/đ/g, "d")
+     .split(/\s+/)
+     .filter((token) => token.length > 0)
+ }

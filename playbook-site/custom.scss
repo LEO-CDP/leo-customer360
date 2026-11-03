@@ -1,0 +1,118 @@
+@use "./base.scss";
+@use "./variables.scss" as *; // patched: $mobile <= 799px, $tablet 800-1199px, $desktop >= 1200px
+
+$wide: "(min-width: 800px)";
+$touch: "(pointer: coarse), (max-width: 1199px)";
+
+body { font-size: 16px; line-height: 1.7; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: 52px; background: var(--light); border-bottom: 1px solid var(--lightgray); z-index: 40; }
+/* Quartz sets sidebar z-index:1 inline while search is open; drop the bar below it */
+body:has(.search-container.active)::before, body:has(.search-container.active) :is(.page-title, .darkmode, .search-button, .mobile-explorer) { z-index: 0; }
+/* the 52px bar is the only fixed header: jumped-to headings land below it */
+article [id] { scroll-margin-top: 68px; }
+
+.page > #quartz-body {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding-top: 52px;
+  grid-template-rows: auto auto auto;
+  @media all and ($tablet) { grid-template-columns: 296px minmax(0, 1fr); }
+  @media all and ($desktop) { grid-template-columns: 296px minmax(0, 1fr) 220px; }
+  @media #{$wide} { column-gap: 0; padding-left: 0; padding-right: 0; }
+
+  .sidebar { padding: 24px 16px 24px 24px; top: 52px; height: calc(100vh - 52px); gap: 14px; box-sizing: border-box; }
+  .sidebar.left { z-index: 50; border-right: 1px solid var(--lightgray); flex-direction: column; }
+  .sidebar.right { z-index: 0; border-left: 1px solid var(--lightgray); padding-left: 20px; }
+  .center { width: 100%; min-width: 0; max-width: 747px; margin: 0 auto; padding: 8px 16px 0; box-sizing: border-box; @media #{$wide} { padding-left: 32px; padding-right: 32px; } }
+  .page-header { margin: 0; padding-top: 16px; }
+
+  /* the whole left column scrolls (search + explorer) when the viewport is short */
+  @media #{$wide} {
+    .sidebar.left { overflow-y: auto; overscroll-behavior: contain; }
+    .explorer { flex: none; overflow: visible; }
+    .explorer-content { overflow: visible; }
+    .explorer.collapsed > .explorer-content { display: none; }
+  }
+  @media all and not ($desktop) { .sidebar.right { display: none; } }
+  @media all and ($mobile) {
+    /* only the 52px bar stays fixed on phones */
+    .sidebar.left, .sidebar.left:has(.explorer) { position: static; height: 0; border-right: 0; padding: 0; }
+    .breadcrumb-container { margin-top: 0; }
+    .page-header { padding-top: 8px; }
+    /* menu + search buttons live in the bar (fixed, right of the theme toggle); the menu is a fixed panel under it */
+    .explorer-content { position: fixed; top: 52px; height: calc(100dvh - 52px); max-height: calc(100dvh - 52px); padding-top: 12px; }
+    .explorer .mobile-explorer { position: fixed; top: 4px; right: 56px; z-index: 41; }
+    .search > .search-button { position: fixed; top: 4px; right: 100px; z-index: 41; width: 44px; height: 44px; padding: 0; justify-content: center; border: 0; }
+    .search > .search-button p { display: none; }
+    .search > .search-button svg { margin: 0; }
+  }
+}
+@media all and ($mobile) { body:has(.explorer:not(.collapsed)) { overflow: hidden; } }
+
+.page-title { position: fixed; top: 0; left: 24px; height: 52px; display: flex; align-items: center; z-index: 41; font-size: 16px; font-weight: 700; }
+.page-title a { color: #1e1e1e; }
+:root[saved-theme="dark"] .page-title a { color: var(--dark); }
+.darkmode { position: fixed; top: 4px; right: 12px; width: 44px; height: 44px; z-index: 41; }
+.darkmode svg { left: calc(50% - 10px); }
+
+.breadcrumb-container { margin: 22px 0 14px; font-size: 14px; }
+.article-title { font-size: 44px; font-weight: 700; line-height: 1.3; margin: 0; text-wrap: balance; }
+h2, article h2 { font-size: 28px; font-weight: 700; margin-top: 44px; color: var(--dark); }
+article h3 { font-size: 18px; }
+a.internal, article a { background: none; color: var(--secondary); }
+@media all and ($mobile) { .article-title { font-size: 30px; } }
+
+.pb-meta { font-size: 13px; color: var(--gray); margin-top: 14px; display: grid; gap: 2px; }
+.pb-meta b { color: var(--darkgray); font-size: 12px; letter-spacing: .03em; margin-right: 6px; }
+.pb-head hr { margin: 20px 0; border: 0; border-top: 1px solid var(--lightgray); }
+.pb-guide { background: #f8f8f8; border-radius: 7px; padding: 20px 24px; }
+:root[saved-theme="dark"] .pb-guide { background: #1b2433; }
+.pb-guide p { margin: 0 0 8px; }
+.pb-guide ul { margin: 0; padding-left: 20px; }
+.pb-guide li { margin: 4px 0; }
+
+.explorer h2, .explorer .folder-title, .toc h3 { font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.explorer ul li a { font-size: 14px; font-weight: 600; color: var(--darkgray); }
+.explorer-content a { display: block; padding: 2px 8px; }
+.explorer-content a.active { font-weight: 800; color: var(--tertiary); opacity: 1; box-shadow: inset 3px 0 0 var(--tertiary); background: color-mix(in srgb, var(--tertiary) 10%, transparent); }
+.toc-content a { font-size: 14px; }
+
+/* touch / narrow: 44px hit areas */
+@media #{$touch} {
+  .search-button { min-height: 44px; }
+  .mobile-explorer { min-width: 44px; min-height: 44px; justify-content: center; }
+  .breadcrumb-element { min-height: 44px; }
+  .breadcrumb-element a { display: inline-flex; align-items: center; min-height: 44px; }
+  .explorer-content a, .pb-guide li a, .toc-content a { display: flex; align-items: center; min-height: 44px; }
+}
+.pb-search-close { position: fixed; top: 4px; right: 12px; z-index: 1; min-width: 44px; min-height: 44px; padding: 0 16px; border: 1px solid var(--lightgray); border-radius: 22px; background: var(--light); color: var(--dark); font: inherit; font-weight: 600; cursor: pointer; }
+
+table { border: 1px solid var(--lightgray); border-radius: 7px; border-collapse: separate; border-spacing: 0; width: 100%; font-size: 15px; }
+th { background: #f8f8f8; }
+:root[saved-theme="dark"] th { background: #1b2433; }
+th, td { padding: 10px 14px !important; border-bottom: 1px solid var(--lightgray); }
+@media all and ($mobile) { table { font-size: 14px; } th, td { padding: 6px 8px !important; line-height: 1.4; } }
+tr:last-child td { border-bottom: 0; }
+
+.mermaid, .mermaid text, .mermaid foreignObject, .mermaid .nodeLabel, .mermaid .edgeLabel { font-family: "Source Sans 3", sans-serif !important; }
+.table-container { overflow-x: auto; margin: 1rem 0; max-width: 100%; }
+.table-container > table { margin: 0; padding: 0; width: 100%; }
+article table td, article table th { text-align: left; }
+footer { display: none; }
+
+:root { --pb-c: #e4f4ee; --pb-c-fg: #0b6b4b; --pb-l: #e5f0fe; --pb-l-fg: #0350ad; --pb-a: #fdf1dc; --pb-a-fg: #8a5300; }
+:root[saved-theme="dark"] { --pb-c: #15382e; --pb-c-fg: #7fdcb9; --pb-l: #17345a; --pb-l-fg: #b5d6ff; --pb-a: #3c2d14; --pb-a-fg: #f3c777; }
+.mermaid-content, .mermaid { max-width: 100%; }
+article .mermaid { overflow-x: auto; }
+.node.c rect, .node.c path, .node.c polygon { fill: var(--pb-c) !important; stroke: var(--pb-c-fg) !important; }
+.node.l rect, .node.l path, .node.l polygon { fill: var(--pb-l) !important; stroke: var(--pb-l-fg) !important; }
+.node.a rect, .node.a path, .node.a polygon { fill: var(--pb-a) !important; stroke: var(--pb-a-fg) !important; }
+.node.c .nodeLabel, .node.c .nodeLabel p { color: var(--pb-c-fg) !important; }
+.node.l .nodeLabel, .node.l .nodeLabel p { color: var(--pb-l-fg) !important; }
+.node.a .nodeLabel, .node.a .nodeLabel p { color: var(--pb-a-fg) !important; }
+/* min-width is set per chart by PlaybookEnhance (85% of viewBox) so text stays >= 13px; the chart scrolls instead */
+article pre[data-pb-more] { position: relative; }
+article pre[data-pb-more]::after { content: ""; position: absolute; top: 0; right: 0; bottom: 0; width: 36px; background: linear-gradient(to right, transparent, var(--light)); pointer-events: none; z-index: 1; }
+article pre[data-pb-more]::before { content: "Vuốt ngang để xem toàn bộ sơ đồ"; display: block; padding: 2px 0 6px; font: 12px var(--bodyFont); color: var(--gray); text-align: center; }
+.mermaid .edgeLabel, .mermaid .edgeLabel p, .mermaid .edgeLabel span, .mermaid .edgeLabel rect, .mermaid .edgeLabel .labelBkg, .mermaid .labelBkg { background-color: var(--light) !important; fill: var(--light) !important; opacity: 1; }
+.mermaid .edgeLabel, .mermaid .edgeLabel p, .mermaid .edgeLabel span { color: var(--darkgray) !important; }

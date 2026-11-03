@@ -1,0 +1,13 @@
+diff --git a/quartz/i18n/locales/vi-VN.ts b/quartz/i18n/locales/vi-VN.ts
+index 26a58a5..8621f50 100644
+--- a/quartz/i18n/locales/vi-VN.ts
++++ b/quartz/i18n/locales/vi-VN.ts
+@@ -54,7 +54,7 @@ export default {
+       searchBarPlaceholder: "Tìm kiếm thông tin",
+     },
+     tableOfContents: {
+-      title: "Bảng Nội Dung",
++      title: "Trên trang này",
+     },
+     contentMeta: {
+       readingTime: ({ minutes }) => `đọc ${minutes} phút`,

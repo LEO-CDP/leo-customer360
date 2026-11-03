@@ -1,0 +1,13 @@
+diff --git a/quartz/components/scripts/explorer.inline.ts b/quartz/components/scripts/explorer.inline.ts
+index 9c83411..1750bda 100644
+--- a/quartz/components/scripts/explorer.inline.ts
++++ b/quartz/components/scripts/explorer.inline.ts
+@@ -224,7 +224,7 @@ async function setupExplorer(currentSlug: FullSlug) {
+       // try to scroll to the active element if it exists
+       const activeElement = explorerUl.querySelector(".active")
+       if (activeElement) {
+-        activeElement.scrollIntoView({ behavior: "smooth" })
++        activeElement.scrollIntoView({ block: "nearest" })
+       }
+     }
+ 

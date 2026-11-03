@@ -24,6 +24,8 @@ const arg = (k, d) => {
 const REPO = arg("--repo", ".");
 const OUT = arg("--out", "content");
 const INJECT = process.argv.includes("--inject-frontmatter");
+// Hides a path from this site only. .documentignore would also hide it from the docs chatbot index.
+const EXCLUDE = arg("--exclude");
 
 // 1. Enumerate tracked markdown (respects .gitignore automatically).
 const files = execSync(`git -C "${REPO}" ls-files "*.md"`, { encoding: "utf8" })
@@ -32,9 +34,10 @@ const files = execSync(`git -C "${REPO}" ls-files "*.md"`, { encoding: "utf8" })
   .filter(Boolean);
 
 // 2. Exclusion matcher: .documentignore + always-exclude the site's own machinery.
-const ig = ignore().add(["docs-site/", ".quartz-engine/", "public/", "content/"]);
+const ig = ignore().add(["docs-site/", "playbook-site/", ".quartz-engine/", ".playbook-engine/", "public/", "content/"]);
 const difPath = join(REPO, ".documentignore");
 if (existsSync(difPath)) ig.add(readFileSync(difPath, "utf8"));
+if (EXCLUDE) ig.add(EXCLUDE);
 
 const shown = files.filter((f) => !ig.ignores(f));
 const hidden = files.filter((f) => ig.ignores(f));
