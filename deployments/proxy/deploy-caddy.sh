@@ -57,7 +57,7 @@ SDK_FRAME_ANCESTOR="$(tfval sdk_frame_ancestor "$ovl")"
 
 : "${DOMAIN:?set caddy_domain in $ovl (e.g. cdp.example.com)}"
 : "${EMAIL:?set acme_email in $ovl (Let’s Encrypt account email)}"
-: "${SDK_FRAME_ANCESTOR:?set sdk_frame_ancestor in $ovl (e.g. https://beta.leocdp.com for UAT)}"
+: "${SDK_FRAME_ANCESTOR:?set sdk_frame_ancestor in $ovl (e.g. '*' to allow any embedding origin)}"
 # No default: it used to fall back to the tracking vServer, which no longer exists — a stale
 # default silently routes /data at a dead address instead of failing.
 : "${DATA_UP:?set data_upstream in $ovl (the event-api Service EXTERNAL-IP, e.g. 1.2.3.4:8010)}"

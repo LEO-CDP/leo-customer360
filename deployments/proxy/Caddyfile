@@ -71,7 +71,7 @@
 	}
 
 	# The web SDK iframe must reach customer360-event-api, not the frontend catch-all.
-	# SAMEORIGIN cannot allow an iframe embedded by a different origin.
+	# SAMEORIGIN cannot allow cross-origin embedding; the overlays currently allow any parent.
 	@cdp_sdk path /cdp-sdk/*
 	handle @cdp_sdk {
 		header {

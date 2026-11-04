@@ -51,11 +51,12 @@ catch-all in [`Caddyfile`](./Caddyfile). Caddy removes any upstream
 origin configured by `sdk_frame_ancestor` in the environment overlay.
 
 `X-Frame-Options: SAMEORIGIN` is not sufficient when the embedding page and the
-iframe use different origins. Set `sdk_frame_ancestor` to the exact HTTPS origin
-of the embedding site, then redeploy Caddy.
+iframe use different origins. Set `sdk_frame_ancestor` to the allowed parent
+origin, then redeploy Caddy. The current UAT and production overlays use `*`,
+which intentionally allows the SDK iframe to be embedded by any origin.
 
-The current environment mapping is `https://beta.leocdp.com` for UAT and
-`https://c360.leocdp.com` for production.
+Use a specific HTTPS origin instead of `*` if embedding should be restricted to
+trusted sites.
 
 ---
 
@@ -184,9 +185,9 @@ LB no longer points at it.
 - **customer360-promotions** is proxied under `/ads` with the prefix stripped — fine for its JSON
   API; if it serves UI assets it'd need its own base-path config.
 - **Web SDK iframe** is proxied under `/cdp-sdk` without stripping the prefix because
-  `customer360-event-api` mounts the SDK at that path. Its response allows only the origin
-  configured by `sdk_frame_ancestor`; do not replace this with `SAMEORIGIN` for a
-  cross-origin embedding site.
+  `customer360-event-api` mounts the SDK at that path. Its response allows the parent
+  origin configured by `sdk_frame_ancestor` (`*` in the current overlays); do not replace
+  this with `SAMEORIGIN` for cross-origin embedding.
 - **Dagster / Portainer / Netdata** generate absolute URLs or have their own callback
   paths and do **not** sub-path cleanly without app-side config (`dagster --path-prefix`,
   `oauth2-proxy --proxy-prefix`, Portainer base href). By default they stay on their raw

@@ -87,9 +87,10 @@ MinIO itself uses `http://minio:9000` internally for console authentication;
 host-side clients and the tracking/analytics services.
 
 The cross-origin web SDK iframe is served by `customer360-event-api`, not the admin
-frontend. Because the embedding page is `https://example.com` and the iframe
-origin is `https://c360.example.com`, do not use `X-Frame-Options: SAMEORIGIN`;
-use the iframe route's `frame-ancestors` policy below instead.
+frontend. The SDK iframe route uses `Content-Security-Policy: frame-ancestors *`
+to allow any parent origin. This is intentionally broad; use a specific trusted
+origin instead if embedding should be restricted. Do not use
+`X-Frame-Options: SAMEORIGIN` for cross-origin embedding.
 
 ```nginx
 ############# C360 local dev #######
@@ -240,6 +241,18 @@ server {
     proxy_read_timeout 600s;
   }
 
+  # customer360-event-api SDK iframe: strip /data so /data/cdp-sdk/* reaches /cdp-sdk/*.
+  # Match this before the general /data/ route to apply the iframe embedding policy.
+  location ^~ /data/cdp-sdk/ {
+    proxy_pass http://c360_tracking_api/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Port $server_port;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_hide_header X-Frame-Options;
+    add_header Content-Security-Policy "frame-ancestors *" always;
+  }
+
   # customer360-event-api: strip /data so /data/health reaches /health.
   location = /data {
     return 308 /data/;
@@ -253,11 +266,6 @@ server {
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_read_timeout 600s;
   }
-
-  # c360 web SDK iframe endpoint is served by customer360-event-api at
-  # /cdp-sdk/html/cdp-event-proxy.html. Public URL can be prefixed with /data
-  # (for example /data/cdp-sdk/html/cdp-event-proxy.html) because this block
-  # strips /data before forwarding to the upstream service.
 
   # Dagster UI: use `dagster dev ... --path-prefix /dagster`.
   location = /dagster {

@@ -47,4 +47,4 @@ docs_upstream = "10.100.1.7:8001"
 agent_upstream = "10.100.1.10:8009" # agent-box private ip (verified via hostname -I on the box)
 
 # Parent origin allowed to embed the hidden c360 web SDK iframe.
-sdk_frame_ancestor = "https://beta.leocdp.com"
+sdk_frame_ancestor = "*"
