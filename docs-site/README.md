@@ -10,7 +10,7 @@ Full design + rationale: [`deployments/document/quartz-docs-site-plan.md`](../de
 
 | File | Purpose |
 |------|---------|
-| `collect.mjs` | Scans the repo for `*.md` (via `git ls-files`), filters by the root [`.documentignore`](../.documentignore), mirrors the tree into `content/` (structure preserved), **also copies the media the docs embed — images, video, audio, PDF — alongside them** so `![](path)` and `![[embed]]` render, and injects frontmatter where missing. |
+| `collect.mjs` | Scans the repo for `*.md` (via `git ls-files`), filters by the root [`.documentignore`](../.documentignore), skips `--exclude` paths (playbooks have their own site in [`playbook-site/`](../playbook-site/)), mirrors the tree into `content/` (structure preserved), **also copies the media the docs embed — images, video, audio, PDF — alongside them** so `![](path)` and `![[embed]]` render, and injects frontmatter where missing. |
 | `quartz.config.ts` | Site config — title, `baseUrl`, theme, plugins (wikilinks, GFM, TOC, KaTeX, RSS/sitemap). |
 | `quartz.layout.ts` | Page layout — explorer, search, graph, backlinks. |
 | `package.json` | The collector's one dependency (`ignore`). |
@@ -35,7 +35,7 @@ cp docs-site/quartz-components/scripts/docs-chatbot.inline.ts .quartz-engine/qua
 cp docs-site/quartz-components/styles/docs-chatbot.scss       .quartz-engine/quartz/components/styles/
 
 # 3. Collect the markdown into the engine's content/
-( cd docs-site && npm install && node collect.mjs --repo .. --out ../.quartz-engine/content --inject-frontmatter )
+( cd docs-site && npm install && node collect.mjs --repo .. --out ../.quartz-engine/content --inject-frontmatter --exclude docs/playbooks/ )
 
 # 4. Build + serve. The chatbot calls a PUBLIC docs-vector-search API (CORS); point it at one
 #    with DOCS_AI_PUBLIC_URL (defaults to the UAT docs API). DOCS_SITE_BASE sets citation links.

@@ -95,7 +95,7 @@ jobs:
         run: |
           npm ci
           rm -rf ../.quartz-engine/content
-          node collect.mjs --repo .. --out ../.quartz-engine/content --inject-frontmatter
+          node collect.mjs --repo .. --out ../.quartz-engine/content --inject-frontmatter --exclude docs/playbooks/
 
       - name: Build Quartz
         working-directory: .quartz-engine
