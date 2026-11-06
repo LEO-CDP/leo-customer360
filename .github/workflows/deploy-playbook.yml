@@ -1,0 +1,76 @@
+name: Playbook Site
+
+# Builds the LEO Playbook (docs/playbooks/ -> .playbook-engine/public) on every
+# branch to validate it; DEPLOYS only from the default branch AND only once the
+# repo variable PLAYBOOK_S3_BUCKET is set (vStorage bucket on VNG Cloud). Until then
+# nothing is published. Setup: playbook-site/README.md.
+on:
+  push:
+    paths:
+      - "docs/playbooks/**"
+      - "playbook-site/**"
+      - ".github/workflows/deploy-playbook.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Own group (NOT "pages") so a playbook run never cancels a tech-docs deploy.
+concurrency:
+  group: playbook-site-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build site
+        run: bash playbook-site/build.sh
+
+      - name: Fail on broken internal links
+        run: |
+          node - <<'JS'
+          const fs = require("fs"), path = require("path");
+          const pub = path.resolve(".playbook-engine/public");
+          const walk = d => fs.readdirSync(d, { withFileTypes: true })
+            .flatMap(e => e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]);
+          const exists = p => [p, p + ".html", path.join(p, "index.html")].some(f => fs.existsSync(f) && fs.statSync(f).isFile());
+          let bad = 0;
+          for (const f of walk(pub).filter(f => f.endsWith(".html"))) {
+            for (const m of fs.readFileSync(f, "utf8").matchAll(/<a [^>]*href="([^"#?]+)/g)) {
+              const h = decodeURI(m[1]);
+              if (/^([a-z]+:|\/\/)/i.test(h)) continue; // external
+              const t = h.startsWith("/") ? path.join(pub, h) : path.resolve(path.dirname(f), h);
+              if (!exists(t)) { bad++; console.log("BROKEN", path.relative(pub, f), "->", h); }
+            }
+          }
+          if (bad) process.exit(1);
+          JS
+
+      # Quartz links pages without ".html" (/use-cases/ecommerce). S3 does not
+      # resolve that, so each page is also uploaded under its extensionless key,
+      # served as text/html.
+      - name: Deploy to vStorage
+        # Default branch only, and only when a bucket has been configured.
+        if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && vars.PLAYBOOK_S3_BUCKET != ''
+        working-directory: .playbook-engine/public
+        env:
+          # Same vStorage project key the CD workflows use.
+          AWS_ACCESS_KEY_ID: ${{ secrets.VSTORAGE_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.VSTORAGE_SECRET_KEY }}
+          # vStorage rejects any region but us-east-1 (see deployments/storage/variables.tf).
+          AWS_DEFAULT_REGION: ${{ vars.PLAYBOOK_S3_REGION || 'us-east-1' }}
+          ENDPOINT: ${{ vars.PLAYBOOK_S3_ENDPOINT || 'https://hcm04.vstorage.vngcloud.vn' }}
+          BUCKET: ${{ vars.PLAYBOOK_S3_BUCKET }}
+        run: |
+          find . -name '*.html' ! -name 'index.html' ! -name '404.html' -exec sh -c 'cp "$1" "${1%.html}"' _ {} \;
+          # Files with an extension (content type guessed), then extensionless pages as HTML.
+          # An --exclude'd key is never touched by --delete, so the two passes don't undo each other.
+          aws s3 sync . "s3://$BUCKET" --endpoint-url "$ENDPOINT" --delete --exclude "*" --include "*.*"
+          aws s3 sync . "s3://$BUCKET" --endpoint-url "$ENDPOINT" --delete --exclude "*.*" --content-type "text/html; charset=utf-8"

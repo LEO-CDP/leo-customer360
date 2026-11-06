@@ -9,7 +9,7 @@
 s3_endpoint = "https://hcm04.vstorage.vngcloud.vn" # object storage = HCM04/HAN02 (NOT HCM03)
 region      = "us-east-1"                          # keep us-east-1 (no LocationConstraint) — see variables.tf
 
-bucket_names = ["leo-customer360-uat"]
+bucket_names = ["leo-customer360-uat", "leo-playbook-uat"] # leo-playbook-uat: static LEO Playbook site (deploy-playbook.yml)
 
 master_profile_s3_bucket = "c360-master-profiles"
 product_import_s3_bucket  = "c360-product-imports-uat"

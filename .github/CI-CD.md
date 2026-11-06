@@ -110,6 +110,13 @@ The full local run of every suite still lives in [`../run_all_tests.sh`](../run_
 
 ---
 
+## LEO Playbook site
+
+Built and deployed by its own workflow, [`workflows/deploy-playbook.yml`](workflows/deploy-playbook.yml),
+independent of the service CI/CD. Setup: [`../playbook-site/README.md`](../playbook-site/README.md).
+
+---
+
 ## Secrets used
 
 | Secret               | Used by | Purpose                          |
