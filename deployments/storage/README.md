@@ -80,6 +80,11 @@ inside it.
 > facts (endpoint, auth, body schema, 30 GB quota min), and the reason are in
 > [`../issues/2026-08-17-vstorage-create-project-api-blocked.md`](../issues/2026-08-17-vstorage-create-project-api-blocked.md).
 
+> **`leo-playbook-uat`** holds the static LEO Playbook site and must be **publicly
+> readable**. Terraform cannot set that (vStorage lacks the S3 ACL/policy resources), so after
+> `apply` open the bucket in the vStorage console and set its access to public read.
+> Setup order: [`../../playbook-site/README.md`](../../playbook-site/README.md#deploy).
+
 ## Usage
 
 ```bash

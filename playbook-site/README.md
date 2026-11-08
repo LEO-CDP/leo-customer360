@@ -39,25 +39,34 @@ applies, the build stops.
 ## Deploy
 
 Workflow: `.github/workflows/deploy-playbook.yml`. The site is static files only
-(no backend). It builds on every branch but deploys nothing until all of this is
-configured:
+(no backend). It builds on every branch but deploys nothing until step 4 is done.
+Do the steps in this order; each one has a check.
 
-1. Create the bucket `leo-playbook-uat` (declared in
-   `deployments/storage/overlays/uat.tfvars`): `cd deployments/storage &&
-   ./deploy.sh uat plan`, check it only adds that bucket, then `./deploy.sh uat
-   apply`. Make it publicly readable in the vStorage console.
-2. Point DNS for `playbook.leocdp.com` at the same load balancer as
-   `beta.leocdp.com`, then redeploy Caddy (`deployments/proxy/deploy-caddy.sh uat
-   validate`, then `uat`). Its `playbook.leocdp.com` block serves HTTPS and maps
-   folder URLs to `index.html`, which vStorage does not do itself.
-3. In this repo's Actions variables, set `PLAYBOOK_S3_BUCKET=leo-playbook-uat`.
-   Optional: `PLAYBOOK_S3_ENDPOINT` (default `https://hcm04.vstorage.vngcloud.vn`)
-   and `PLAYBOOK_S3_REGION` (default `us-east-1`). The upload uses the existing
-   `VSTORAGE_ACCESS_KEY` / `VSTORAGE_SECRET_KEY` secrets.
-
-Then a merge to the default branch that touches `docs/playbooks/**` or
-`playbook-site/**` publishes the site. To publish without a content change, run
-the workflow by hand (Actions > Playbook Site > Run workflow) on the default branch.
+1. **Bucket.** Optional: the deploy job creates `leo-playbook-uat` itself if it is missing,
+   but it stays private until you set public read in the console, so do that
+   after the first run if you skip Terraform. Terraform route: needs `deployments/storage/.env` (or `terraform.tfvars`) with the
+   vStorage keys. `cd deployments/storage && ./deploy.sh uat plan` and confirm it
+   only adds `leo-playbook-uat`, then `./deploy.sh uat apply`. Then, in the
+   vStorage console, set the bucket to public read (Terraform cannot).
+   Check: `curl -I https://hcm04.vstorage.vngcloud.vn/leo-playbook-uat/index.html`
+   returns 404 (bucket reachable, not yet filled), not 403.
+2. **DNS.** Create an A record `playbook.leocdp.com` -> the same LB IP as
+   `beta.leocdp.com`. Check: `nslookup playbook.leocdp.com`.
+3. **Caddy.** `cd deployments/proxy && ./deploy-caddy.sh uat validate`, then
+   `./deploy-caddy.sh uat`. Its `playbook.leocdp.com` block serves HTTPS and maps
+   folder URLs to `index.html`, which vStorage does not do itself. Check:
+   `curl -I https://playbook.leocdp.com/` gets a valid cert and a 404 from the
+   empty bucket (not a 502 or NoSuchBucket).
+4. **Enable the deploy.** Set the Actions variable
+   `PLAYBOOK_S3_BUCKET=leo-playbook-uat` (keep this exact name: the Caddyfile
+   hardcodes it). Optional: `PLAYBOOK_S3_ENDPOINT` (default
+   `https://hcm04.vstorage.vngcloud.vn`) and `PLAYBOOK_S3_REGION` (default
+   `us-east-1`). The upload uses the existing `VSTORAGE_ACCESS_KEY` /
+   `VSTORAGE_SECRET_KEY` secrets.
+5. **Publish.** Actions > Playbook Site > Run workflow, on the default branch. After
+   that, a merge that touches `docs/playbooks/**` or `playbook-site/**` publishes.
+   Check: the "Deploy to vStorage" step is not skipped, and
+   `curl -I https://playbook.leocdp.com/use-cases/ecommerce` returns 200 `text/html`.
 
 Quartz links pages without `.html`, which S3 does not resolve, so the deploy job
 also uploads each page under its extensionless key as `text/html`.

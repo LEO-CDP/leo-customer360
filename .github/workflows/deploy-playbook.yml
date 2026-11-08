@@ -18,7 +18,8 @@ permissions:
 # Own group (NOT "pages") so a playbook run never cancels a tech-docs deploy.
 concurrency:
   group: playbook-site-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a default-branch run: a killed --delete sync leaves the bucket half-updated.
+  cancel-in-progress: ${{ github.ref != format('refs/heads/{0}', github.event.repository.default_branch) }}
 
 jobs:
   build-deploy:
@@ -68,8 +69,19 @@ jobs:
           AWS_DEFAULT_REGION: ${{ vars.PLAYBOOK_S3_REGION || 'us-east-1' }}
           ENDPOINT: ${{ vars.PLAYBOOK_S3_ENDPOINT || 'https://hcm04.vstorage.vngcloud.vn' }}
           BUCKET: ${{ vars.PLAYBOOK_S3_BUCKET }}
+          # Newer aws-cli adds checksum headers that S3-compatible stores can reject.
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
         run: |
-          find . -name '*.html' ! -name 'index.html' ! -name '404.html' -exec sh -c 'cp "$1" "${1%.html}"' _ {} \;
+          # Create the bucket on first deploy. Only a 404 means "missing"; a 403 (someone else's
+          # bucket or bad keys) must fail, not be papered over. Public-read stays a console step.
+          if ! err=$(aws s3api head-bucket --bucket "$BUCKET" --endpoint-url "$ENDPOINT" 2>&1); then
+            case "$err" in
+              *"(404)"*|*NotFound*|*NoSuchBucket*) aws s3api create-bucket --bucket "$BUCKET" --endpoint-url "$ENDPOINT" ;;
+              *) echo "$err"; exit 1 ;;
+            esac
+          fi
+          find . -name '*.html' ! -name 'index.html' ! -name '404.html' -exec sh -c '[ -d "${1%.html}" ] || cp "$1" "${1%.html}"' _ {} \;
           # Files with an extension (content type guessed), then extensionless pages as HTML.
           # An --exclude'd key is never touched by --delete, so the two passes don't undo each other.
           aws s3 sync . "s3://$BUCKET" --endpoint-url "$ENDPOINT" --delete --exclude "*" --include "*.*"

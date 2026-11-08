@@ -113,7 +113,8 @@ The full local run of every suite still lives in [`../run_all_tests.sh`](../run_
 ## LEO Playbook site
 
 Built and deployed by its own workflow, [`workflows/deploy-playbook.yml`](workflows/deploy-playbook.yml),
-independent of the service CI/CD. Setup: [`../playbook-site/README.md`](../playbook-site/README.md).
+independent of the service CI/CD (the main CD never touches vStorage, so the playbook job
+creates its own bucket on first deploy if it is missing). Setup: [`../playbook-site/README.md`](../playbook-site/README.md).
 
 ---
 

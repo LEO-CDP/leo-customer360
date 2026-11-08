@@ -21,6 +21,14 @@ The L4 NLB stays in front (it's the thing with the public IP), but for the app i
 does dumb TCP passthrough of `:80`/`:443` to Caddy. Ops dashboards (Dagster, Portainer,
 Netdata) can stay on their existing LB ports, or move under Caddy later (see Caveats).
 
+## Second host: `playbook.leocdp.com` (static LEO Playbook)
+
+A separate Caddyfile site block proxies `playbook.leocdp.com` to the public vStorage bucket
+`leo-playbook-uat` (published by `.github/workflows/deploy-playbook.yml`). It is not part of
+the path-routed `caddy_domain` and needs its own DNS A record to the same LB IP, plus its own
+Let's Encrypt cert (issued on first request once DNS resolves). Full setup order:
+[`../../playbook-site/README.md`](../../playbook-site/README.md#deploy).
+
 ## Files
 
 | File | Purpose |
