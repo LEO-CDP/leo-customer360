@@ -140,5 +140,6 @@ playbook.leocdp.com {
 	rewrite @dir {path}index.html
 	reverse_proxy https://hcm04.vstorage.vngcloud.vn {
 		rewrite /leo-playbook-uat{path}
+		header_up Host {upstream_hostport} # else the bucket is looked up by playbook.leocdp.com
 	}
 }
