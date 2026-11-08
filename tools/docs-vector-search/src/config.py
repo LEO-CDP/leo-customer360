@@ -202,6 +202,8 @@ CORS_ORIGINS = [
 # 0 disables the limiter; otherwise Redis must be reachable.
 ASK_RATE_MAX = int(os.getenv("ASK_RATE_MAX", "10"))
 ASK_RATE_WINDOW_SEC = int(os.getenv("ASK_RATE_WINDOW_SEC", "60"))
+# The public playbook bot has its own, tighter per-client budget (same window); 0 disables it.
+PLAYBOOK_RATE_MAX = int(os.getenv("PLAYBOOK_RATE_MAX", "5"))
 # Number of trusted reverse-proxy hops that append to X-Forwarded-For (Caddy = 1). The
 # real client is the Nth entry from the right. A chain shorter than this is treated as
 # not-via-the-proxy and falls back to the direct peer (fail closed).

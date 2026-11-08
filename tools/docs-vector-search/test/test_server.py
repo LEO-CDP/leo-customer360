@@ -200,7 +200,12 @@ def test_ask_request_limits_page_context_title_view_and_dialog_size():
 
 
 def test_playbook_ask_is_fixed_to_the_playbook_scope_and_takes_nothing_else(monkeypatch):
-    monkeypatch.setattr(server.limiter, "enforce", lambda request: _noop())
+    limits = []
+
+    async def fake_enforce(request, limit=None, scope="client"):
+        limits.append((limit, scope))
+
+    monkeypatch.setattr(server.limiter, "enforce", fake_enforce)
     seen = {}
 
     def fake_query(*args, **kwargs):
@@ -213,6 +218,7 @@ def test_playbook_ask_is_fixed_to_the_playbook_scope_and_takes_nothing_else(monk
 
     asyncio.run(server.playbook_ask(server.PlaybookAskRequest(question="Segment là gì?"), _request([])))
 
+    assert limits == [(server.PLAYBOOK_RATE_MAX, "playbook")]  # its own budget and counter
     assert seen["kwargs"] == {"path_prefix": "playbooks/"}
     assert seen["args"][0] == "Segment là gì?"
     # page/context/history are not part of the public playbook request at all

@@ -44,6 +44,7 @@ from .config import (
     TOP_K_MAX,
     TOP_N_MAX,
     STRUCTURED_ANSWERS,
+    PLAYBOOK_RATE_MAX,
 )
 from .providers import embed, rerank, rerank_stats
 from .rate_limit import limiter
@@ -268,7 +269,7 @@ async def ask(req: AskRequest, request: Request):
 @app.post("/playbook/ask")
 async def playbook_ask(req: PlaybookAskRequest, request: Request):
     """/ask limited to the playbook pages. This is the only ask route the playbook host exposes."""
-    await limiter.enforce(request)
+    await limiter.enforce(request, PLAYBOOK_RATE_MAX, "playbook")
     return await asyncio.to_thread(
         _query_sync, req.question, RETRIEVE_TOP_N, RERANK_TOP_K, path_prefix=PLAYBOOK_PREFIX
     )

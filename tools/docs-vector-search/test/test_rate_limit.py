@@ -203,3 +203,29 @@ def test_the_playbook_host_is_allowed_by_default():
     from src.config import LEO_BOT_ALLOWED_HOSTS
 
     assert "playbook.leocdp.com" in LEO_BOT_ALLOWED_HOSTS
+
+
+def test_a_route_can_use_its_own_limit_and_counter(monkeypatch):
+    async def check():
+        redis_client = FakeRedis(result=[3, True])
+        limiter = RedisRequestLimiter()
+        setattr(limiter, "client", redis_client)
+        monkeypatch.setattr(rate_limit, "LEO_BOT_ALLOWED_HOSTS", {"docs.example.com"})
+        monkeypatch.setattr(rate_limit, "ASK_RATE_MAX", 10)
+        monkeypatch.setattr(rate_limit, "ASK_RATE_WINDOW_SEC", 60)
+        monkeypatch.setattr(rate_limit.time, "time", lambda: 121)
+        limiter.enabled = True
+        request = _request([(b"host", b"docs.example.com")])
+
+        # 3 requests is under the global 10 but over a playbook limit of 2
+        with pytest.raises(HTTPException) as exc_info:
+            await limiter.enforce(request, 2, "playbook")
+        assert exc_info.value.status_code == 429
+
+        # its counter is its own: /ask traffic (scope "client") never shares it
+        assert redis_client.pipeline_instance.operations[0][1].startswith("docs:ratelimit:playbook:")
+
+        # a limit of 0 switches that route's limiting off
+        await limiter.enforce(request, 0, "playbook")
+
+    asyncio.run(check())
