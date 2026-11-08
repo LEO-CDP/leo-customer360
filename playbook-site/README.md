@@ -52,8 +52,8 @@ Do the steps in this order; each one has a check.
    returns 404 (bucket reachable, not yet filled), not 403.
 2. **DNS.** Create an A record `playbook.leocdp.com` -> the same LB IP as
    `beta.leocdp.com`. Check: `nslookup playbook.leocdp.com`.
-3. **Caddy.** `cd deployments/proxy && ./deploy-caddy.sh uat validate`, then
-   `./deploy-caddy.sh uat`. Its `playbook.leocdp.com` block serves HTTPS and maps
+3. **Caddy.** Actions > Deploy Caddy (UAT) > Run workflow: `validate` first, then `deploy`
+   (same as `deploy-caddy.sh uat validate|deploy`, which needs the deploy SSH key). Its `playbook.leocdp.com` block serves HTTPS and maps
    folder URLs to `index.html`, which vStorage does not do itself. Check:
    `curl -I https://playbook.leocdp.com/` gets a valid cert and a 404 from the
    empty bucket (not a 502 or NoSuchBucket).

@@ -1,0 +1,55 @@
+name: Deploy Caddy (UAT)
+
+# Manual: validate or (re)deploy the Caddy reverse proxy on the UAT api box, through
+# deployments/proxy/deploy-caddy.sh. UAT ONLY — no environment input. The deploy SSH key and
+# the vStorage state keys live in GitHub secrets, so nothing here needs a local machine.
+# Run: Actions -> "Deploy Caddy (UAT)" -> Run workflow. "validate" changes nothing on the box.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "validate = check the Caddyfile on the box, no change; deploy = recreate the Caddy container (brief blip on beta.leocdp.com)"
+        required: true
+        type: choice
+        default: validate
+        options:
+          - validate
+          - deploy
+
+concurrency:
+  group: caddy-uat # one Caddy change at a time on the shared api box
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  caddy:
+    name: "uat · ${{ inputs.action }}"
+    runs-on: ubuntu-latest
+    environment: uat
+    env:
+      # vStorage creds for the remote Terraform backend (read-only: resolves the api box IP).
+      AWS_ACCESS_KEY_ID: ${{ secrets.VSTORAGE_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.VSTORAGE_SECRET_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.14.8
+
+      - name: Install the deploy SSH key
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/c360-api_ed25519
+          chmod 600 ~/.ssh/c360-api_ed25519
+
+      # READ-ONLY: init remote state so deploy-caddy.sh can read the server outputs.
+      - name: terraform init (server, read-only)
+        working-directory: deployments
+        run: terraform -chdir=server init -input=false >/dev/null
+
+      - name: Caddy ${{ inputs.action }}
+        working-directory: deployments/proxy
+        run: ./deploy-caddy.sh uat "${{ inputs.action }}"
