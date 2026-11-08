@@ -81,8 +81,8 @@ inside it.
 > [`../issues/2026-08-17-vstorage-create-project-api-blocked.md`](../issues/2026-08-17-vstorage-create-project-api-blocked.md).
 
 > **`leo-playbook-uat`** holds the static LEO Playbook site and must be **publicly
-> readable**. Terraform cannot set that (vStorage lacks the S3 ACL/policy resources), so after
-> `apply` open the bucket in the vStorage console and set its access to public read.
+> readable**. Terraform cannot set that (vStorage lacks the S3 ACL/policy resources); the
+> playbook deploy workflow applies a GetObject-only bucket policy on every run.
 > Setup order: [`../../playbook-site/README.md`](../../playbook-site/README.md#deploy).
 
 ## Usage

@@ -74,13 +74,16 @@ jobs:
           AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
         run: |
           # Create the bucket on first deploy. Only a 404 means "missing"; a 403 (someone else's
-          # bucket or bad keys) must fail, not be papered over. Public-read stays a console step.
+          # bucket or bad keys) must fail, not be papered over. Public read is set by the policy below.
           if ! err=$(aws s3api head-bucket --bucket "$BUCKET" --endpoint-url "$ENDPOINT" 2>&1); then
             case "$err" in
               *"(404)"*|*NotFound*|*NoSuchBucket*) aws s3api create-bucket --bucket "$BUCKET" --endpoint-url "$ENDPOINT" ;;
               *) echo "$err"; exit 1 ;;
             esac
           fi
+          # Public read for files only (no listing). Idempotent: replaces the same policy each run.
+          aws s3api put-bucket-policy --bucket "$BUCKET" --endpoint-url "$ENDPOINT" --policy \
+            "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":\"*\",\"Action\":\"s3:GetObject\",\"Resource\":\"arn:aws:s3:::$BUCKET/*\"}]}"
           find . -name '*.html' ! -name 'index.html' ! -name '404.html' -exec sh -c '[ -d "${1%.html}" ] || cp "$1" "${1%.html}"' _ {} \;
           # Files with an extension (content type guessed), then extensionless pages as HTML.
           # An --exclude'd key is never touched by --delete, so the two passes don't undo each other.

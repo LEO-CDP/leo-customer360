@@ -42,14 +42,13 @@ Workflow: `.github/workflows/deploy-playbook.yml`. The site is static files only
 (no backend). It builds on every branch but deploys nothing until step 4 is done.
 Do the steps in this order; each one has a check.
 
-1. **Bucket.** Optional: the deploy job creates `leo-playbook-uat` itself if it is missing,
-   but it stays private until you set public read in the console, so do that
-   after the first run if you skip Terraform. Terraform route: needs `deployments/storage/.env` (or `terraform.tfvars`) with the
-   vStorage keys. `cd deployments/storage && ./deploy.sh uat plan` and confirm it
-   only adds `leo-playbook-uat`, then `./deploy.sh uat apply`. Then, in the
-   vStorage console, set the bucket to public read (Terraform cannot).
-   Check: `curl -I https://hcm04.vstorage.vngcloud.vn/leo-playbook-uat/index.html`
-   returns 404 (bucket reachable, not yet filled), not 403.
+1. **Bucket.** Nothing to do by hand: the deploy job creates `leo-playbook-uat` if it is
+   missing and applies a public-read policy (`s3:GetObject` only, no listing) on every
+   deploy. Terraform route (optional, then `import` the bucket if the job already made it):
+   needs `deployments/storage/.env` (or `terraform.tfvars`) with the vStorage keys;
+   `cd deployments/storage && ./deploy.sh uat plan`, then `apply`.
+   Check after step 5: `curl -I https://hcm04.vstorage.vngcloud.vn/leo-playbook-uat/index.html`
+   returns 200 (403 means the policy was not applied; read the deploy step log).
 2. **DNS.** Create an A record `playbook.leocdp.com` -> the same LB IP as
    `beta.leocdp.com`. Check: `nslookup playbook.leocdp.com`.
 3. **Caddy.** Actions > Deploy Caddy (UAT) > Run workflow: `validate` first, then `deploy`
