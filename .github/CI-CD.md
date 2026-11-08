@@ -118,6 +118,14 @@ creates its own bucket on first deploy if it is missing). Setup: [`../playbook-s
 
 ---
 
+## Caddy (UAT)
+
+Run by hand with [`workflows/deploy-caddy.yml`](workflows/deploy-caddy.yml) (Actions -> Deploy
+Caddy (UAT)). `validate` checks the Caddyfile on the box and changes nothing; `deploy` recreates
+the container. It uses `DEPLOY_SSH_KEY` and the vStorage state keys, so no local setup is needed.
+
+---
+
 ## Secrets used
 
 | Secret               | Used by | Purpose                          |
