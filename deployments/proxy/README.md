@@ -26,7 +26,7 @@ Netdata) can stay on their existing LB ports, or move under Caddy later (see Cav
 A separate Caddyfile site block proxies `playbook.leocdp.com` to the public vStorage bucket
 `leo-playbook-uat` (published by `.github/workflows/deploy-playbook.yml`). It is not part of
 the path-routed `caddy_domain` and needs its own DNS A record to the same LB IP, plus its own
-Let's Encrypt cert (issued on first request once DNS resolves). Full setup order:
+Let's Encrypt cert (issued on first request once DNS resolves). It also exposes `POST /ai/ask` there, rewritten to the docs service's playbook-scoped `/playbook/ask` (the only path to the docs box on that host). Full setup order:
 [`../../playbook-site/README.md`](../../playbook-site/README.md#deploy).
 
 ## Files

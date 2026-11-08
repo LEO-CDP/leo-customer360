@@ -32,8 +32,10 @@ def connect():
 class DocumentChunkRepository:
     """Persistence and candidate-generation boundary for document chunks."""
 
-    def __init__(self, connection):
+    def __init__(self, connection, path_prefix: str | None = None):
         self.connection = connection
+        # Restricts every search to chunks whose path starts with this (e.g. "playbooks/"); None = all docs.
+        self.path_prefix = path_prefix
         self._fusion = ReciprocalRankFusion(RRF_RANK_CONSTANT)
 
     def init_schema(self) -> None:
@@ -123,9 +125,10 @@ class DocumentChunkRepository:
                 f"""SELECT id, path, title, heading, text,
                            1 - (embedding <=> %s) AS score
                     FROM {PG_SCHEMA}.doc_chunks
+                    WHERE (%s::text IS NULL OR starts_with(path, %s))
                     ORDER BY embedding <=> %s
                     LIMIT %s""",
-                (qv, qv, limit),
+                (qv, self.path_prefix, self.path_prefix, qv, limit),
             )
             return self._rows(cur.fetchall(), ("id", "path", "title", "heading", "text", "score"))
 
@@ -142,9 +145,10 @@ class DocumentChunkRepository:
                     FROM {PG_SCHEMA}.doc_chunks AS d
                     CROSS JOIN parsed_query AS q
                     WHERE d.search_vector @@ q.tsquery
+                      AND (%s::text IS NULL OR starts_with(d.path, %s))
                     ORDER BY score DESC, d.ordinal ASC
                     LIMIT %s""",
-                (query, limit),
+                (query, self.path_prefix, self.path_prefix, limit),
             )
             return self._rows(
                 cur.fetchall(),

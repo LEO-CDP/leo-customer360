@@ -51,6 +51,11 @@ from .rate_limit import limiter
 _log = logging.getLogger("uvicorn.error")
 
 
+# The playbook site's bot may only see the playbook pages (docs/playbooks/**). The scope is fixed
+# here, server-side: the /playbook/* routes take no scope from the caller.
+PLAYBOOK_PREFIX = "playbooks/"
+
+
 def _retrieve_sync(question: str, top_n: int) -> list[dict]:
     with store.connect() as conn:
         return retrieve(question, conn, top_n)
@@ -68,9 +73,10 @@ def _query_sync(
     history: list[dict] | None = None,
     summary: str | None = None,
     recalled_turn: dict | None = None,
+    path_prefix: str | None = None,
 ) -> dict:
     with store.connect() as conn:
-        return query(question, conn, top_n, top_k, page, context, view, dialog, context_title, history, summary, recalled_turn)
+        return query(question, conn, top_n, top_k, page, context, view, dialog, context_title, history, summary, recalled_turn, path_prefix)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -141,6 +147,11 @@ class AskRequest(BaseModel):
     summary: str | None = Field(None, max_length=800)
     # The exact earlier exchange the user named by position. Trusted caller only.
     recalled_turn: RecalledTurn | None = None
+
+
+class PlaybookAskRequest(BaseModel):
+    """Public, stateless: a question and nothing else (no page/context/history, which are trusted-only)."""
+    question: str = Field(..., min_length=1, max_length=QUESTION_MAX_LEN)
 
 
 class SearchRequest(BaseModel):
@@ -252,6 +263,15 @@ async def ask(req: AskRequest, request: Request):
     )
     _log.info("/ask completed in %.2fs question_chars=%d sources=%d", time.perf_counter() - started, len(req.question), len(result["sources"]))
     return result
+
+
+@app.post("/playbook/ask")
+async def playbook_ask(req: PlaybookAskRequest, request: Request):
+    """/ask limited to the playbook pages. This is the only ask route the playbook host exposes."""
+    await limiter.enforce(request)
+    return await asyncio.to_thread(
+        _query_sync, req.question, RETRIEVE_TOP_N, RERANK_TOP_K, path_prefix=PLAYBOOK_PREFIX
+    )
 
 
 @app.post("/reindex", status_code=202)

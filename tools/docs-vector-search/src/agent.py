@@ -636,9 +636,9 @@ class RagAgent:
         return answer
 
 
-def _agent(conn) -> RagAgent:
+def _agent(conn, path_prefix: str | None = None) -> RagAgent:
     return RagAgent(
-        DocumentChunkRepository(conn),
+        DocumentChunkRepository(conn, path_prefix),
         structured_generator=generate if STRUCTURED_ANSWERS else None,
         rewriter=(
             partial(generate, timeout=FOLLOWUP_REWRITE_TIMEOUT_SECONDS, max_tokens=REWRITE_MAX_TOKENS)
@@ -671,9 +671,10 @@ def query(
     history: list[dict] | None = None,
     summary: str | None = None,
     recalled_turn: dict | None = None,
+    path_prefix: str | None = None,
 ) -> dict:
     """Compatibility wrapper for the public /ask flow."""
-    return _agent(conn).answer(question, top_n, top_k, page, context, view, dialog, context_title, history, summary, recalled_turn)
+    return _agent(conn, path_prefix).answer(question, top_n, top_k, page, context, view, dialog, context_title, history, summary, recalled_turn)
 
 
 def main() -> None:

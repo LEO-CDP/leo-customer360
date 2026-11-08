@@ -9,6 +9,8 @@ on:
     paths:
       - "docs/playbooks/**"
       - "playbook-site/**"
+      - "docs-site/quartz-components/scripts/docs-chatbot.inline.ts" # shared chatbot widget
+      - "docs-site/quartz-components/styles/docs-chatbot.scss"
       - ".github/workflows/deploy-playbook.yml"
   workflow_dispatch:
 

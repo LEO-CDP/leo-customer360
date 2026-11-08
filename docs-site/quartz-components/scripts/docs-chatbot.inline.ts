@@ -14,6 +14,51 @@ interface Source {
 
 const FLAG = "__docsChatbotReady"
 
+// UI text. The docs site uses EN; the playbook site (Vietnamese) sets data-lang="vi" on the marker.
+const STRINGS = {
+  en: {
+    launcher: "Ask the Docs",
+    title: "Docs Assistant",
+    subtitle: "Grounded in the LEO Customer 360 docs",
+    welcome: "Hi! Ask a question about the documentation and I'll answer with links to the source pages.",
+    placeholder: "Ask a question…  (Enter to send)",
+    disclaimer: "AI-generated from the docs — verify with the linked sources.",
+    sources: "Sources",
+    searching: "Searching the docs and writing the answer…",
+    slow: "Still working… this is taking longer than usual.",
+    noAnswer: "I couldn't find an answer in the documentation.",
+    errStatus: "The documentation service returned an error (HTTP {status}).",
+    errOffline: "Could not reach the documentation assistant. It may be starting up or offline.",
+    retry: "Try again",
+    close: "Close",
+    send: "Send",
+    dialog: "Documentation assistant",
+    suggestions: [
+      { q: "How does identity resolution merge two profiles?", label: "Identity resolution" },
+      { q: "How is tenant isolation enforced?", label: "Tenant isolation" },
+    ],
+  },
+  vi: {
+    launcher: "Hỏi LEO Playbook",
+    title: "Trợ lý Playbook",
+    subtitle: "Chỉ dựa trên nội dung LEO Playbook",
+    welcome: "Xin chào! Hãy hỏi về nội dung Playbook, tôi sẽ trả lời kèm liên kết đến trang nguồn.",
+    placeholder: "Nhập câu hỏi…  (Enter để gửi)",
+    disclaimer: "Do AI tạo từ Playbook — hãy đối chiếu với các trang nguồn.",
+    sources: "Nguồn",
+    searching: "Đang tìm trong Playbook và soạn câu trả lời…",
+    slow: "Vẫn đang xử lý… lâu hơn bình thường.",
+    noAnswer: "Tôi không tìm thấy câu trả lời trong Playbook.",
+    errStatus: "Dịch vụ trả lời lỗi (HTTP {status}).",
+    errOffline: "Không kết nối được trợ lý. Có thể dịch vụ đang khởi động hoặc ngoại tuyến.",
+    retry: "Thử lại",
+    close: "Đóng",
+    send: "Gửi",
+    dialog: "Trợ lý Playbook",
+    suggestions: [],
+  },
+}
+
 function init() {
   // Build the widget once; it lives in <body> so it survives Quartz SPA navigation.
   if ((window as any)[FLAG]) return
@@ -21,6 +66,15 @@ function init() {
   const apiBase = (marker?.dataset.api || "").replace(/\/$/, "")
   const siteBase = (marker?.dataset.site || "").replace(/\/$/, "")
   if (!apiBase) return // no config -> do nothing
+  const L = marker?.dataset.lang === "vi" ? STRINGS.vi : STRINGS.en
+  // Where a source page lives: docs pages sit under <site>/docs; the playbook serves its pages at the
+  // site root and its source paths carry a "playbooks/" prefix (data-strip) that is not in the URL.
+  const pageBase = marker?.dataset.pageBase ?? `${siteBase}/docs`
+  const strip = marker?.dataset.strip || ""
+  let suggestions = L.suggestions
+  try {
+    if (marker?.dataset.suggestions) suggestions = JSON.parse(marker.dataset.suggestions)
+  } catch {}
   ;(window as any)[FLAG] = true
 
   let controller: AbortController | null = null
@@ -37,13 +91,15 @@ function init() {
   const sourceUrl = (path: string, heading?: string, title?: string): string => {
     // README.md is its own page on the site (docs/<dir>/README); docs/<dir>/ is only a folder listing.
     const slug = String(path || "")
+      .replace(strip ? new RegExp("^" + strip.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) : /^$/, "")
       .replace(/\.md$/i, "")
+      .replace(strip ? /(^|\/)index$/ : /^$/, "") // playbook: index pages are the folder URL
       .split("/")
       .map(encodeURIComponent)
       .join("/")
     const last = String(heading || "").split(" > ").pop()!.trim()
     const id = !last || last === title ? "" : last.toLowerCase().replace(/[^\p{L}\p{M}\p{N} _-]/gu, "").replace(/ /g, "-")
-    return `${siteBase}/docs/${slug}${id ? "#" + encodeURIComponent(id) : ""}`
+    return `${pageBase}/${slug}${id ? "#" + encodeURIComponent(id) : ""}`
   }
 
   // The answer is Markdown. Escape first, then turn the few constructs the model uses into HTML
@@ -93,38 +149,37 @@ function init() {
   launcher.id = "docs-chat-launcher"
   launcher.type = "button"
   launcher.setAttribute("aria-expanded", "false")
-  launcher.title = "Ask the Docs"
-  launcher.innerHTML = `<span class="docs-chat-launcher-icon">💬</span><span>Ask the Docs</span>`
+  launcher.title = L.launcher
+  launcher.innerHTML = `<span class="docs-chat-launcher-icon">💬</span><span>${esc(L.launcher)}</span>`
 
   const panel = document.createElement("div")
   panel.id = "docs-chat-panel"
   panel.className = "hidden"
   panel.setAttribute("role", "dialog")
-  panel.setAttribute("aria-label", "Documentation assistant")
+  panel.setAttribute("aria-label", L.dialog)
   panel.innerHTML = `
     <div id="docs-chat-header">
       <div>
-        <p class="docs-chat-title">Docs Assistant</p>
-        <p class="docs-chat-subtitle">Grounded in the LEO Customer 360 docs</p>
+        <p class="docs-chat-title">${esc(L.title)}</p>
+        <p class="docs-chat-subtitle">${esc(L.subtitle)}</p>
       </div>
-      <button id="docs-chat-close" type="button" title="Close" aria-label="Close">&times;</button>
+      <button id="docs-chat-close" type="button" title="${esc(L.close)}" aria-label="${esc(L.close)}">&times;</button>
     </div>
     <div id="docs-chat-log" aria-live="polite">
       <div class="docs-chat-msg docs-chat-bot">
         <div class="docs-chat-bubble">
-          Hi! Ask a question about the documentation and I'll answer with links to the source pages.
+          ${esc(L.welcome)}
           <div class="docs-chat-suggestions">
-            <button type="button" class="docs-chat-suggestion" data-q="How does identity resolution merge two profiles?">Identity resolution</button>
-            <button type="button" class="docs-chat-suggestion" data-q="How is tenant isolation enforced?">Tenant isolation</button>
+            ${suggestions.map((x: { q: string; label: string }) => `<button type="button" class="docs-chat-suggestion" data-q="${esc(x.q)}">${esc(x.label)}</button>`).join("")}
           </div>
         </div>
       </div>
     </div>
     <form id="docs-chat-form">
-      <textarea id="docs-chat-input" rows="1" placeholder="Ask a question…  (Enter to send)"></textarea>
-      <button id="docs-chat-send" type="submit" title="Send" aria-label="Send">➤</button>
+      <textarea id="docs-chat-input" rows="1" placeholder="${esc(L.placeholder)}"></textarea>
+      <button id="docs-chat-send" type="submit" title="${esc(L.send)}" aria-label="${esc(L.send)}">➤</button>
     </form>
-    <p class="docs-chat-disclaimer">AI-generated from the docs — verify with the linked sources.</p>`
+    <p class="docs-chat-disclaimer">${esc(L.disclaimer)}</p>`
 
   document.body.appendChild(launcher)
   document.body.appendChild(panel)
@@ -180,7 +235,7 @@ function init() {
       return
     }
     box.innerHTML =
-      `<div class="docs-chat-sources-title">Sources</div>` +
+      `<div class="docs-chat-sources-title">${esc(L.sources)}</div>` +
       list
         .map((s) => {
           const label = s.title || s.path
@@ -219,16 +274,16 @@ function init() {
 
     if (!retry) addUser(question)
     const bot = addBot()
-    setStatus(bot, "Searching the docs and writing the answer…", true)
+    setStatus(bot, L.searching, true)
     // The answer can take several seconds: say so instead of looking frozen.
-    const slow = setTimeout(() => setStatus(bot, "Still working… this is taking longer than usual.", true), SLOW_HINT_MS)
+    const slow = setTimeout(() => setStatus(bot, L.slow, true), SLOW_HINT_MS)
 
     try {
       // One call. Sources are shown only with the answer, and only the ones it used: listing the
       // search candidates first showed unrelated pages, and kept them when the answer was "I don't know".
       const a = await post("/ask", { question }, signal)
       setStatus(bot, "", false)
-      setAnswer(bot, a?.answer || "I couldn't find an answer in the documentation.")
+      setAnswer(bot, a?.answer || L.noAnswer)
       setSources(bot, a?.found === false ? [] : (a?.sources ?? []))
       reveal(bot)
       input.focus()
@@ -236,10 +291,10 @@ function init() {
       if (err?.name === "AbortError") return
       setStatus(bot, "", false)
       const detail = err?.status
-        ? `The documentation service returned an error (HTTP ${err.status}).`
-        : "Could not reach the documentation assistant. It may be starting up or offline."
+        ? L.errStatus.replace("{status}", String(err.status))
+        : L.errOffline
       ;(bot.querySelector(".docs-chat-answer") as HTMLElement).innerHTML =
-        `<span class="docs-chat-error">${esc(detail)}</span><div><button type="button" class="docs-chat-retry" data-q="${esc(question)}">Try again</button></div>`
+        `<span class="docs-chat-error">${esc(detail)}</span><div><button type="button" class="docs-chat-retry" data-q="${esc(question)}">${esc(L.retry)}</button></div>`
     } finally {
       clearTimeout(slow)
       controller = null

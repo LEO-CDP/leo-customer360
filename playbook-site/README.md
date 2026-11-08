@@ -70,6 +70,22 @@ Do the steps in this order; each one has a check.
 Quartz links pages without `.html`, which S3 does not resolve, so the deploy job
 also uploads each page under its extensionless key as `text/html`.
 
+## AI assistant
+
+The site has the same chat widget as the docs site (`docs-site/quartz-components/scripts/docs-chatbot.inline.ts`,
+shared; `build.sh` copies it in; Vietnamese text via `data-lang="vi"`). It only answers from the
+playbook pages:
+
+- The widget calls `POST /ai/ask` on `playbook.leocdp.com` (same origin, no CORS).
+- Caddy rewrites that to `/playbook/ask` on docs-vector-search and proxies nothing else under `/ai`.
+- `/playbook/ask` pins retrieval to chunks under `playbooks/` (`docs/playbooks/**`) in the server, so a
+  caller cannot widen the scope. The playbook pages are indexed by the normal docs index (the CD
+  `docs-index` step, which also runs when `docs/**` changes), so no extra index job exists.
+
+Rollout order: merge (CI builds and CD deploys the docs-search image with the new route), run the
+Deploy Caddy (UAT) workflow, then the playbook deploy publishes the widget. Until the first two are
+done the widget answers with an error message.
+
 ## Updating content
 
 Whoever changes a product screen updates the matching `docs/playbooks/` page in
