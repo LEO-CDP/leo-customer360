@@ -45,8 +45,12 @@ class RedisRequestLimiter:
         if self.enabled:
             await self.client.ping()
 
-    async def enforce(self, request: Request) -> None:
-        """Validate public hosts and enforce a fixed-window client limit."""
+    async def enforce(self, request: Request, limit: int | None = None, scope: str = "client") -> None:
+        """Validate public hosts and enforce a fixed-window client limit.
+
+        limit overrides ASK_RATE_MAX and scope names the Redis counter, so a route can have its own
+        budget that /ask and /search traffic never uses up (the playbook bot passes both)."""
+        limit = ASK_RATE_MAX if limit is None else limit
         # The admin proxy is authenticated separately and may use a private service
         # hostname that is intentionally absent from the public host allow-list.
         if self.is_internal(request):
@@ -59,7 +63,7 @@ class RedisRequestLimiter:
                 detail="Host origin is not whitelisted for this endpoint.",
             )
 
-        if not self.enabled:
+        if not self.enabled or limit <= 0:
             return
 
         # 3. Gather client identification factors
@@ -75,7 +79,7 @@ class RedisRequestLimiter:
         current_window = now // ASK_RATE_WINDOW_SEC
 
         # Single Redis key representing this specific client for this specific time window
-        limit_key = f"docs:ratelimit:client:{identity_hash}:{current_window}"
+        limit_key = f"docs:ratelimit:{scope}:{identity_hash}:{current_window}"
 
         try:
             # Execute INCR and EXPIRE in a single atomic pipeline
@@ -93,7 +97,7 @@ class RedisRequestLimiter:
         request_count = results[0]
 
         # 6. Reject if the single combined threshold is exceeded
-        if request_count > ASK_RATE_MAX:
+        if request_count > limit:
             retry_after = ASK_RATE_WINDOW_SEC - (now % ASK_RATE_WINDOW_SEC)
             raise HTTPException(
                 status_code=429,

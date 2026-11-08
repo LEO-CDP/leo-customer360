@@ -82,6 +82,9 @@ playbook pages:
   caller cannot widen the scope. The playbook pages are indexed by the normal docs index (the CD
   `docs-index` step, which also runs when `docs/**` changes), so no extra index job exists.
 
+The route has its own per-client rate limit (`PLAYBOOK_RATE_MAX`, default 5 questions per minute, set on
+the docs service), separate from the docs bot's `ASK_RATE_MAX`.
+
 Rollout order: merge (CI builds and CD deploys the docs-search image with the new route), run the
 Deploy Caddy (UAT) workflow, then the playbook deploy publishes the widget. Until the first two are
 done the widget answers with an error message.
