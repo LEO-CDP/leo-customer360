@@ -127,3 +127,18 @@
 	#   handle_path /netdata/* { reverse_proxy {$NETDATA_UPSTREAM} }   # oauth2-proxy --proxy-prefix
 	#   handle_path /portainer/* { reverse_proxy https://{$PORTAINER_UPSTREAM} { transport http { tls_insecure_skip_verify } } }
 }
+
+# --- LEO Playbook: static site in the vStorage bucket leo-playbook-uat (public read), synced by
+#     .github/workflows/deploy-playbook.yml. vStorage HCM04 has no static-website mode, so folder
+#     URLs (/, /use-cases/) are mapped to their index.html here; extensionless page keys are
+#     uploaded by the workflow. Needs DNS playbook.leocdp.com -> the same LB as caddy_domain.
+#     ponytail: host + bucket hardcoded (one public site, not per env); a prod Caddy would also
+#     try a cert for this host, move them to overlay vars if prod Caddy goes live. ---
+playbook.leocdp.com {
+	encode zstd gzip
+	@dir path */
+	rewrite @dir {path}index.html
+	reverse_proxy https://hcm04.vstorage.vngcloud.vn {
+		rewrite /leo-playbook-uat{path}
+	}
+}
