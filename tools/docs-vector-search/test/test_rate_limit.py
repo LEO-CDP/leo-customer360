@@ -198,3 +198,8 @@ def test_limiter_maps_redis_failure_to_503(monkeypatch):
         assert exc_info.value.headers["Retry-After"] == "5"
 
     asyncio.run(check())
+
+def test_the_playbook_host_is_allowed_by_default():
+    from src.config import LEO_BOT_ALLOWED_HOSTS
+
+    assert "playbook.leocdp.com" in LEO_BOT_ALLOWED_HOSTS

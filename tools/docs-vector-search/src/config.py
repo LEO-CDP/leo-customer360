@@ -22,7 +22,7 @@ def _parse_allowed_hosts(value: str) -> set[str]:
 LEO_BOT_ALLOWED_HOSTS = _parse_allowed_hosts(
     os.getenv(
         "LEO_BOT_ALLOWED_HOSTS",
-        "localhost, admin.leocdp.com, beta.leocdp.com, c360.example.com",
+        "localhost, admin.leocdp.com, beta.leocdp.com, playbook.leocdp.com, c360.example.com",
     )
 )
 
