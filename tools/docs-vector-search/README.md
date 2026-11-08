@@ -108,6 +108,7 @@ curl -s localhost:8001/reindex/<job_id> -H "X-Internal-Auth: $INTERNAL_API_SECRE
 |----------|------|---------|
 | `POST /ask` | `{question, top_n?, top_k?}` | grounded answer + cited sources, plus `found`, `status` (`answered`, `partial`, or `not_found`) and `missing` (the parts of the question the docs do not cover). When `status` is `not_found`, `answer` is a fixed localized message (English or Vietnamese); `clarify` is `"accents"` when the question looks like Vietnamese typed without accents (the answer asks the user to retype it with accents), or `"question"` when the message was too vague to search (the answer is a short model-written question). Both only replace a `not_found` refusal. |
 | `POST /search` | `{query, top_n?}` | reranked chunks (no generation) |
+| `POST /playbook/ask` | `{question}` | same as `/ask`, but retrieval is pinned to chunks whose path starts with `playbooks/` (`docs/playbooks/**`). The scope is fixed in the server (`PLAYBOOK_PREFIX`), not taken from the request, and the body accepts no page/context/history. Public and rate-limited; the playbook site reaches it through Caddy (`POST /ai/ask` on `playbook.leocdp.com`). |
 | `POST /reindex` | no body; `X-Internal-Auth` required | `202` with an asynchronous job record |
 | `GET /reindex/{job_id}` | `X-Internal-Auth` required | job status, counts, and error/result |
 | `GET /health` | — | loaded chunk count and active provider/model configuration |

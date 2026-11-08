@@ -21,6 +21,9 @@ git apply --ignore-whitespace "$SITE"/patches/*.patch
 cp "$SITE/quartz.config.ts" "$SITE/quartz.layout.ts" .
 cp "$SITE/custom.scss" quartz/styles/custom.scss
 cp "$SITE"/quartz-components/*.tsx quartz/components/
+# the chatbot widget is shared with the docs site
+cp "$ROOT/docs-site/quartz-components/scripts/docs-chatbot.inline.ts" quartz/components/scripts/
+cp "$ROOT/docs-site/quartz-components/styles/docs-chatbot.scss" quartz/components/styles/
 
 rm -rf content public
 cp -R "$ROOT/docs/playbooks" content

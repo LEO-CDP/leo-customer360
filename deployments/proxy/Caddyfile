@@ -136,10 +136,23 @@
 #     try a cert for this host, move them to overlay vars if prod Caddy goes live. ---
 playbook.leocdp.com {
 	encode zstd gzip
-	@dir path */
-	rewrite @dir {path}index.html
-	reverse_proxy https://hcm04.vstorage.vngcloud.vn {
-		rewrite /leo-playbook-uat{path}
-		header_up Host {upstream_hostport} # else the bucket is looked up by playbook.leocdp.com
+	# --- playbook AI bot: the ONLY thing on this host that reaches the docs box. POST /ai/ask is
+	#     rewritten to /playbook/ask, which the service pins to docs/playbooks/** (the caller cannot
+	#     choose the scope). Same origin as the site, so no CORS. Nothing else under /ai is proxied. ---
+	@ask {
+		path /ai/ask
+		method POST
+	}
+	handle @ask {
+		rewrite * /playbook/ask
+		reverse_proxy {$DOCS_UPSTREAM}
+	}
+	handle {
+		@dir path */
+		rewrite @dir {path}index.html
+		reverse_proxy https://hcm04.vstorage.vngcloud.vn {
+			rewrite /leo-playbook-uat{path}
+			header_up Host {upstream_hostport} # else the bucket is looked up by playbook.leocdp.com
+		}
 	}
 }

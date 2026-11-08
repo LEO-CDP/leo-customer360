@@ -2,11 +2,12 @@ import { PageLayout, SharedLayout } from "./quartz/cfg"
 import * as Component from "./quartz/components"
 import PlaybookMeta from "./quartz/components/PlaybookMeta"
 import PlaybookEnhance from "./quartz/components/PlaybookEnhance"
+import PlaybookChatbot from "./quartz/components/PlaybookChatbot"
 
 export const sharedPageComponents: SharedLayout = {
   head: Component.Head(),
   header: [],
-  afterBody: [PlaybookEnhance()],
+  afterBody: [PlaybookEnhance(), PlaybookChatbot()],
   footer: Component.Footer({ links: {} }),
 }
 
