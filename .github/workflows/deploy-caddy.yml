@@ -52,4 +52,4 @@ jobs:
 
       - name: Caddy ${{ inputs.action }}
         working-directory: deployments/proxy
-        run: ./deploy-caddy.sh uat "${{ inputs.action }}"
+        run: bash deploy-caddy.sh uat "${{ inputs.action }}"
