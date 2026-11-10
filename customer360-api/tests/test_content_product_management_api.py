@@ -290,3 +290,69 @@ def test_create_product_rejects_mismatched_domain_product_type_before_database_w
 
     assert response.status_code == 422
     repository.assert_not_called()
+
+
+def test_update_product_is_tenant_scoped_and_invalidates_content_cache():
+    client, _db = make_client()
+    repository = MagicMock()
+    repository.update_product.return_value = make_product(title="Updated product")
+    payload = {
+        "domain": "retail",
+        "product_type": "retail_product",
+        "source_id": "shop-1",
+        "product_id_type": "SKU",
+        "product_id": "sku-1",
+        "title": "Updated product",
+        "summary": "Updated summary",
+        "cta_label": "Shop now",
+        "cta_url": "https://example.com/product",
+        "keywords": ["books", "featured"],
+        "ext_attributes": {"product_category": "book"},
+        "original_price": "20.00",
+        "sale_price": "15.00",
+        "currency": "USD",
+        "status_code": 1,
+    }
+    with (
+        patch("core.routers.content_api.validate_domain_value") as validate_domain,
+        patch(
+            "core.routers.content_api.ProductItemRepository",
+            return_value=repository,
+        ),
+        patch("core.routers.content_api.invalidate_prefix") as invalidate,
+    ):
+        response = client.put(f"/content-items/products/{PRODUCT_ID}", json=payload)
+
+    assert response.status_code == 200
+    assert response.json()["title"] == "Updated product"
+    validate_domain.assert_called_once()
+    repository.update_product.assert_called_once()
+    call = repository.update_product.call_args
+    assert call.kwargs["tenant_id"] == uuid.UUID(TENANT_ID)
+    assert call.kwargs["product_item_id"] == PRODUCT_ID
+    assert call.kwargs["payload"].status_code == 1
+    invalidate.assert_called_once_with("content_items")
+
+
+def test_update_product_returns_not_found_without_leaking_other_tenants():
+    client, _db = make_client()
+    repository = MagicMock()
+    repository.update_product.return_value = None
+    payload = {
+        "domain": "retail",
+        "product_type": "retail_product",
+        "source_id": "shop-1",
+        "product_id_type": "SKU",
+        "product_id": "sku-1",
+        "title": "Product title",
+    }
+    with (
+        patch("core.routers.content_api.validate_domain_value"),
+        patch(
+            "core.routers.content_api.ProductItemRepository",
+            return_value=repository,
+        ),
+    ):
+        response = client.put(f"/content-items/products/{PRODUCT_ID}", json=payload)
+
+    assert response.status_code == 404

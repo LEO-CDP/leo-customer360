@@ -850,6 +850,11 @@ window.C360 = window.C360 || {};
     $("#campaign-editor-version").text(campaign.updated_at ? "Version " + campaign.updated_at : "New campaign");
     $("#campaign-editor-title").text(campaign.campaign_id ? "Edit campaign" : "Create campaign");
     $("#campaign-editor-eyebrow").text(campaign.campaign_id ? "Campaign editor" : "Campaign workspace");
+    $("#campaign-editor-icon").attr(
+      "class",
+      "bi " + (campaign.campaign_id ? "bi-pencil-square" : "bi-megaphone") + " text-2xl"
+    );
+    $("#campaign-editor-mode").text(campaign.campaign_id ? "Editing" : "New setup");
     $("#campaign-editor-approval").toggleClass("hidden", !campaign.approval_status).text(campaign.approval_status || "");
     $("#campaign-field-code").val(campaign.campaign_code || "");
     $("#campaign-field-name").val(campaign.name || "");
@@ -960,14 +965,18 @@ window.C360 = window.C360 || {};
           campaign: payload,
           workflow: workflow
         }, "POST");
-    $("#btn-campaign-editor-save").prop("disabled", true).text("Saving...");
+    $("#btn-campaign-editor-save").prop("disabled", true);
+    $("#campaign-editor-save-icon").attr("class", "bi bi-arrow-repeat animate-spin");
+    $("#campaign-editor-save-label").text("Saving...");
     request.done(function (response) {
       var id = response.campaign.campaign_id || campaignId;
       C360.router.navigate("/campaigns/" + encodeURIComponent(id));
     }).fail(function (xhr) {
       setCampaignMessage("#campaign-editor-error", campaignError(xhr));
     }).always(function () {
-      $("#btn-campaign-editor-save").prop("disabled", false).text("Save campaign");
+      $("#btn-campaign-editor-save").prop("disabled", false);
+      $("#campaign-editor-save-icon").attr("class", "bi bi-check2-circle");
+      $("#campaign-editor-save-label").text("Save campaign");
     });
   }
 

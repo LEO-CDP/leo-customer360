@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from leo_customer360_dao.config import settings
 from leo_customer360_dao.models.content import CdpContentItem
-from leo_customer360_dao.schemas.product_item import ProductItemCreate
+from leo_customer360_dao.schemas.product_item import ProductItemCreate, ProductItemUpdate
 
 _PRODUCT_ITEM_SELECT = f"""
     SELECT
@@ -197,3 +197,114 @@ class ProductItemRepository:
         if row is None:
             raise LookupError(f"Product item '{product_item_id}' was not found")
         return dict(row)
+
+    def update_product(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        product_item_id: str,
+        payload: ProductItemUpdate,
+    ) -> dict[str, Any] | None:
+        """Replace one tenant-owned product and its linked content fields."""
+        try:
+            row = self.session.execute(
+                text(
+                    f"""
+                    SELECT content_item_id
+                    FROM {settings.db_schema}.cdp_product_items
+                    WHERE tenant_id = :tenant_id
+                      AND product_item_id = :product_item_id
+                    FOR UPDATE
+                    """
+                ),
+                {"tenant_id": tenant_id, "product_item_id": product_item_id},
+            ).first()
+            if row is None:
+                self.session.rollback()
+                return None
+
+            content_item_id = row[0]
+            if content_item_id is not None:
+                self.session.execute(
+                    text(
+                        f"""
+                        UPDATE {settings.db_schema}.cdp_content_items
+                        SET domain = :domain,
+                            title = :title,
+                            summary = :summary,
+                            image_url = :image_url,
+                            cta_label = :cta_label,
+                            cta_url = :cta_url,
+                            segment_tags = :keywords,
+                            status_code = :status_code,
+                            updated_at = now()
+                        WHERE tenant_id = :tenant_id
+                          AND content_item_id = :content_item_id
+                          AND item_type = 'product'
+                        """
+                    ),
+                    {
+                        "tenant_id": tenant_id,
+                        "content_item_id": content_item_id,
+                        "domain": payload.domain,
+                        "title": payload.title,
+                        "summary": payload.summary,
+                        "image_url": payload.image_url,
+                        "cta_label": payload.cta_label,
+                        "cta_url": payload.cta_url,
+                        "keywords": payload.keywords,
+                        "status_code": payload.status_code,
+                    },
+                )
+
+            self.session.execute(
+                text(
+                    f"""
+                    UPDATE {settings.db_schema}.cdp_product_items
+                    SET domain = :domain,
+                        product_type = :product_type,
+                        source_id = :source_id,
+                        source_type = :source_type,
+                        product_id_type = :product_id_type,
+                        product_id = :product_id,
+                        keywords = :keywords,
+                        ext_attributes = CAST(:ext_attributes AS jsonb),
+                        original_price = :original_price,
+                        sale_price = :sale_price,
+                        currency = :currency,
+                        source_fields = CAST(:source_fields AS jsonb),
+                        updated_at = now()
+                    WHERE tenant_id = :tenant_id
+                      AND product_item_id = :product_item_id
+                    """
+                ),
+                {
+                    "tenant_id": tenant_id,
+                    "product_item_id": product_item_id,
+                    "domain": payload.domain,
+                    "product_type": payload.product_type,
+                    "source_id": payload.source_id,
+                    "source_type": payload.source_type,
+                    "product_id_type": payload.product_id_type,
+                    "product_id": payload.product_id,
+                    "keywords": payload.keywords,
+                    "ext_attributes": json.dumps(payload.ext_attributes, allow_nan=False),
+                    "original_price": payload.original_price,
+                    "sale_price": payload.sale_price,
+                    "currency": payload.currency,
+                    "source_fields": json.dumps(
+                        payload.model_dump(mode="json", exclude={"status_code"}),
+                        ensure_ascii=False,
+                        allow_nan=False,
+                    ),
+                },
+            )
+            result = self.get_product(
+                tenant_id=tenant_id,
+                product_item_id=product_item_id,
+            )
+            self.session.commit()
+        except Exception:
+            self.session.rollback()
+            raise
+        return result

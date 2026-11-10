@@ -1,31 +1,45 @@
 <main id="campaign-editor-view" class="space-y-6" aria-label="Campaign editor">
-	<header class="flex flex-wrap items-start justify-between gap-4">
-		<div>
-			<button id="btn-campaign-editor-back" type="button" class="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-indigo-700 mb-3">
-				<span aria-hidden="true">&larr;</span><span>Back to campaigns</span>
-			</button>
-			<p id="campaign-editor-eyebrow" class="text-xs uppercase tracking-wider font-semibold text-indigo-600">Campaign workspace</p>
-			<h1 id="campaign-editor-title" class="text-2xl font-bold text-slate-900 mt-1">Create campaign</h1>
-			<p class="text-sm text-slate-500 mt-1">Update campaign metadata through the governed campaign API.</p>
+	<header class="flex flex-wrap items-start justify-between gap-5 rounded-2xl border border-slate-200 bg-gradient-to-r from-white via-white to-indigo-50/70 p-5 shadow-sm sm:p-6">
+		<div class="flex min-w-0 items-start gap-4">
+			<span class="mt-1 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-indigo-100 text-indigo-700 ring-1 ring-inset ring-indigo-200" aria-hidden="true">
+				<i id="campaign-editor-icon" class="bi bi-megaphone text-2xl"></i>
+			</span>
+			<div class="min-w-0">
+				<button id="btn-campaign-editor-back" type="button" class="mb-3 inline-flex items-center gap-2 rounded-lg text-sm font-semibold text-slate-600 transition hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+					<i class="bi bi-arrow-left" aria-hidden="true"></i><span>Back to campaigns</span>
+				</button>
+				<p id="campaign-editor-eyebrow" class="text-xs font-semibold uppercase tracking-wider text-indigo-600">Campaign workspace</p>
+				<div class="mt-1 flex flex-wrap items-center gap-2">
+					<h1 id="campaign-editor-title" class="text-2xl font-bold tracking-tight text-slate-900">Create campaign</h1>
+					<span id="campaign-editor-mode" class="rounded-full bg-indigo-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-indigo-700 ring-1 ring-inset ring-indigo-100">New setup</span>
+				</div>
+				<p class="mt-1 max-w-2xl text-sm leading-relaxed text-slate-500">Set up the audience, delivery details, schedule, and governed customer journey for this campaign.</p>
+			</div>
 		</div>
-		<div class="flex items-center gap-2">
-			<span id="campaign-editor-version" class="text-xs font-mono text-slate-500 bg-slate-100 border border-slate-200 rounded-md px-2.5 py-1.5">New campaign</span>
-			<span id="campaign-editor-approval" class="hidden text-xs font-semibold rounded-md px-2.5 py-1.5"></span>
+		<div class="flex flex-wrap items-center gap-2 sm:justify-end">
+			<span class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-mono text-slate-500">
+				<i class="bi bi-clock-history text-slate-400" aria-hidden="true"></i>
+				<span id="campaign-editor-version">New campaign</span>
+			</span>
+			<span id="campaign-editor-approval" class="hidden rounded-lg border border-indigo-100 bg-indigo-50 px-2.5 py-1.5 text-xs font-semibold text-indigo-700"></span>
 		</div>
 	</header>
 
 	<div id="campaign-editor-error" class="hidden rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" role="alert"></div>
 	<div id="campaign-editor-success" class="hidden rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700" role="status"></div>
-	<div id="campaign-editor-loading" class="hidden rounded-xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500">Loading campaign...</div>
+	<div id="campaign-editor-loading" class="hidden rounded-xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500" role="status" aria-live="polite"><i class="bi bi-arrow-repeat mr-2 animate-spin text-indigo-600" aria-hidden="true"></i>Loading campaign...</div>
 
 	<form id="campaign-editor-form" class="space-y-6" novalidate>
 		<input id="campaign-editor-id" type="hidden" />
 		<input id="campaign-editor-updated-at" type="hidden" />
 
-		<section class="bg-white border border-slate-200 rounded-2xl shadow-sm p-5 sm:p-6">
-			<div class="mb-4">
-				<h2 class="text-base font-bold text-slate-900">Campaign metadata</h2>
-				<p class="text-sm text-slate-500 mt-1">These fields set the campaign route, audience language, schedule, and budget. Channel and platform follow the workflow studio options.</p>
+		<section id="campaign-metadata-section" aria-labelledby="campaign-metadata-heading" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+			<div class="mb-5 flex items-start gap-3">
+				<span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sky-700 ring-1 ring-inset ring-sky-100" aria-hidden="true"><i class="bi bi-card-list text-lg"></i></span>
+				<div>
+					<h2 id="campaign-metadata-heading" class="text-base font-bold text-slate-900">Campaign details</h2>
+					<p class="mt-1 max-w-3xl text-sm leading-relaxed text-slate-500">Configure the campaign's identity, channel, language, dates, and budget. Available platforms depend on the selected channel.</p>
+				</div>
 			</div>
 			<div class="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2 xl:grid-cols-3">
 				<label class="block min-w-0 text-sm font-semibold text-slate-700">Name<span class="text-rose-600"> *</span><input id="campaign-field-name" name="name" required placeholder="Enter a clear campaign name" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors placeholder:text-slate-400 hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100" /></label>
@@ -90,10 +104,16 @@
 			</div>
 		</section>
 
-		<section class="bg-white border border-indigo-200 rounded-2xl shadow-sm p-6">
-			<div class="mb-5">
-				<div class="flex items-center gap-2"><h2 class="text-base font-bold text-slate-900">Governed campaign plan</h2><span class="text-[11px] uppercase tracking-wider font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded px-2 py-1">Review required</span></div>
-				<p class="text-sm text-slate-500 mt-1">Changes here are audited and may return an approved campaign to InReview.</p>
+		<section id="campaign-plan-section" aria-labelledby="campaign-plan-heading" class="rounded-2xl border border-indigo-200 bg-white p-5 shadow-sm sm:p-6">
+			<div class="mb-5 flex items-start gap-3">
+				<span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-700 ring-1 ring-inset ring-indigo-100" aria-hidden="true"><i class="bi bi-shield-check text-lg"></i></span>
+				<div>
+					<div class="flex flex-wrap items-center gap-2">
+						<h2 id="campaign-plan-heading" class="text-base font-bold text-slate-900">Governed campaign plan</h2>
+						<span class="inline-flex items-center gap-1 rounded-full border border-indigo-100 bg-indigo-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-indigo-700"><i class="bi bi-clipboard-check" aria-hidden="true"></i> Review required</span>
+					</div>
+					<p class="mt-1 text-sm leading-relaxed text-slate-500">Changes are audited and may return an approved campaign to InReview.</p>
+				</div>
 			</div>
 			<div class="grid grid-cols-1 md:grid-cols-2 gap-5">
 				<div class="text-sm font-semibold text-slate-700 md:col-span-2">
@@ -143,7 +163,7 @@
 					<textarea id="campaign-field-constraints" name="budget_time_constraints" rows="3" aria-describedby="campaign-constraints-help" placeholder="Example: Maximum budget, campaign dates, and channels to include or exclude." class="mt-2 block w-full min-w-0 resize-y rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors placeholder:text-slate-400 hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100"></textarea>
 				</label>
 			</div>
-			<div class="mt-5 rounded-lg bg-slate-50 border border-slate-200 p-4 text-xs text-slate-600">AI plan and agent provenance are read-only. Saving pins this workflow to the campaign; activation runs the approved version. Simulation uses virtual time and estimated outcomes. Without a configured provider, delivery and audience sync are logged only.</div>
+			<div class="mt-5 flex items-start gap-3 rounded-xl border border-sky-100 bg-sky-50/60 p-4 text-xs leading-relaxed text-slate-600"><i class="bi bi-info-circle-fill mt-0.5 shrink-0 text-sky-600" aria-hidden="true"></i><span>AI plan and agent provenance are read-only. Saving pins this workflow to the campaign; activation runs the approved version. Simulation uses virtual time and estimated outcomes. Without a configured provider, delivery and audience sync are logged only.</span></div>
 			<section class="mt-6 min-w-0 overflow-hidden rounded-2xl border border-indigo-100 bg-white shadow-sm" aria-labelledby="campaign-workflow-heading">
 				<div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-gradient-to-r from-indigo-50/80 to-white px-5 py-4">
 					<div class="flex min-w-0 items-start gap-3">
@@ -159,9 +179,12 @@
 			</section>
 		</section>
 
-		<footer class="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50/95 py-4 backdrop-blur">
-			<button id="btn-campaign-editor-cancel" type="button" class="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
-			<div class="flex items-center gap-2"><button id="btn-campaign-editor-save" type="submit" class="rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700">Save campaign</button></div>
+		<footer class="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white/95 py-4 backdrop-blur">
+			<p class="hidden items-center gap-1.5 text-xs text-slate-500 sm:flex"><i class="bi bi-shield-lock" aria-hidden="true"></i>Changes are saved through the governed campaign workflow.</p>
+			<div class="ml-auto flex items-center gap-2">
+				<button id="btn-campaign-editor-cancel" type="button" class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400"><i class="bi bi-x-lg text-xs" aria-hidden="true"></i>Cancel</button>
+				<button id="btn-campaign-editor-save" type="submit" class="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"><i id="campaign-editor-save-icon" class="bi bi-check2-circle" aria-hidden="true"></i><span id="campaign-editor-save-label">Save campaign</span></button>
+			</div>
 		</footer>
 	</form>
 

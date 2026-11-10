@@ -73,6 +73,12 @@ class ProductItemCreate(BaseModel):
         return self
 
 
+class ProductItemUpdate(ProductItemCreate):
+    """Complete replacement fields for a product and its linked content."""
+
+    status_code: int = Field(default=1, ge=0)
+
+
 class ProductItemRead(BaseModel):
     """Product metadata plus generated presentation fields when available."""
 

@@ -33,7 +33,11 @@ from leo_customer360_dao.schemas.content import (
     ContentItemUpdate,
     RecommendedContentItem,
 )
-from leo_customer360_dao.schemas.product_item import ProductItemCreate, ProductItemRead
+from leo_customer360_dao.schemas.product_item import (
+    ProductItemCreate,
+    ProductItemRead,
+    ProductItemUpdate,
+)
 from core.utils.product_utils import (
     MAX_PRODUCT_TSV_BYTES,
     ProductImportStorageError,
@@ -246,6 +250,36 @@ def create_product_item(
             status_code=409,
             detail="A product with this source and product identity already exists",
         ) from exc
+    invalidate_prefix("content_items")
+    return result
+
+
+@router.put("/products/{product_item_id}", response_model=ProductItemRead)
+def update_product_item(
+    product_item_id: str,
+    payload: ProductItemUpdate,
+    tenant_context: TenantId,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Replace a product and its linked content within the authenticated tenant."""
+    try:
+        validate_domain_value(db, payload.domain)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
+        result = ProductItemRepository(db).update_product(
+            tenant_id=uuid.UUID(tenant_context),
+            product_item_id=product_item_id,
+            payload=payload,
+        )
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="A product with this source and product identity already exists",
+        ) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Product item '{product_item_id}' not found")
     invalidate_prefix("content_items")
     return result
 
