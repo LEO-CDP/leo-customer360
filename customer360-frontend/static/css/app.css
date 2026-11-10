@@ -78,6 +78,16 @@ body {
   backdrop-filter: blur(3px);
 }
 
+.promotion-conversion-modal {
+  width: min(36rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+}
+
+.promotion-conversion-modal::backdrop {
+  background: rgba(15, 23, 42, 0.55);
+}
+
 #campaign-state-modal #campaign-state-form {
   min-width: 0;
 }

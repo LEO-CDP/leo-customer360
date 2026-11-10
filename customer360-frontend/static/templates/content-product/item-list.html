@@ -50,7 +50,7 @@
           <div class="mb-5 flex flex-wrap items-end justify-between gap-3">
             <div>
               <h2 class="text-lg font-bold text-slate-900">Content items</h2>
-              <p class="mt-1 text-sm text-slate-500">News, video, and article items shown to customers.</p>
+              <p class="mt-1 text-sm text-slate-500">Manage customer-facing items and create or refresh a promotion creative from a saved item.</p>
             </div>
             <div class="flex gap-2">
               <button id="btn-content-refresh" type="button" class="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50">Refresh</button>
@@ -107,7 +107,7 @@
           <div class="mb-5 flex flex-wrap items-end justify-between gap-3">
             <div>
               <h2 class="text-lg font-bold text-slate-900">Product items</h2>
-              <p class="mt-1 text-sm text-slate-500">Product source records with generated customer-facing content when available.</p>
+              <p class="mt-1 text-sm text-slate-500">Manage products and create or refresh a creative using their linked content.</p>
             </div>
             <div class="flex gap-2">
               <button id="btn-products-refresh" type="button" class="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50">Refresh</button>
@@ -156,6 +156,48 @@
     </div>
   </section>
 </div>
+
+<dialog id="item-promotion-modal" class="promotion-conversion-modal rounded-2xl border-0 bg-white p-0 text-slate-900 shadow-2xl" aria-labelledby="item-promotion-title" aria-describedby="item-promotion-description">
+  <form id="item-promotion-form" class="w-full" novalidate>
+    <header class="flex items-start justify-between gap-4 border-b border-slate-200 bg-indigo-50/50 p-5 sm:p-6">
+      <div class="flex min-w-0 items-start gap-3">
+        <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700"><i class="bi bi-megaphone text-lg" aria-hidden="true"></i></span>
+        <div class="min-w-0">
+          <h2 id="item-promotion-title" class="text-lg font-bold">Create or refresh creative</h2>
+          <p id="item-promotion-description" class="mt-1 text-sm text-slate-600">The last saved item is used. Existing linked creatives are refreshed; new ones start as drafts.</p>
+        </div>
+      </div>
+      <button id="item-promotion-close" type="button" class="rounded-lg p-2 text-slate-500 hover:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" aria-label="Close creative conversion"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+    </header>
+    <div class="space-y-4 p-5 sm:p-6">
+      <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <p id="item-promotion-kind" class="text-xs font-semibold uppercase tracking-wide text-slate-500">Source item</p>
+        <p id="item-promotion-name" class="mt-1 break-words text-sm font-semibold text-slate-800"></p>
+      </div>
+      <div class="grid gap-4 sm:grid-cols-2">
+        <label class="block text-sm font-semibold text-slate-700">Ad type <span class="text-rose-600">*</span>
+          <select id="item-promotion-ad-type" required disabled class="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100">
+            <option value="">Select an ad type</option>
+          </select>
+        </label>
+        <label class="block text-sm font-semibold text-slate-700">Format code <span class="text-rose-600">*</span>
+          <select id="item-promotion-format" required disabled class="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100">
+            <option value="">Select a format</option>
+          </select>
+        </label>
+      </div>
+      <div id="item-promotion-options-status" class="hidden text-xs text-slate-500" role="status" aria-live="polite"></div>
+      <button id="item-promotion-options-retry" type="button" class="hidden rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"><i class="bi bi-arrow-clockwise mr-1" aria-hidden="true"></i>Retry loading choices</button>
+      <p class="flex gap-2 rounded-lg border border-sky-100 bg-sky-50 px-3 py-2.5 text-xs leading-relaxed text-slate-600"><i class="bi bi-info-circle mt-0.5 shrink-0 text-sky-600" aria-hidden="true"></i><span>Choose an ad type and format supported by your promotion setup. This does not publish an ad or configure its destination. Pause an active creative before refreshing it.</span></p>
+      <div id="item-promotion-error" class="hidden rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert"></div>
+      <div id="item-promotion-success" class="hidden rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800" role="status" aria-live="polite"></div>
+    </div>
+    <footer class="flex flex-wrap justify-end gap-2 border-t border-slate-200 bg-slate-50 p-5 sm:px-6">
+      <button id="item-promotion-cancel" type="button" class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">Cancel</button>
+      <button id="item-promotion-submit" type="submit" disabled class="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"><i class="bi bi-arrow-repeat" aria-hidden="true"></i><span>Create or refresh</span></button>
+    </footer>
+  </form>
+</dialog>
 
 <div id="item-form-modal" class="fixed inset-0 z-50 hidden items-center justify-center overflow-y-auto bg-slate-900/50 p-4" role="dialog" aria-modal="true" aria-labelledby="item-form-title" aria-describedby="item-form-description">
   <div class="my-auto w-full max-w-4xl rounded-2xl bg-white shadow-2xl ring-1 ring-black/5">

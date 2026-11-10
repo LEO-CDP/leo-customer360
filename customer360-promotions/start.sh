@@ -167,36 +167,66 @@ fi
 HOST="${c360_PROMOTION_API_HOST:-localhost}"
 PORT="${c360_PROMOTION_API_PORT:-9009}"
 
-c360_PROMOTION_DB_HOST="${c360_PROMOTION_DB_HOST:-localhost}"
-c360_PROMOTION_DB_PORT="${c360_PROMOTION_DB_PORT:-5432}"
-c360_PROMOTION_DB_USER="${c360_PROMOTION_DB_USER:-postgres}"
-c360_PROMOTION_DB_PASSWORD="${c360_PROMOTION_DB_PASSWORD:-change_me_postgres_password}"
-c360_PROMOTION_DB_NAME="${c360_PROMOTION_DB_NAME:-customer360}"
+# Local development can symlink this .env to the repo-level shared DB config.
+# Prefer promotions-specific overrides; otherwise reuse its database settings.
+c360_PROMOTION_DB_HOST="${c360_PROMOTION_DB_HOST:-${DB_HOST:-localhost}}"
+c360_PROMOTION_DB_PORT="${c360_PROMOTION_DB_PORT:-${DB_PORT:-5432}}"
+c360_PROMOTION_DB_USER="${c360_PROMOTION_DB_USER:-${DB_USER:-postgres}}"
+c360_PROMOTION_DB_PASSWORD="${c360_PROMOTION_DB_PASSWORD:-${DB_PASSWORD:-change_me_postgres_password}}"
+c360_PROMOTION_DB_NAME="${c360_PROMOTION_DB_NAME:-${DB_NAME:-customer360}}"
 c360_PROMOTION_DB_CONTAINER_NAME="${c360_PROMOTION_DB_CONTAINER_NAME:-customer360-postgres}"
+export c360_PROMOTION_DB_HOST c360_PROMOTION_DB_PORT c360_PROMOTION_DB_USER
+export c360_PROMOTION_DB_PASSWORD c360_PROMOTION_DB_NAME
 
 ###############################################################################
 # PostgreSQL helpers
 ###############################################################################
 
 check_db_available() {
-    "$VENV_PYTHON" - "$c360_PROMOTION_DB_HOST" "$c360_PROMOTION_DB_PORT" <<'PY'
-import socket
+    PGPASSWORD="$c360_PROMOTION_DB_PASSWORD" \
+    "$VENV_PYTHON" - \
+        "$c360_PROMOTION_DB_HOST" \
+        "$c360_PROMOTION_DB_PORT" \
+        "$c360_PROMOTION_DB_USER" \
+        "$c360_PROMOTION_DB_NAME" <<'PY'
+import os
 import sys
+
+import psycopg2
 
 host = sys.argv[1]
 port = int(sys.argv[2])
-
-sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-sock.settimeout(2)
+user = sys.argv[3]
+database = sys.argv[4]
 
 try:
-    sock.connect((host, port))
-    print(f"DB_OK {host}:{port}")
-    raise SystemExit(0)
-except OSError:
+    connection = psycopg2.connect(
+        host=host,
+        port=port,
+        user=user,
+        password=os.environ.get("PGPASSWORD"),
+        dbname=database,
+        connect_timeout=3,
+    )
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+    finally:
+        connection.close()
+except psycopg2.OperationalError as exc:
+    if getattr(exc, "pgcode", None) == "28P01":
+        print("DB_AUTH_FAILED: PostgreSQL rejected the configured user/password.", file=sys.stderr)
+    elif getattr(exc, "pgcode", None) == "3D000":
+        print(f"DB_NAME_FAILED: PostgreSQL database '{database}' does not exist.", file=sys.stderr)
+    else:
+        print(f"DB_CONNECTION_FAILED: Cannot connect and authenticate to {host}:{port}/{database}.", file=sys.stderr)
     raise SystemExit(1)
-finally:
-    sock.close()
+except psycopg2.Error as exc:
+    if getattr(exc, "pgcode", None) == "42501":
+        print(f"DB_PERMISSION_FAILED: User '{user}' cannot connect to database '{database}'.", file=sys.stderr)
+    else:
+        print("DB_CHECK_FAILED: PostgreSQL query failed.", file=sys.stderr)
+    raise SystemExit(1)
 PY
 }
 
@@ -503,12 +533,12 @@ if ! check_db_available; then
     if ensure_dev_infra; then
 
         if ! check_db_available; then
-            log "${RED}[DB] PostgreSQL did not become ready${NC} | ${c360_PROMOTION_DB_HOST}:${c360_PROMOTION_DB_PORT}"
+            log "${RED}[DB] Authenticated PostgreSQL check failed${NC} | Verify c360_PROMOTION_DB_* credentials, database name, and CONNECT permission"
             exit 1
         fi
 
     else
-        log "${YELLOW}[DB] Start the dev stack first${NC} | cd .. && ./dev-c360.sh"
+            log "${YELLOW}[DB] Verify PostgreSQL is running and c360_PROMOTION_DB_* credentials are correct${NC}"
         log "${YELLOW}[DB] Or boot postgres manually${NC} | docker compose -f ../dev-docker-compose.yml up -d postgres redis keycloak"
         exit 1
     fi

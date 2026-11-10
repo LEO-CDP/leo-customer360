@@ -138,29 +138,85 @@ independent and uses `customer360-promotions/.env` from `customer360-promotions/
 - `LEO_OPENAI_MODEL_NAME`: OpenAI model. Default: `gpt-5.6-luna`
 - `LEO_OPENAI_BASE_URL`: OpenAI-compatible API URL. Default: `YOUR_OPENAI_BASE_URL`
 
+## Customer 360 to promotions API
+
+These settings are in the root `.env.example` and are consumed by
+`customer360-api` when a tenant admin explicitly converts a campaign or content
+item to a promotions record:
+
+- `C360_PROMOTION_API_URL`: HTTPS base URL for `customer360-promotions`.
+  Unset by default; conversion returns 503 until configured.
+- `c360_PROMOTION_MANAGEMENT_TOKENS`: JSON mapping promotions tenant keys to
+  unique bearer tokens. Configure the same mapping on the promotions service.
+  The root example uses `{}`, which intentionally disables integration.
+- `C360_PROMOTION_TENANT_KEYS`: JSON mapping Customer 360 tenant UUIDs to
+  provisioned promotions tenant keys. The root example uses `{}`, so no core
+  tenant is mapped.
+- `C360_PROMOTION_ALLOW_INSECURE_HTTP`: Defaults to `false`; only enable for a
+  trusted private network without TLS. HTTPS is required otherwise.
+
+An authorized operator must also provision the corresponding
+`leo_ads.customer360_tenant_map` entry in the promotions database. Never derive
+or accept this destination mapping from a tenant request. The API deployment
+script writes these values into its protected environment file; provide tokens
+through a secret manager or protected deployment environment, not source
+control. See the [promotion conversion guide](../../customer360-api/README.md#promotions-conversion)
+and [promotions deployment runbook](../../deployments/customer360-promotions/README.md).
+
 ## Independent customer360-promotions settings
 
-These keys belong only to `customer360-promotions/.env`. They are not part of the root
-global `.env` file.
+[`customer360-promotions/.env.example`](../../customer360-promotions/.env.example)
+is a **local-development template only**, not a production environment file.
+For local development, copy it to `customer360-promotions/.env`. The host-run
+`start.sh` and `PromotionsSettings` accept promotions-specific
+`c360_PROMOTION_DB_*` values and fall back to the root `DB_*` values only when
+the root values are present in the loaded environment or `.env`.
+Promotions-specific settings take precedence.
 
-### Ad server API
+Production Kubernetes configuration is assembled by
+`deployments/customer360-promotions/deploy-promotions.sh` from Terraform
+outputs and protected secrets into generated ConfigMaps/Secrets; it does not
+deploy this example file. Do not copy its `localhost` addresses or placeholder
+credentials to production. Check the deployment runbook for current production
+infrastructure readiness.
 
-- `c360_PROMOTION_API_HOST`: API listen address. Default: `localhost`
-- `c360_PROMOTION_API_PORT`: API listen port. Default: `9009`
-- `c360_PROMOTION_TRACKING_BASE_URL`: Customer 360 tracking API URL. Default: `http://localhost:8010`
+### Promotions API and management authentication
+
+- `c360_PROMOTION_ENVIRONMENT`: Runtime environment. Example: `development`.
+- `c360_PROMOTION_API_HOST` / `c360_PROMOTION_API_PORT`: Bind address and port
+  used by the host-run `start.sh`. The container listens on `0.0.0.0:9009`.
+- `c360_PROMOTION_ROOT_PATH`: Public reverse-proxy prefix, e.g. `/ads`;
+  defaults to empty.
+- `c360_PROMOTION_MANAGEMENT_TOKENS`: JSON mapping of promotions tenant keys
+  to unique bearer tokens, each at least 32 ASCII characters with no
+  whitespace. The example uses `{}`; management endpoints fail closed with
+  503 until valid tokens and tenant mappings are configured. Provision
+  `leo_ads.customer360_tenant_map` separately.
 
 ### Ad server PostgreSQL
 
-- `c360_PROMOTION_DB_HOST`: PostgreSQL host. Default: `localhost`
-- `c360_PROMOTION_DB_PORT`: PostgreSQL port. Default: `5432`
-- `c360_PROMOTION_DB_USER`: PostgreSQL user. Default: `postgres`
-- `c360_PROMOTION_DB_PASSWORD`: PostgreSQL password. Set a private value.
-- `c360_PROMOTION_DB_NAME`: Database name. Default: `customer360`
-- `c360_PROMOTION_DB_SCHEMA`: Ads schema. Default: `leo_ads`
+- `c360_PROMOTION_DB_HOST`: PostgreSQL host. Development example: `localhost`.
+- `c360_PROMOTION_DB_PORT`: PostgreSQL port. Development example: `5432`.
+- `c360_PROMOTION_DB_USER`: PostgreSQL user. Development example: `postgres`.
+- `c360_PROMOTION_DB_PASSWORD`: PostgreSQL password. The example value is a
+  placeholder and must be replaced with a secret.
+- `c360_PROMOTION_DB_NAME`: Database name. Development example: `customer360`.
+- `c360_PROMOTION_DB_SCHEMA`: Promotions schema. Default: `leo_ads`.
+- `c360_PROMOTION_DB_POOL_SIZE`, `c360_PROMOTION_DB_MAX_OVERFLOW`,
+  `c360_PROMOTION_DB_POOL_RECYCLE_SECONDS`, and
+  `c360_PROMOTION_DB_POOL_PRE_PING`: Per-process SQLAlchemy pool settings.
+  Production connection budgets must account for pods times
+  `(pool_size + max_overflow)`.
+- `c360_PROMOTION_DB_ECHO_SQL`: SQL logging switch. Keep `false` in production.
 
 ### Ad server Redis
 
-- `c360_PROMOTION_REDIS_HOST`: Redis host. Default: `localhost`
-- `c360_PROMOTION_REDIS_PORT`: Redis port. Default: `6580`
-- `c360_PROMOTION_REDIS_DB`: Redis database number. Default: `0`
-- `c360_PROMOTION_REDIS_PASSWORD`: Redis password. Set a private value.
+- `c360_PROMOTION_REDIS_HOST`, `c360_PROMOTION_REDIS_PORT`,
+  `c360_PROMOTION_REDIS_DB`, and `c360_PROMOTION_REDIS_PASSWORD`: Development
+  Redis connection settings; the example uses localhost and a placeholder
+  password. Production deployment resolves the private Redis endpoint and
+  password from deployment configuration.
+- `c360_PROMOTION_CACHE_ENABLED` and `c360_PROMOTION_CACHE_TTL_SECONDS` appear
+  in the local configuration/template (the deploy script sets the enabled
+  flag), but the current promotions application does not wire a Redis cache
+  client. Setting these values alone does not enable response caching.

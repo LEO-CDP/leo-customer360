@@ -13,6 +13,24 @@ The frontend is intentionally thin: it does not own the business logic or databa
 - Renders charts, dashboards, and tables using jQuery + Handlebars + Chart.js
 - Routes the browser via hash-based navigation without a framework build step
 
+## Promotion conversion
+
+Tenant admins can choose **Promotion campaign** on a campaign's details page,
+or **Creative** on a content or product row. Creative conversion requires the
+ad type and format code for the intended promotion setup; both lists load from
+the Customer 360 API and can be retried if loading fails. The lists contain
+sample-catalog choices, not a guarantee of placement or renderer compatibility.
+A product and its
+linked content share one creative; products without linked content cannot be
+converted.
+
+The action uses the last saved source record and creates or refreshes its
+linked promotion record. New records start as drafts; it does not publish an
+ad or configure a serving destination. Active promotion records must be paused
+before refreshing. Core campaign dates are stored as metadata, not applied as
+the promotion schedule. Configure the services and tenant mapping as described
+in the [promotion conversion API guide](../customer360-api/README.md#promotions-conversion).
+
 ## UX of Menu 
 
 For a marketing user, the natural journey is:

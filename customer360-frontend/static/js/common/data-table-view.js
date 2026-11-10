@@ -104,7 +104,7 @@ window.C360 = window.C360 || {};
       if (!o.el.thead) return;
       $(o.el.thead).html(C360.templates.render("data-table-head", {
         columns: o.columns,
-        showActionColumn: o.rowClickable || !!o.onEdit,
+        showActionColumn: o.rowClickable || !!o.onEdit || !!o.onSecondaryAction,
         compactTable: !!o.compactTable
       }));
     }
@@ -127,7 +127,11 @@ window.C360 = window.C360 || {};
           clickable: o.rowClickable,
           actionLabel: o.actionLabel,
           editable: !!o.onEdit,
+          hasActions: !!o.onEdit || !!o.onSecondaryAction,
           editLabel: o.editLabel || "Edit",
+          secondaryAction: !!o.onSecondaryAction && (!o.canSecondaryAction || o.canSecondaryAction(item)),
+          secondaryActionLabel: o.secondaryActionLabel || "Action",
+          secondaryActionAria: o.secondaryActionAria ? o.secondaryActionAria(item) : (o.secondaryActionLabel || "Action"),
           cells: o.columns.map(function (col) { return buildCellVm(col, vm); })
         };
       });
@@ -390,6 +394,18 @@ window.C360 = window.C360 || {};
           $btn.on("click" + eventNamespace, function (e) {
             e.stopPropagation();
             o.onEdit(rowId);
+          });
+        });
+      }
+
+      if (o.onSecondaryAction) {
+        $tbody.find(".dtv-secondary-btn").each(function () {
+          var $btn = $(this);
+          var rowId = $btn.data("id");
+          $btn.off("click" + eventNamespace);
+          $btn.on("click" + eventNamespace, function (e) {
+            e.stopPropagation();
+            o.onSecondaryAction(rowId, this);
           });
         });
       }

@@ -18,23 +18,68 @@ function workflow(child) {
   };
 }
 
-function campaignHelpers(jquery, api) {
+function campaignHelpers(jquery, api, options = {}) {
   const file = path.join(__dirname, "../static/js/campaign-view.js");
   const source = fs.readFileSync(file, "utf8").replace(
-    "C360.campaignView = { load: loadAll };",
-    "C360.campaignView = { workflowProfile, campaignStatusPresentation, channels: CAMPAIGN_CHANNELS, platforms: CAMPAIGN_PLATFORMS, save: saveCampaignEditor, state: campaignWorkflowState, actions: campaignStateActions, transitions: campaignHistoryTransitions, submitState: submitCampaignState, detailState: campaignDetailState, mountCampaignWorkflowStudio, loadDetails: loadCampaignDetails };",
+    "C360.campaignView = {",
+    "C360.campaignView = { workflowProfile, campaignStatusPresentation, channels: CAMPAIGN_CHANNELS, platforms: CAMPAIGN_PLATFORMS, save: saveCampaignEditor, state: campaignWorkflowState, actions: campaignStateActions, transitions: campaignHistoryTransitions, submitState: submitCampaignState, detailState: campaignDetailState, mountCampaignWorkflowStudio, loadDetails: loadCampaignDetails, submitPromotion: submitCampaignPromotion, promotionState: campaignPromotionState,",
   );
   const context = {
     $: jquery,
+    document: options.document,
     window: { C360: {
       fmt: { realName: (profile) => profile.first_name, shortId: (id) => id },
-      config: { api, current: { tenantId: "tenant" } },
+      config: { api, current: { tenantId: "tenant" }, currentUser: options.currentUser },
       router: { define() {} },
     } },
   };
   vm.runInNewContext(source, context);
   return context.window.C360.campaignView;
 }
+
+test("campaign promotion uses the selected tenant and reports failures without duplicate requests", () => {
+  const nodes = {};
+  function jquery(selector) {
+    if (!nodes[selector]) nodes[selector] = {
+      content: "", disabled: false,
+      addClass() { return this; }, removeClass() { return this; },
+      text(value) { this.content = value; return this; },
+      prop(name, value) { this[name] = value; return this; },
+    };
+    return nodes[selector];
+  }
+  const requests = [];
+  const dialog = { open: true };
+  const helpers = campaignHelpers(jquery, (...args) => {
+    const request = {
+      args,
+      done(callback) { this.onDone = callback; return this; },
+      fail(callback) { this.onFail = callback; return this; },
+      always(callback) { this.onAlways = callback; return this; },
+    };
+    requests.push(request);
+    return request;
+  }, {
+    document: { getElementById: () => dialog },
+    currentUser: () => ({ roles: ["tenant_admin"] }),
+  });
+  helpers.detailState.campaign = { campaign_id: "campaign-1" };
+  helpers.promotionState.selection = { id: "campaign-1", tenantId: "tenant" };
+  const event = { preventDefault() {} };
+  helpers.submitPromotion(event);
+  helpers.submitPromotion(event);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].args[0], "/promotions/campaigns/campaign-1");
+  assert.equal(requests[0].args[2], "PUT");
+  requests[0].onFail({ responseJSON: { detail: "Pause the active promotion." } });
+  requests[0].onAlways();
+  assert.match(nodes["#campaign-promotion-error"].content, /Pause/);
+  assert.equal(helpers.promotionState.busy, false);
+  helpers.submitPromotion(event);
+  requests[1].onDone({ campaign_id: 7, status: "draft" });
+  requests[1].onAlways();
+  assert.match(nodes["#campaign-promotion-success"].content, /#7/);
+});
 
 test("LEO Ads is selectable for campaign and workflow audience sync", () => {
   const sync = Core.catalog().find((item) => item.type === "run_data_synch_job");
@@ -206,6 +251,7 @@ test("campaign save uses the iframe validation API before persisting its workflo
       toggleClass() { return this; },
       text(value) { messages[selector] = value; return this; },
       prop() { return this; },
+      attr() { return this; },
     };
   }
   const deferred = {

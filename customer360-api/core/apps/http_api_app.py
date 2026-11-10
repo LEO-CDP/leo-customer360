@@ -37,6 +37,7 @@ from core.routers.agent_workflow_api import router as agent_workflow_router
 from core.routers.assistant_api import all_assistant_routers
 
 from core.routers.persona_api import all_persona_routers
+from core.routers.promotion_api import all_promotion_routers
 from core.routers.relations_api import all_relations_routers
 from core.routers.reporting_api import router as reporting_router
 from core.routers.audience_tag_api import all_audience_tag_routers
@@ -76,6 +77,7 @@ API_ROUTER_GROUPS = (
     all_relations_routers,
     all_events_routers,
     all_content_routers,
+    all_promotion_routers,
     (graph_router,),
     all_crm_routers,
     all_crm_sync_routers,

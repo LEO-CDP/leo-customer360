@@ -51,7 +51,11 @@ case "$ACTION" in
   *) echo "Usage: ./deploy-promotions.sh <uat|prod> [deploy|destroy]"; exit 1 ;;
 esac
 
+INJECTED_MANAGEMENT_TOKENS="${c360_PROMOTION_MANAGEMENT_TOKENS:-}"
 [[ -f .env ]] && { set -a; source ./.env; set +a; }
+if [[ -n "$INJECTED_MANAGEMENT_TOKENS" ]]; then
+  c360_PROMOTION_MANAGEMENT_TOKENS="$INJECTED_MANAGEMENT_TOKENS"
+fi
 
 NAMESPACE="${PROMOTIONS_NAMESPACE:-customer360}"
 OVERLAY="$MANIFESTS/overlays/$ENV"
@@ -207,6 +211,11 @@ umask 077
 {
   echo "c360_PROMOTION_DB_PASSWORD=$DB_PASS"
   [[ -n "${REDIS_PASS:-}" ]] && echo "c360_PROMOTION_REDIS_PASSWORD=$REDIS_PASS"
+  if [[ -n "${c360_PROMOTION_MANAGEMENT_TOKENS:-}" ]]; then
+    printf 'c360_PROMOTION_MANAGEMENT_TOKENS=%s\n' "$c360_PROMOTION_MANAGEMENT_TOKENS"
+  else
+    echo ">> WARNING: management token mapping is not configured; management APIs will be unavailable." >&2
+  fi
 } > "$GEN/secret.env"
 
 # Pin the image by digest when image_ref resolved one, else by tag.

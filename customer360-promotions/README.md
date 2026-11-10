@@ -60,6 +60,14 @@ cp .env.example .env
 #   c360_PROMOTION_DB_NAME=customer360
 ```
 
+For local development only, `./start.sh` may symlink a missing service-local
+`.env` to the repository-level `.env`. If promotions-specific
+`c360_PROMOTION_DB_*` variables are absent, it reuses that file's `DB_HOST`,
+`DB_PORT`, `DB_USER`, `DB_PASSWORD`, and `DB_NAME`. Explicit promotions
+settings always take precedence. `python app.py` or direct Uvicorn startup uses
+the same settings fallback but does not run the launcher's database
+preflight.
+
 ### Running the Server
 
 **Independent Docker container on a Linux development machine:**
@@ -117,6 +125,109 @@ uvicorn app:app --reload --port 9009
 - **Swagger UI**: http://localhost:9009/docs
 - **ReDoc**: http://localhost:9009/redoc
 - **Root info**: GET http://localhost:9009/
+
+### Campaign and creative management
+
+The `/management/campaigns` and `/management/creatives` endpoints manage
+the canonical `leo_ads.campaign` and `leo_ads.creative` records from
+[`db-schema-init.sql`](sql-scripts/db-schema-init.sql). They are separate from
+the Customer 360 CRM campaign API. Creative render configurations,
+destinations, tracking endpoints, creative items, and ads are not managed by
+these endpoints.
+
+Every management request requires a dedicated `Authorization: Bearer <token>`
+header. Configure `c360_PROMOTION_MANAGEMENT_TOKENS` as a JSON object mapping
+each **promotions tenant key** (for example `demo` from
+[`sample-data-init.sql`](sql-scripts/sample-data-init.sql)) to its own unique
+token. Only active tenants can access the API. A token grants full management
+access to its mapped tenant; the API does not accept a tenant ID in the body
+or use one supplied in a query. Tokens must be unique, ASCII, at least 32
+characters long, and contain no whitespace. Generate a cryptographically
+random token with:
+
+```bash
+python3 -c 'import secrets; print(secrets.token_urlsafe(32))'
+```
+
+Set the JSON mapping in a protected environment or secrets manager, not in
+source control. For a local `.env`, use a single-quoted JSON value:
+
+```dotenv
+c360_PROMOTION_MANAGEMENT_TOKENS='{"demo":"<generated-token-for-demo>"}'
+```
+
+Replace the placeholder with the generated token. Restart the process after
+changing the mapping; remove or replace a tenant's entry to revoke or rotate
+its token. Use HTTPS between the client and the service, and restrict access
+to the management endpoints at the network/proxy layer. The pre-existing
+health and ad-serving endpoints retain their existing access behavior and are
+**not** protected by this management token.
+
+On Kubernetes, supply `c360_PROMOTION_MANAGEMENT_TOKENS` to
+[`deploy-promotions.sh`](../deployments/customer360-promotions/deploy-promotions.sh)
+from a secure environment or the deployment's protected `.env`; the deployer
+places it in the generated Kubernetes Secret. Supply it on every deployment.
+If the mapping is absent, malformed, contains duplicate or weak-format tokens,
+or is empty, the management endpoints return **503** and do not accept requests.
+Invalid or missing bearer tokens return **401**; a mapped tenant that is
+missing or not active returns **403**.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/management/campaigns` | List this tenant's campaigns |
+| POST | `/management/campaigns` | Create a campaign |
+| GET | `/management/campaigns/{campaign_id}` | Get a campaign |
+| PUT | `/management/campaigns/{campaign_id}` | Replace editable campaign fields |
+| DELETE | `/management/campaigns/{campaign_id}` | Delete an unreferenced campaign |
+| GET | `/management/creatives` | List this tenant's creatives |
+| POST | `/management/creatives` | Create a creative |
+| GET | `/management/creatives/{creative_id}` | Get a creative |
+| PUT | `/management/creatives/{creative_id}` | Replace editable creative fields |
+| DELETE | `/management/creatives/{creative_id}` | Delete an unreferenced creative |
+
+List endpoints accept `offset` (default 0) and `limit` (default 50, maximum
+100), and return an array ordered by ID. IDs in paths are the schema's numeric
+primary keys; `campaign_key` and `creative_key` are tenant-scoped external
+identifiers. Creative keys are unique per tenant and `version_no`. `PUT` is a
+full replacement: supply required fields and all optional values to retain.
+Related advertiser, source-account, source-asset, and campaign IDs must belong
+to the token's tenant. A missing or foreign-tenant record returns **404**;
+invalid or foreign-tenant references return **422** without exposing their
+existence. A duplicate key or a delete blocked by an existing ad or creative
+returns **409**. Deleting a creative without ads also deletes its dependent
+renders, destinations, tracking endpoints, and creative items via the
+database's cascades. Date values must include a timezone.
+
+For example, after securely setting `PROMOTION_TOKEN` in the shell:
+
+```bash
+curl -H "Authorization: Bearer $PROMOTION_TOKEN" \
+  'http://localhost:9009/management/campaigns?limit=20'
+
+curl -X POST 'http://localhost:9009/management/campaigns' \
+  -H "Authorization: Bearer $PROMOTION_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"campaign_key":"spring","name":"Spring campaign","status":"draft","metadata":{}}'
+
+curl -X POST 'http://localhost:9009/management/creatives' \
+  -H "Authorization: Bearer $PROMOTION_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"creative_key":"spring-banner","ad_type":"display","format_code":"single_banner","status":"draft","headline":"Spring offers","content_payload":{}}'
+```
+
+See `/docs` for the complete request and response schemas and the bearer-token
+authorization control.
+
+The protected `/management/customer360/{tenant_uuid}/campaigns/{campaign_uuid}`
+and `/management/customer360/{tenant_uuid}/content/{content_uuid}` PUT endpoints
+are used by customer360-api for idempotent conversion. They verify the
+operator-provisioned `leo_ads.customer360_tenant_map` against the authenticated
+promotions tenant. They create draft records with reserved
+`customer360:<source UUID>` keys; synchronized creatives use version 1. Generic
+management writes cannot create or change those identities or delete these
+records. A sync of an active record returns 409. See the
+[Customer 360 API conversion guide](../customer360-api/README.md#promotions-conversion)
+for configuration and lifecycle details.
 
 ---
 
@@ -899,7 +1010,7 @@ PostgreSQL (durability) → Source of truth
 | `c360_PROMOTION_DB_HOST` | `localhost` | PostgreSQL host |
 | `c360_PROMOTION_DB_PORT` | `5432` | PostgreSQL port |
 | `c360_PROMOTION_DB_USER` | `postgres` | PostgreSQL user |
-| `c360_PROMOTION_DB_PASSWORD` | `password` | PostgreSQL password |
+| `c360_PROMOTION_DB_PASSWORD` | `change_me_postgres_password` | PostgreSQL password (replace the development placeholder) |
 | `c360_PROMOTION_DB_NAME` | `customer360` | Database name |
 | `c360_PROMOTION_DB_SCHEMA` | `leo_ads` | Schema name |
 | `c360_PROMOTION_DB_POOL_SIZE` | `10` | Connection pool size |
@@ -979,8 +1090,18 @@ PostgreSQL connection failed
 
 **Solution:**
 - Ensure PostgreSQL is running: `docker ps | grep postgres`
-- Check credentials in `.env`
-- Verify `c360_PROMOTION_DB_HOST` is reachable: `ping localhost`
+- Confirm the correct `DB_*` values are set in the repository `.env` when the
+  promotions `.env` is symlinked to it, or set `c360_PROMOTION_DB_*` in a
+  service-local `.env`. Promotions-specific values take precedence.
+- Run `./start.sh` and inspect its authenticated database preflight. It
+  distinguishes rejected credentials, a missing database, and unreachable
+  PostgreSQL before starting Uvicorn.
+- A TCP port check alone does not confirm PostgreSQL authentication or database
+  access. After startup, verify both `curl http://localhost:9009/health` and
+  `curl http://localhost:9009/health/database`.
+
+The database URL is assembled with SQLAlchemy's URL builder so passwords with
+reserved URL characters (such as `@`, `:`, `/`, or `#`) are handled correctly.
 
 ### Schema not found
 

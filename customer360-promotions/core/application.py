@@ -35,6 +35,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from core.config import db_promotions_engine, promotions_settings
+from core.management_api import router as management_router
 from repository.ad_repository import AdRepository
 from repository.placement_repository import PlacementRepository
 
@@ -170,6 +171,8 @@ class PromotionsApplication:
         )
 
         self._configure_middleware(application)
+        application.state.promotions_engine = self.engine
+        application.include_router(management_router)
         self._register_routes(application)
 
         return application

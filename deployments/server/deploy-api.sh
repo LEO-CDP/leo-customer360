@@ -17,7 +17,11 @@ case "$ENV" in
   *) echo "Usage: ./deploy-api.sh <uat|prod>"; exit 1 ;;
 esac
 
+INJECTED_PROMOTION_TOKENS="${c360_PROMOTION_MANAGEMENT_TOKENS:-}"
 [[ -f .env ]] && { set -a; source ./.env; set +a; }
+if [[ -n "$INJECTED_PROMOTION_TOKENS" ]]; then
+  c360_PROMOTION_MANAGEMENT_TOKENS="$INJECTED_PROMOTION_TOKENS"
+fi
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/c360-api_ed25519}"
 API_SERVER_KEY="${API_SERVER_KEY:-api}"
 . "$(cd "$(dirname "$0")/.." && pwd)/lib/tfvars.sh"   # tfval + srv_ip
@@ -194,9 +198,17 @@ if [[ -z "$DOCS_SEARCH_URL" ]]; then
 fi
 if [[ -n "$DOCS_SEARCH_URL" ]]; then echo ">> Docs assistant -> $DOCS_SEARCH_URL"; else echo "::warning::no docs box fixed_ip in $ENV - the API keeps the default DOCS_SEARCH_URL; /assistant/ask returns 502 until the docs box is applied."; fi
 DOCS_INTERNAL_AUTH_SECRET_B64="$(printf %s "${DOCS_INTERNAL_AUTH_SECRET:-${DOCS_INTERNAL_SECRET:-leoragbot}}" | base64 | tr -d '\r\n')"
+for value in "${c360_PROMOTION_MANAGEMENT_TOKENS:-}" "${C360_PROMOTION_TENANT_KEYS:-}" "${C360_PROMOTION_API_URL:-}"; do
+  if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
+    echo "ERROR: promotions configuration values must be single-line." >&2
+    exit 1
+  fi
+done
 # ssh flattens argv and silently drops empty args (shifting later fields); pass one
 # base64 newline-joined blob so empties survive, split remotely with mapfile.
-ARGV_B64="$(printf '%s\n' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "${DAG_HOST:-127.0.0.1}" "${REDIS_HOST:-}" "${REDIS_PORT:-}" "$REDIS_PW_B64" "$SSO_LOGIN" "$SSO_URL" "$KC_REALM" "$KC_CLIENT" "$KC_SECRET_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\r\n')" "$OTEL_B64" "$EVENT_QUERY_MAX_DAYS" "$EVENT_S3_BUCKET" "$EVENT_RAW_PREFIX" "$EVENT_S3_ENDPOINT_URL" "$EVENT_S3_REGION" "$EVENT_S3_ACCESS_KEY_ID" "$EVENT_S3_SECRET_B64" "$EVENT_S3_FORCE_PATH_STYLE" "$SMTP_B64" "$S3_AUTO_CREATE" "$MASTER_PROFILE_S3_BUCKET" "$SOURCE_GIT_COMMIT_HASH" "$AGENT_SERVICE_URL" "$AGENT_API_TOKEN_B64" "$EXPECTED_GIT_HASH" "$KC_TOKEN_EXPIRES_MINUTES" "$PRODUCT_IMPORT_S3_BUCKET" "$CONTENT_IMPORT_S3_BUCKET" "$DOCS_SEARCH_URL" "$DOCS_INTERNAL_AUTH_SECRET_B64" "$DAGSTER_PORT" | base64 | tr -d '\r\n')"
+PROMOTION_TOKENS_B64="$(printf %s "${c360_PROMOTION_MANAGEMENT_TOKENS:-}" | base64 | tr -d '\r\n')"
+PROMOTION_KEYS_B64="$(printf %s "${C360_PROMOTION_TENANT_KEYS:-}" | base64 | tr -d '\r\n')"
+ARGV_B64="$(printf '%s\n' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "${DAG_HOST:-127.0.0.1}" "${REDIS_HOST:-}" "${REDIS_PORT:-}" "$REDIS_PW_B64" "$SSO_LOGIN" "$SSO_URL" "$KC_REALM" "$KC_CLIENT" "$KC_SECRET_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\r\n')" "$OTEL_B64" "$EVENT_QUERY_MAX_DAYS" "$EVENT_S3_BUCKET" "$EVENT_RAW_PREFIX" "$EVENT_S3_ENDPOINT_URL" "$EVENT_S3_REGION" "$EVENT_S3_ACCESS_KEY_ID" "$EVENT_S3_SECRET_B64" "$EVENT_S3_FORCE_PATH_STYLE" "$SMTP_B64" "$S3_AUTO_CREATE" "$MASTER_PROFILE_S3_BUCKET" "$SOURCE_GIT_COMMIT_HASH" "$AGENT_SERVICE_URL" "$AGENT_API_TOKEN_B64" "$EXPECTED_GIT_HASH" "$KC_TOKEN_EXPIRES_MINUTES" "$PRODUCT_IMPORT_S3_BUCKET" "$CONTENT_IMPORT_S3_BUCKET" "$DOCS_SEARCH_URL" "$DOCS_INTERNAL_AUTH_SECRET_B64" "$DAGSTER_PORT" "${C360_PROMOTION_API_URL:-}" "$PROMOTION_TOKENS_B64" "$PROMOTION_KEYS_B64" "${C360_PROMOTION_ALLOW_INSECURE_HTTP:-false}" | base64 | tr -d '\r\n')"
 ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$ARGV_B64" < <(declare -f docker_pull_retry; declare -f ensure_s3_bucket; cat <<'REMOTE'
 set -euo pipefail
 mapfile -t A < <(printf %s "${1:-}" | base64 -d)   # fields in order, empties preserved
@@ -228,6 +240,10 @@ CONTENT_IMPORT_S3_BUCKET="${A[36]:-c360-content-imports}"
 DOCS_SEARCH_URL="${A[37]:-}"
 DOCS_INTERNAL_AUTH_SECRET="$(printf %s "${A[38]:-}" | base64 -d 2>/dev/null || true)"
 DAGSTER_PORT="${A[39]:-3000}"
+PROMOTION_API_URL="${A[40]:-}"
+PROMOTION_TOKENS_B64="${A[41]:-}"
+PROMOTION_KEYS_B64="${A[42]:-}"
+PROMOTION_ALLOW_INSECURE_HTTP="${A[43]:-false}"
 [[ "$KC_TOKEN_EXPIRES_MINUTES" =~ ^[0-9]+$ ]] && (( KC_TOKEN_EXPIRES_MINUTES >= 1 && KC_TOKEN_EXPIRES_MINUTES <= 1440 )) || {
   echo "ERROR: received KEYCLOAK_TOKEN_EXPIRES_MINUTES is invalid." >&2
   exit 1
@@ -288,6 +304,18 @@ ENVF
 # Docs service for the LEO Assistant / support endpoints; empty URL => keep the DAO default.
 [[ -n "$DOCS_SEARCH_URL" ]] && echo "DOCS_SEARCH_URL=$DOCS_SEARCH_URL" >> "$env_file"
 [[ -n "$DOCS_INTERNAL_AUTH_SECRET" ]] && echo "DOCS_INTERNAL_AUTH_SECRET=$DOCS_INTERNAL_AUTH_SECRET" >> "$env_file"
+[[ -n "$PROMOTION_API_URL" ]] && printf 'C360_PROMOTION_API_URL=%s\n' "$PROMOTION_API_URL" >> "$env_file"
+if [[ -n "$PROMOTION_TOKENS_B64" ]]; then
+  printf 'c360_PROMOTION_MANAGEMENT_TOKENS=' >> "$env_file"
+  printf '%s' "$PROMOTION_TOKENS_B64" | base64 -d >> "$env_file"
+  printf '\n' >> "$env_file"
+fi
+if [[ -n "$PROMOTION_KEYS_B64" ]]; then
+  printf 'C360_PROMOTION_TENANT_KEYS=' >> "$env_file"
+  printf '%s' "$PROMOTION_KEYS_B64" | base64 -d >> "$env_file"
+  printf '\n' >> "$env_file"
+fi
+printf 'C360_PROMOTION_ALLOW_INSECURE_HTTP=%s\n' "$PROMOTION_ALLOW_INSECURE_HTTP" >> "$env_file"
 if [[ -n "$REDIS_HOST" && -n "$REDIS_PW" ]]; then
   cat >> "$env_file" <<ENVR
 REDIS_HOST=$REDIS_HOST

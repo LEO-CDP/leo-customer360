@@ -11,6 +11,12 @@ window.C360 = window.C360 || {};
   var selectedFile = null;
   var importKind = "product";
   var editingItem = null;
+  var promotionSelection = null;
+  var promotionBusy = false;
+  var promotionReturnFocus = null;
+  var promotionOptions = null;
+  var promotionOptionsLoading = false;
+  var promotionOptionsRequest = 0;
   var contentById = {};
   var productsById = {};
   var MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -98,6 +104,10 @@ window.C360 = window.C360 || {};
     rowClickable: false,
     onEdit: function (id) { openItemForm("content", contentById[String(id)]); },
     editLabel: "Edit",
+    onSecondaryAction: function (id, button) { openPromotionDialog("content", contentById[String(id)], button); },
+    canSecondaryAction: function () { return C360.config.isAdmin(); },
+    secondaryActionLabel: "Creative",
+    secondaryActionAria: function (item) { return "Create or refresh creative for " + (item.title || "content item"); },
     resourceLabel: "content item",
     fetch: function (params) {
       return api("/content-items/", $.extend({
@@ -146,6 +156,10 @@ window.C360 = window.C360 || {};
     rowClickable: false,
     onEdit: function (id) { openItemForm("product", productsById[String(id)]); },
     editLabel: "Edit",
+    onSecondaryAction: function (id, button) { openPromotionDialog("product", productsById[String(id)], button); },
+    canSecondaryAction: function () { return C360.config.isAdmin(); },
+    secondaryActionLabel: "Creative",
+    secondaryActionAria: function (item) { return "Create or refresh creative for " + (item.title || "product"); },
     resourceLabel: "product",
     fetch: function (params) {
       return api("/content-items/products", $.extend({
@@ -177,6 +191,184 @@ window.C360 = window.C360 || {};
 
   function clearPageError() {
     $("#content-products-page-error").addClass("hidden").text("");
+  }
+
+  function closePromotionDialog() {
+    if (promotionBusy) return;
+    var dialog = document.getElementById("item-promotion-modal");
+    if (dialog && dialog.open) dialog.close();
+    promotionSelection = null;
+    promotionOptions = null;
+    promotionOptionsLoading = false;
+    promotionOptionsRequest += 1;
+    if (promotionReturnFocus && document.contains(promotionReturnFocus)) promotionReturnFocus.focus();
+    promotionReturnFocus = null;
+  }
+
+  function updatePromotionControls() {
+    var ready = !!promotionSelection && promotionSelection.hasContent && !!promotionOptions &&
+      !promotionOptionsLoading && !promotionBusy;
+    $("#item-promotion-ad-type, #item-promotion-format").prop("disabled", !ready);
+    var adType = $("#item-promotion-ad-type").val();
+    var format = $("#item-promotion-format").val();
+    var valid = ready && promotionOptions.ad_types.some(function (option) { return option.value === adType; }) &&
+      promotionOptions.format_codes.some(function (option) { return option.value === format; });
+    $("#item-promotion-submit").prop("disabled", !valid);
+  }
+
+  function validPromotionOptions(options) {
+    return Array.isArray(options) && options.length > 0 && options.every(function (option, index) {
+      return option && typeof option.value === "string" && option.value.trim() === option.value &&
+        option.value.length > 0 && option.value.length <= 80 && typeof option.label === "string" &&
+        option.label.trim().length > 0 && options.findIndex(function (other) {
+          return other && other.value === option.value;
+        }) === index;
+    });
+  }
+
+  function populatePromotionOptions(selector, placeholder, options) {
+    var $select = $(selector).empty();
+    $select.append($("<option></option>").val("").text(placeholder));
+    options.forEach(function (option) {
+      $select.append($("<option></option>").val(option.value).text(option.label + " (" + option.value + ")"));
+    });
+    $select.val("");
+  }
+
+  function loadPromotionOptions() {
+    if (!promotionSelection || !promotionSelection.hasContent || promotionOptionsLoading || promotionBusy) return;
+    var selection = promotionSelection;
+    if (!C360.config.isAdmin() || String(C360.config.current.tenantId) !== selection.tenantId) {
+      $("#item-promotion-error").text("Your tenant or permissions changed. Close this dialog and select the item again.").removeClass("hidden");
+      $("#item-promotion-options-retry").addClass("hidden");
+      return;
+    }
+    var requestId = ++promotionOptionsRequest;
+    promotionOptions = null;
+    promotionOptionsLoading = true;
+    $("#item-promotion-error, #item-promotion-options-retry").addClass("hidden");
+    $("#item-promotion-options-status").text("Loading creative choices…").removeClass("hidden");
+    updatePromotionControls();
+    api("/promotions/creative-options")
+      .done(function (result) {
+        if (requestId !== promotionOptionsRequest || promotionSelection !== selection) return;
+        if (String(C360.config.current.tenantId) !== selection.tenantId) {
+          $("#item-promotion-error").text("Your tenant changed. Close this dialog and select the item again.").removeClass("hidden");
+          return;
+        }
+        if (!result || !validPromotionOptions(result.ad_types) || !validPromotionOptions(result.format_codes)) {
+          $("#item-promotion-error").text("The API returned invalid creative choices. Try loading them again.").removeClass("hidden");
+          $("#item-promotion-options-retry").removeClass("hidden");
+          return;
+        }
+        promotionOptions = result;
+        populatePromotionOptions("#item-promotion-ad-type", "Select an ad type", result.ad_types);
+        populatePromotionOptions("#item-promotion-format", "Select a format", result.format_codes);
+      })
+      .fail(function (xhr) {
+        if (requestId !== promotionOptionsRequest || promotionSelection !== selection) return;
+        var detail = xhr && xhr.responseJSON && xhr.responseJSON.detail;
+        var message = C360.config.formatApiErrorDetail(detail);
+        $("#item-promotion-error").text(message || "Could not load creative choices. Please try again.").removeClass("hidden");
+        $("#item-promotion-options-retry").removeClass("hidden");
+      })
+      .always(function () {
+        if (requestId !== promotionOptionsRequest || promotionSelection !== selection) return;
+        promotionOptionsLoading = false;
+        $("#item-promotion-options-status").addClass("hidden").text("");
+        updatePromotionControls();
+      });
+  }
+
+  function openPromotionDialog(kind, item, button) {
+    if (!C360.config.isAdmin()) return;
+    var itemId = item && (kind === "product" ? item.product_item_id : item.content_item_id);
+    if (!item || itemId === null || itemId === undefined || String(itemId) === "") {
+      $("#content-products-page-error").text("The item is no longer available. Refresh the catalog and try again.").removeClass("hidden");
+      return;
+    }
+    var dialog = document.getElementById("item-promotion-modal");
+    if (!dialog || dialog.open || promotionBusy) return;
+    promotionSelection = {
+      kind: kind,
+      id: String(itemId),
+      tenantId: String(C360.config.current.tenantId),
+      hasContent: kind !== "product" || !!item.content_item_id
+    };
+    promotionReturnFocus = button || document.activeElement;
+    $("#item-promotion-form")[0].reset();
+    $("#item-promotion-kind").text(kind === "product" ? "Product" : "Content item");
+    $("#item-promotion-name").text(item.title || "Untitled item");
+    $("#item-promotion-description").text(kind === "product"
+      ? "The product shares a creative with its last saved linked content. Product pricing and source attributes are not copied."
+      : "The last saved item is used. Existing linked creatives are refreshed; new ones start as drafts.");
+    $("#item-promotion-error, #item-promotion-success").addClass("hidden").text("");
+    $("#item-promotion-options-status, #item-promotion-options-retry").addClass("hidden");
+    $("#item-promotion-cancel").text("Cancel");
+    promotionOptions = null;
+    promotionOptionsLoading = false;
+    updatePromotionControls();
+    if (!promotionSelection.hasContent) {
+      $("#item-promotion-error").text("This product has no linked content item and cannot be converted.").removeClass("hidden");
+    }
+    dialog.showModal();
+    if (promotionSelection.hasContent) loadPromotionOptions();
+  }
+
+  function submitPromotion(event) {
+    event.preventDefault();
+    if (!promotionSelection || promotionBusy) return;
+    var selection = promotionSelection;
+    var $error = $("#item-promotion-error");
+    $error.addClass("hidden").text("");
+    $("#item-promotion-success").addClass("hidden").text("");
+    if (!C360.config.isAdmin() || String(C360.config.current.tenantId) !== selection.tenantId) {
+      $error.text("Your tenant or permissions changed. Close this dialog and select the item again.").removeClass("hidden");
+      return;
+    }
+    if (!selection.hasContent) {
+      $error.text("This product has no linked content item and cannot be converted.").removeClass("hidden");
+      return;
+    }
+    var adType = $("#item-promotion-ad-type").val();
+    var format = $("#item-promotion-format").val();
+    if (!promotionOptions || promotionOptionsLoading ||
+        !promotionOptions.ad_types.some(function (option) { return option.value === adType; }) ||
+        !promotionOptions.format_codes.some(function (option) { return option.value === format; })) {
+      $error.text("Select an ad type and format code from the available choices.").removeClass("hidden");
+      return;
+    }
+    promotionBusy = true;
+    $("#item-promotion-submit, #item-promotion-close, #item-promotion-cancel, #item-promotion-ad-type, #item-promotion-format").prop("disabled", true);
+    $("#item-promotion-submit span").text("Synchronizing…");
+    api("/promotions/" + (selection.kind === "product" ? "products/" : "content/") + encodeURIComponent(selection.id),
+      { ad_type: adType, format_code: format }, "PUT")
+      .done(function (result) {
+        if (String(C360.config.current.tenantId) !== selection.tenantId) {
+          $error.text("The tenant changed while the request was running. Check the original tenant for the result.").removeClass("hidden");
+          return;
+        }
+        if (!result || !Number.isSafeInteger(result.creative_id) || result.creative_id <= 0) {
+          $error.text("The API did not confirm the creative. Refresh and retry.").removeClass("hidden");
+          return;
+        }
+        $("#item-promotion-success").text(
+          "Creative #" + result.creative_id + " created or refreshed" +
+          (result.status ? " (status: " + result.status + ")" : "") + ". This did not publish an ad."
+        ).removeClass("hidden");
+        $("#item-promotion-cancel").text("Close");
+      })
+      .fail(function (xhr) {
+        var detail = xhr && xhr.responseJSON && xhr.responseJSON.detail;
+        var message = C360.config.formatApiErrorDetail(detail);
+        $error.text(message || "Could not synchronize the creative. Please try again.").removeClass("hidden");
+      })
+      .always(function () {
+        promotionBusy = false;
+        $("#item-promotion-close, #item-promotion-cancel").prop("disabled", false);
+        $("#item-promotion-submit span").text("Create or refresh");
+        updatePromotionControls();
+      });
   }
 
   function setTab(tab, shouldLoad) {
@@ -612,6 +804,14 @@ window.C360 = window.C360 || {};
         setTab($(this).attr("data-item-kind"), true);
       })
       .on("click.contentProducts", "#btn-item-add", function () { openItemForm(); })
+      .on("submit.contentProducts", "#item-promotion-form", submitPromotion)
+      .on("click.contentProducts", "#item-promotion-close, #item-promotion-cancel", closePromotionDialog)
+      .on("click.contentProducts", "#item-promotion-options-retry", loadPromotionOptions)
+      .on("change.contentProducts", "#item-promotion-ad-type, #item-promotion-format", updatePromotionControls)
+      .on("cancel.contentProducts", "#item-promotion-modal", function (event) {
+        event.preventDefault();
+        closePromotionDialog();
+      })
       .on("click.contentProducts", "#btn-content-refresh", function () { contentTable.reload(); })
       .on("click.contentProducts", "#btn-products-refresh", function () { productTable.reload(); })
       .on("click.contentProducts", "#item-form-close, #item-form-cancel", function () {
@@ -654,6 +854,8 @@ window.C360 = window.C360 || {};
 
     $(document).off("keydown.contentProducts").on("keydown.contentProducts", function (event) {
       if (event.key === "Escape") {
+        var promotionDialog = document.getElementById("item-promotion-modal");
+        if (promotionDialog && promotionDialog.open) return;
         closeModal("#item-form-modal");
         closeModal("#product-import-modal");
       }

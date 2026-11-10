@@ -3,9 +3,10 @@
 from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import AliasChoices, Field, SecretStr
 
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import create_engine
+from sqlalchemy.engine import URL
 
 
 class PromotionsSettings(BaseSettings):
@@ -20,11 +21,26 @@ class PromotionsSettings(BaseSettings):
     environment: str = "development"
     api_version: str = "1.0.0"
 
-    db_host: str = "localhost"
-    db_port: int = 5432
-    db_user: str = "postgres"
-    db_password: str = "password"
-    db_name: str = "customer360"
+    db_host: str = Field(
+        default="localhost",
+        validation_alias=AliasChoices("c360_PROMOTION_DB_HOST", "DB_HOST"),
+    )
+    db_port: int = Field(
+        default=5432,
+        validation_alias=AliasChoices("c360_PROMOTION_DB_PORT", "DB_PORT"),
+    )
+    db_user: str = Field(
+        default="postgres",
+        validation_alias=AliasChoices("c360_PROMOTION_DB_USER", "DB_USER"),
+    )
+    db_password: str = Field(
+        default="change_me_postgres_password",
+        validation_alias=AliasChoices("c360_PROMOTION_DB_PASSWORD", "DB_PASSWORD"),
+    )
+    db_name: str = Field(
+        default="customer360",
+        validation_alias=AliasChoices("c360_PROMOTION_DB_NAME", "DB_NAME"),
+    )
     db_schema: str = "leo_ads"
 
     db_pool_size: int = 10
@@ -36,6 +52,9 @@ class PromotionsSettings(BaseSettings):
     api_default_page_size: int = 100
     api_max_page_size: int = 1000
 
+    # JSON object mapping promotions tenant keys to dedicated bearer tokens.
+    management_tokens: SecretStr = SecretStr("{}")
+
     # Redis response cache (see core/cache.py). Disconnected/misconfigured
     # Redis never breaks the API -- it just disables caching (fail open).
     redis_host: str = "localhost"
@@ -46,10 +65,15 @@ class PromotionsSettings(BaseSettings):
     cache_ttl_seconds: int = 60
 
     @property
-    def database_url(self) -> str:
-        return (
-            f"postgresql+psycopg2://{self.db_user}:{self.db_password}"
-            f"@{self.db_host}:{self.db_port}/{self.db_name}"
+    def database_url(self) -> URL:
+        """Return a safely escaped SQLAlchemy URL."""
+        return URL.create(
+            drivername="postgresql+psycopg2",
+            username=self.db_user,
+            password=self.db_password,
+            host=self.db_host,
+            port=self.db_port,
+            database=self.db_name,
         )
 
 

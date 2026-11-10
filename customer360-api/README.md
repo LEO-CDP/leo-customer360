@@ -478,3 +478,54 @@ Implementation references:
 - `customer360-api/core/routers/*.py`
 - `customer360-api/core/mcptools/*.py`
 - `customer360-dao/src/leo_customer360_dao/config.py`
+# Promotions conversion
+
+The authenticated tenant-admin API can explicitly synchronize a core campaign
+or content item to the separately deployed promotions service:
+
+| Method | Path | Body |
+|---|---|---|
+| GET | `/api/v1/promotions/creative-options` | none |
+| PUT | `/api/v1/promotions/campaigns/{campaign_id}` | none |
+| PUT | `/api/v1/promotions/content/{content_id}` | `{"ad_type":"display","format_code":"single_banner"}` |
+| PUT | `/api/v1/promotions/products/{product_id}` | same creative body |
+
+These are retryable, explicit operations; normal core updates do not trigger
+conversion. The promotions service uses an immutable `customer360:<source UUID>`
+key and version 1 for creatives to maintain one record per source. A product and
+its linked content share that content item's creative; products without a linked
+content item return 409. Responses include the target record and ID.
+
+New target records start in **draft**. Synchronization does not approve,
+activate, associate an ad/placement, or create rendering and destination records.
+Active targets return 409 until paused, avoiding silent changes to live ads.
+Core dates are preserved in campaign metadata rather than converted to a
+timezone-dependent promotion schedule; the core CTA URL is included in creative
+payload but is not installed as a serving destination. Core deletions and edits
+are not propagated automatically. Reserved linked records cannot be deleted
+through the generic promotions management API.
+
+The creative-options endpoint returns labeled ad types and format codes from
+the sample promotions catalog for use in the UI. These choices do not validate
+placement or renderer compatibility, and provider-specific values remain
+supported by the conversion API.
+
+Configure these values in a protected environment on `customer360-api`:
+
+* `C360_PROMOTION_API_URL`: HTTPS base URL for customer360-promotions.
+* `c360_PROMOTION_MANAGEMENT_TOKENS`: the same JSON mapping of promotions tenant
+  keys to bearer tokens configured on the promotions service.
+* `C360_PROMOTION_TENANT_KEYS`: JSON mapping core tenant UUIDs to promotions
+  tenant keys, for example `{"<core-tenant-uuid>":"demo"}`.
+
+An operator must also provision the corresponding
+`leo_ads.customer360_tenant_map` row on the promotions database, as described
+in the [audience synchronization guide](../customer360-backend/README.md#leo-ads-audience-synchronization).
+The promotions service verifies that the tenant authenticated by the token is
+the mapped destination; a caller cannot choose it. Missing or invalid
+configuration fails closed. HTTPS is required except for loopback; explicitly
+set `C360_PROMOTION_ALLOW_INSECURE_HTTP=true` only on a trusted private network.
+The [API deployment script](../deployments/server/deploy-api.sh) accepts these
+environment values and transports tokens into the API's protected env file.
+Supply them on every deployment. See the [promotions API documentation](../customer360-promotions/README.md)
+for bearer token provisioning and the existing schema upgrade requirements.

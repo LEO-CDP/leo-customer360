@@ -109,6 +109,7 @@ window.C360 = window.C360 || {};
   var campaignWorkflowGeneration = 0;
   var campaignSegmentRequest = 0;
   var campaignDetailState = { campaign: null, workflow: null, history: [], actions: [], busy: false };
+  var campaignPromotionState = { selection: null, busy: false, returnFocus: null };
   var campaignStateReturnFocus = null;
   var campaignDetailGeneration = 0;
   var campaignReportRequest = 0;
@@ -437,6 +438,83 @@ window.C360 = window.C360 || {};
     var roles = user.roles || [];
     var reviewerRoles = ["platform_admin", "super_admin", "system_admin", "tenant_admin", "admin", "root"];
     return roles.some(function (role) { return reviewerRoles.indexOf(String(role).toLowerCase()) !== -1; });
+  }
+
+  function openCampaignPromotion() {
+    var campaign = campaignDetailState.campaign;
+    var dialog = document.getElementById("campaign-promotion-modal");
+    if (!campaign || !campaign.campaign_id || !canReviewCampaign() || !dialog || dialog.open || campaignPromotionState.busy) return;
+    campaignPromotionState.selection = {
+      id: String(campaign.campaign_id),
+      tenantId: String(C360.config.current.tenantId)
+    };
+    campaignPromotionState.returnFocus = document.activeElement;
+    $("#campaign-promotion-name").text(campaign.name || "Campaign");
+    $("#campaign-promotion-error, #campaign-promotion-success").addClass("hidden").text("");
+    $("#campaign-promotion-cancel").text("Cancel");
+    dialog.showModal();
+    $("#campaign-promotion-submit").trigger("focus");
+  }
+
+  function closeCampaignPromotion() {
+    if (campaignPromotionState.busy) return;
+    var dialog = document.getElementById("campaign-promotion-modal");
+    if (dialog && dialog.open) dialog.close();
+    campaignPromotionState.selection = null;
+    if (campaignPromotionState.returnFocus && document.contains(campaignPromotionState.returnFocus)) {
+      campaignPromotionState.returnFocus.focus();
+    }
+    campaignPromotionState.returnFocus = null;
+  }
+
+  function submitCampaignPromotion(event) {
+    event.preventDefault();
+    var selection = campaignPromotionState.selection;
+    if (!selection || campaignPromotionState.busy) return;
+    var dialog = document.getElementById("campaign-promotion-modal");
+    var $error = $("#campaign-promotion-error");
+    $error.addClass("hidden").text("");
+    $("#campaign-promotion-success").addClass("hidden").text("");
+    if (!canReviewCampaign() || String(C360.config.current.tenantId) !== selection.tenantId ||
+        !campaignDetailState.campaign || String(campaignDetailState.campaign.campaign_id) !== selection.id) {
+      $error.text("Your tenant, permissions, or campaign changed. Close this dialog and try again.").removeClass("hidden");
+      return;
+    }
+    campaignPromotionState.busy = true;
+    $("#campaign-promotion-submit, #campaign-promotion-close, #campaign-promotion-cancel").prop("disabled", true);
+    $("#campaign-promotion-submit span").text("Synchronizing…");
+    api("/promotions/campaigns/" + encodeURIComponent(selection.id), {}, "PUT")
+      .done(function (result) {
+        if (document.getElementById("campaign-promotion-modal") !== dialog || !dialog.open) return;
+        if (String(C360.config.current.tenantId) !== selection.tenantId) {
+          $error.text("The tenant changed while the request was running. Check the original tenant for the result.").removeClass("hidden");
+          return;
+        }
+        if (!campaignDetailState.campaign || String(campaignDetailState.campaign.campaign_id) !== selection.id) {
+          $error.text("The campaign changed while the request was running. Check the original campaign for the result.").removeClass("hidden");
+          return;
+        }
+        if (!result || !Number.isSafeInteger(result.campaign_id) || result.campaign_id <= 0) {
+          $error.text("The API did not confirm the promotion campaign. Refresh and retry.").removeClass("hidden");
+          return;
+        }
+        $("#campaign-promotion-success").text(
+          "Promotion campaign #" + result.campaign_id + " created or refreshed" +
+          (result.status ? " (status: " + result.status + ")" : "") + ". This did not publish an ad."
+        ).removeClass("hidden");
+        $("#campaign-promotion-cancel").text("Close");
+      })
+      .fail(function (xhr) {
+        if (document.getElementById("campaign-promotion-modal") === dialog && dialog.open) {
+          $error.text(campaignError(xhr)).removeClass("hidden");
+        }
+      })
+      .always(function () {
+        campaignPromotionState.busy = false;
+        if (document.getElementById("campaign-promotion-modal") !== dialog) return;
+        $("#campaign-promotion-submit, #campaign-promotion-close, #campaign-promotion-cancel").prop("disabled", false);
+        $("#campaign-promotion-submit span").text("Create or refresh");
+      });
   }
 
   function campaignApprovalStatus(campaign) {
@@ -1362,6 +1440,7 @@ window.C360 = window.C360 || {};
     var generation = ++campaignDetailGeneration;
     var selectedPanel = $(".campaign-details-tab[aria-selected='true']").data("panel") || "overview";
     campaignDetailState.campaign = null;
+    $("#campaign-promotion-button-wrap").addClass("hidden");
     setCampaignMessage("#campaign-details-error", "");
     setCampaignMessage("#campaign-details-success", "");
     $("#campaign-details-loading").removeClass("hidden");
@@ -1438,6 +1517,7 @@ window.C360 = window.C360 || {};
         var workflowStatus = workflowApprovalStatus(savedWorkflow);
         var workflowApproved = isWorkflowApproved(savedWorkflow);
         var isAdmin = canReviewCampaign();
+        $("#campaign-promotion-button-wrap").toggleClass("hidden", !isAdmin);
         campaignDetailState.campaign = campaign;
         campaignDetailState.workflow = savedWorkflow;
         campaignDetailState.actions = campaignStateActions(campaign, savedWorkflow, isAdmin);
@@ -1502,6 +1582,13 @@ window.C360 = window.C360 || {};
     campaignDetailState.campaign = null;
     var $doc = $(document);
     $doc.off(".c360campaignworkspace");
+    $doc.on("click.c360campaignworkspace", "#btn-campaign-promote", openCampaignPromotion);
+    $doc.on("click.c360campaignworkspace", "#campaign-promotion-close, #campaign-promotion-cancel", closeCampaignPromotion);
+    $doc.on("submit.c360campaignworkspace", "#campaign-promotion-form", submitCampaignPromotion);
+    $doc.on("cancel.c360campaignworkspace", "#campaign-promotion-modal", function (event) {
+      event.preventDefault();
+      closeCampaignPromotion();
+    });
     $doc.on("click.c360campaignworkspace", "#btn-campaign-manage-state", function () { openCampaignStateModal(); });
     $doc.on("click.c360campaignworkspace", "#btn-campaign-details-refresh", function () {
       if (campaignDetailState.campaign && !campaignDetailState.busy) loadCampaignDetails(campaignDetailState.campaign.campaign_id);
