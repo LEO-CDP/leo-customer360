@@ -154,7 +154,7 @@ jobs:
           TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
           LEO_ADS_DATABASE_URL: ${{ secrets.LEO_ADS_DATABASE_URL }}
           LEO_ADS_CHECK_READINESS: ${{ vars.LEO_ADS_CHECK_READINESS }}
-          c360_PROMOTION_MANAGEMENT_TOKENS: ${{ secrets.C360_PROMOTION_MANAGEMENT_TOKENS }}   # `promotions` + `api` steps: JSON {promotions tenant key: bearer token}; MUST be identical on both sides (secret names are case-insensitive, the env var below is lowercase c360_ on purpose: the app reads it that way)
+          c360_PROMOTION_MANAGEMENT_TOKENS: ${{ secrets.C360_PROMOTION_MANAGEMENT_TOKENS }}   # `promotions` + `api` steps: JSON {promotions tenant key: bearer token}; MUST be identical on both sides (lowercase c360_ on purpose: the app reads it that way)
           C360_PROMOTION_TENANT_KEYS: ${{ vars.C360_PROMOTION_TENANT_KEYS }}   # `api` step: JSON {core tenant UUID: promotions tenant key}
           C360_PROMOTION_API_URL: ${{ vars.C360_PROMOTION_API_URL }}   # `api` step: public promotions base URL (uat: https://beta.leocdp.com/ads)
           C360_PROMOTION_ALLOW_INSECURE_HTTP: ${{ vars.C360_PROMOTION_ALLOW_INSECURE_HTTP }}   # `api` step: only 'true' for a private http:// URL; unset => false
