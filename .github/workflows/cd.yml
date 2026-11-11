@@ -51,6 +51,11 @@ name: CD
 #                           leo_ads is in a separate PostgreSQL database
 #   (var) LEO_ADS_CHECK_READINESS=true -> require the independent promotions
 #                                         database readiness check after backend rollout
+#   C360_PROMOTION_MANAGEMENT_TOKENS -> promotions management API bearer tokens (JSON {promotions tenant key: token}); the
+#                       `promotions` and `api` steps must get the SAME value. Unset => promotions management API fails closed.
+#   (var) C360_PROMOTION_API_URL -> api step: promotions base URL (uat: https://beta.leocdp.com/ads)
+#   (var) C360_PROMOTION_TENANT_KEYS -> api step: JSON {core tenant UUID: promotions tenant key}
+#   (var) C360_PROMOTION_ALLOW_INSECURE_HTTP -> optional; 'true' only for a private http:// API URL
 #   REDIS_PASSWORD   -> TF_VAR_redis_password (used by the API cache and the event-api Redis Stream queue; docs-search uses a dedicated no-auth local Redis)
 #   DOCS_OPENAI_API_KEY -> docs-vector-search OpenAI embeddings and LLM
 #   BREVO_SMTP_PASSWORD -> Brevo SMTP password for uat (email_engine real send + /metadata/smtp); absent => uat email stays mock. prod has no smtp.prod.env so stays mock regardless.
