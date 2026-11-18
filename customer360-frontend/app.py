@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse
 
 from app_utils.config import FrontendSettings, load_environment
 from app_utils.docs_proxy import DocsProxy, register_docs_routes
+from app_utils.error_collector import ErrorCollector, register_error_routes
 from app_utils.lifecycle import SecurityHeadersMiddleware, create_lifespan
 from app_utils.page import AdminPageRenderer
 from app_utils.static_assets import mount_static_assets
@@ -21,6 +22,7 @@ logging.basicConfig(
 BASE_DIR = Path(__file__).resolve().parent
 load_environment(BASE_DIR)
 settings = FrontendSettings.from_environment(BASE_DIR)
+error_collector = ErrorCollector()
 
 app = FastAPI(
     title="Customer 360 Admin Frontend",
@@ -29,7 +31,7 @@ app = FastAPI(
         "and injects runtime configuration constants directly into the template context."
     ),
     version="1.0.0",
-    lifespan=create_lifespan(settings),
+    lifespan=create_lifespan(settings, error_collector),
 )
 app.add_middleware(SecurityHeadersMiddleware)
 
@@ -53,6 +55,8 @@ async def health():
 
 
 register_docs_routes(app, docs_proxy, settings.root_path)
+if settings.error_collector_enabled:
+    register_error_routes(app, error_collector, settings.root_path, settings.is_dev)
 mount_static_assets(app, settings)
 
 
