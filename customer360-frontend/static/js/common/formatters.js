@@ -177,6 +177,19 @@ window.C360 = window.C360 || {};
     return map[stage] || "bg-slate-100 text-slate-600";
   }
 
+  // CLV freshness from scores_updated_at: stale after 72 hours (the scoring
+  // alert threshold); a missing timestamp is "unknown", not fresh.
+  var CLV_STALE_AFTER_HOURS = 72;
+  function clvFreshness(scoresUpdatedAt) {
+    var updated = scoresUpdatedAt ? Date.parse(scoresUpdatedAt) : NaN;
+    if (!Number.isFinite(updated)) return { ageLabel: "age unknown", stale: false, unknown: true };
+    var hours = Math.max(0, (Date.now() - updated) / 3600000);
+    var ageLabel = hours < 1 ? "updated <1h ago"
+      : hours < 48 ? "updated " + Math.floor(hours) + "h ago"
+      : "updated " + Math.floor(hours / 24) + "d ago";
+    return { ageLabel: ageLabel, stale: hours > CLV_STALE_AFTER_HOURS, unknown: false };
+  }
+
   function churnBadgeClass(tier) {
     var map = { low: "bg-green-100 text-green-700", medium: "bg-yellow-100 text-yellow-700", high: "bg-orange-100 text-orange-700", critical: "bg-red-100 text-red-700" };
     return map[tier] || "bg-slate-100 text-slate-600";
@@ -204,6 +217,7 @@ window.C360 = window.C360 || {};
     domainIcon: domainIcon,
     domainIconBg: domainIconBg,
     lifecycleBadgeClass: lifecycleBadgeClass,
-    churnBadgeClass: churnBadgeClass
+    churnBadgeClass: churnBadgeClass,
+    clvFreshness: clvFreshness
   };
 })(window.C360);

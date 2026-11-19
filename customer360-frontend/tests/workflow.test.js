@@ -113,7 +113,8 @@ test("campaign profile adapter preserves condition fields, nulls and consent", (
   const profile = campaignHelpers().workflowProfile({
     master_profile_id: "profile-1", first_name: "Sam", engagement_score: "80",
     churn_probability: "0.2", lead_conversion_probability: "0.8",
-    historical_clv: "1000", predictive_clv: "2400",
+    historical_clv: "1000", predictive_clv: "2400", clv_percentile: "91.5",
+    scores_updated_at: new Date().toISOString(),
     latest_nps_score: null, average_csat: "4.5",
     overall_sentiment_score: "-0.25", profile_completeness_score: "82",
     identity_confidence_score: "0.93",
@@ -127,6 +128,7 @@ test("campaign profile adapter preserves condition fields, nulls and consent", (
   assert.equal(profile.churn_probability, 0.2);
   assert.equal(profile.historical_clv, 1000);
   assert.equal(profile.predictive_clv, 2400);
+  assert.equal(profile.clv_percentile, 91.5);
   assert.equal(profile.lead_conversion_probability, 0.8);
   assert.equal(profile.latest_nps_score, null);
   assert.equal(profile.average_csat, 4.5);
@@ -139,6 +141,20 @@ test("campaign profile adapter preserves condition fields, nulls and consent", (
   assert.deepEqual(Array.from(profile.tags), ["vip"]);
 });
 
+test("campaign profile adapter treats stale or unscored CLV as missing", () => {
+  const stale = new Date(Date.now() - 31 * 86400000).toISOString();
+  for (const scoresUpdatedAt of [stale, null]) {
+    const profile = campaignHelpers().workflowProfile({
+      master_profile_id: "profile-1", historical_clv: "1000",
+      predictive_clv: "2400", clv_percentile: "91.5",
+      scores_updated_at: scoresUpdatedAt,
+    }, 0);
+    assert.equal(profile.predictive_clv, null);
+    assert.equal(profile.clv_percentile, null);
+    assert.equal(profile.historical_clv, 1000);
+  }
+});
+
 test("condition catalog exposes profile scoring fields and valid simulated values", () => {
   const condition = Core.catalog().find((item) => item.type === "condition");
   const fields = condition.config.field.options;
@@ -148,6 +164,7 @@ test("condition catalog exposes profile scoring fields and valid simulated value
     "lead_conversion_probability",
     "historical_clv",
     "predictive_clv",
+    "clv_percentile",
     "latest_nps_score",
     "average_csat",
     "overall_sentiment_score",
@@ -161,6 +178,7 @@ test("condition catalog exposes profile scoring fields and valid simulated value
   const samples = Core.sampleProfiles(32);
   for (const profile of samples) {
     assert.ok(Number.isFinite(profile.predictive_clv));
+    assert.ok(profile.clv_percentile >= 0 && profile.clv_percentile <= 100);
     assert.ok(profile.overall_sentiment_score >= -1 && profile.overall_sentiment_score <= 1);
     assert.ok(profile.profile_completeness_score >= 0 && profile.profile_completeness_score <= 100);
     assert.ok(profile.identity_confidence_score >= 0 && profile.identity_confidence_score <= 1);

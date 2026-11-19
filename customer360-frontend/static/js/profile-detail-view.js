@@ -943,6 +943,15 @@ window.C360 = window.C360 || {};
           : "text-slate-400",
       churnScoreLabel: fmt.percent(profile.churn_probability),
       predictiveClvLabel: fmt.money(profile.predictive_clv, ""),
+      clvPercentileLabel:
+        profile.clv_percentile !== null && profile.clv_percentile !== undefined
+          ? "P" + Number(profile.clv_percentile).toFixed(0) + " within tenant"
+          : null,
+      clvAgeLabel: profile.predictive_clv !== null && profile.predictive_clv !== undefined
+        ? fmt.clvFreshness(profile.scores_updated_at).ageLabel
+        : null,
+      clvStale: profile.predictive_clv !== null && profile.predictive_clv !== undefined &&
+        fmt.clvFreshness(profile.scores_updated_at).stale,
       historicalClvLabel: fmt.money(profile.historical_clv, ""),
       completenessLabel:
         profile.profile_completeness_score !== null &&

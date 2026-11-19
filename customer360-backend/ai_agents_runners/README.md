@@ -236,6 +236,27 @@ runs. A cron run may inspect all tenants because it is an internal scheduler
 run; every selected row still carries its own tenant ID and remains isolated
 in the execution plan.
 
+## CLV prediction jobs
+
+`clv_prediction` (model type `regression`) is implemented in `clv/`; design
+decisions are in `docs/action-plans/PLAN-CLV-REGRESSION-AGENT.md`. Every job is
+a no-op while the agent row is not `ACTIVE`.
+
+| Job | Schedule (`CLV_SCHEDULE_TIMEZONE`, default `Asia/Ho_Chi_Minh`) | Does |
+|---|---|---|
+| `clv_nightly_scoring_job` | 02:00 daily | Scores every profile per (tenant, domain) with the champion, ranks percentiles, applies hysteresis tiers, writes `cdp_customer_valuation` and projects `predictive_clv`, `clv_segment`, `clv_percentile` onto `cdp_master_profiles` in one transaction; stores frozen tier cut-offs on the champion |
+| `clv_training_job` | 03:00 on the 1st | Retrains each (tenant, domain) on month-end cut-offs with a time holdout, applies the promotion gate, registers the model in `cdp_model_versions` |
+| `clv_approve_model_job` | manual | Promotes a `PENDING_APPROVAL` model (first champion or stability-only failure) and re-projects |
+| `clv_rescore_job` | manual / event | Re-scores given profiles (e.g. after a purchase) against the frozen cut-offs |
+| `clv_retention_job` | 04:00 daily | Exports rows past retention (daily > 35 days, any > 36 months) to Parquet, then deletes them |
+| `clv_staleness_job` | hourly | Fails when a projection is older than 72 hours |
+
+A segment workflow step for `clv_prediction` re-scores the segment's members
+against the tenant-wide cut-offs; it never ranks within the segment.
+
+Model artefacts go to `CLV_MODEL_BUCKET` using the platform `S3_*` settings, or
+to `CLV_ARTIFACT_DIR` for local development.
+
 ## Compatibility job
 
 The former `personalization` code location was removed. Its runnable scaffold
@@ -261,3 +282,12 @@ PYTHONPATH=customer360-backend \
 
 The runner tests cover tenant/segment API selection, ordered plans, and cron
 due/not-due filtering.
+
+The CLV end-to-end test needs a database built from `customer360-database/*.sql`
+and a non-superuser role (superusers bypass row-level security):
+
+```bash
+CLV_INTEGRATION_DSN="host=127.0.0.1 dbname=<scratch_db> user=<role> password=<pw>" \
+PYTHONPATH=customer360-backend \
+  python -m pytest ai_agents_runners/tests/test_clv_integration.py -q
+```

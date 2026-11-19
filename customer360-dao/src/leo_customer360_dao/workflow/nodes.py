@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import re
 from abc import ABC, abstractmethod
+from datetime import datetime, timezone
 from typing import ClassVar, Literal
 
 from .context import JourneyContext
@@ -24,12 +25,17 @@ NUMERIC_PROFILE_FIELDS = {
     "churn_probability",
     "historical_clv",
     "predictive_clv",
+    "clv_percentile",
     "latest_nps_score",
     "average_csat",
     "overall_sentiment_score",
     "profile_completeness_score",
     "identity_confidence_score",
 }
+# CLV values older than this are treated as missing so automated journeys
+# fail closed (take the "no" branch) instead of acting on a stale tier.
+CLV_PROFILE_FIELDS = frozenset({"predictive_clv", "clv_percentile"})
+CLV_MAX_AGE_DAYS = 30
 _PLACEHOLDER = re.compile(r"\{\{\s*(\w+)\s*\}\}")
 
 
@@ -112,6 +118,16 @@ class TriggerNode(BaseNode):
         return NodeResult(note=f"entered on {self.config.get('event')}")
 
 
+def _clv_is_stale(profile) -> bool:
+    updated_at = getattr(profile, "scores_updated_at", None)
+    if updated_at is None:
+        return True
+    if updated_at.tzinfo is None:
+        updated_at = updated_at.replace(tzinfo=timezone.utc)
+    age_days = (datetime.now(timezone.utc) - updated_at).total_seconds() / 86400
+    return age_days > CLV_MAX_AGE_DAYS
+
+
 @register_node
 class ConditionNode(BaseNode):
     type = "condition"
@@ -143,6 +159,8 @@ class ConditionNode(BaseNode):
             has = str(value) in ctx.tags
             return not has if op == "hasnt" else has
         actual = getattr(ctx.profile, field)
+        if field in CLV_PROFILE_FIELDS and _clv_is_stale(ctx.profile):
+            actual = None
         if actual is None:
             # A missing value never matches, so the customer takes the no branch.
             return False

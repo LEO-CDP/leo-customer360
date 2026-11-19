@@ -80,6 +80,7 @@ Engineering design documents and implementation plans for core platform capabili
 - [Agentic Ad-Tech Audience Sync Flow](action-plans/AGENTIC-AD-TECH-FLOW.md)
 - [Full Analytics with S3](action-plans/FULL-ANALYTICS-WITH-S3.md) & [S3 Analytics Baseline](action-plans/FULL-ANALYTICS-WITH-S3-BASELINE.md)
 - [CRM Profiles API Improvement](action-plans/PLAN-CRM-PROFILES-API-IMPROVEMENT.md) · [Events API Improvement](action-plans/PLAN-EVENTS-API-IMPROVEMENT.md) · [Segments API Improvement](action-plans/PLAN-SEGMENTS-API-IMPROVEMENT.md)
+- [CLV Regression Agent](action-plans/PLAN-CLV-REGRESSION-AGENT.md)
 
 ## Operations & Deployment
 

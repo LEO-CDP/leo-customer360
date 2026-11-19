@@ -37,3 +37,18 @@ def test_profile_apis_cannot_write_derived_eligibility_policy():
             schema.model_validate(
                 {"communication_preferences": {"eligibility_policy": {"decision": "allow"}}}
             )
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("predictive_clv", "1000.00"),
+        ("clv_segment", "champion"),
+        ("clv_percentile", "95.0"),
+        ("current_valuation_id", "5620d1ff-2fe3-4351-95a4-990174285854"),
+        ("predictive_clv", None),
+    ],
+)
+def test_profile_patch_cannot_write_projected_clv_fields(field, value):
+    with pytest.raises(ValidationError, match="derived from cdp_customer_valuation"):
+        MasterProfileUpdate.model_validate({field: value})

@@ -21,7 +21,7 @@
 
 ## 🚧 Trung hạn
 
-- **Pipeline ML cho các cột scoring** (schema đã sẵn sàng: `churn_probability`, `predictive_clv`, `lead_conversion_probability`, `engagement_score`, `identity_confidence_score`…): huấn luyện + suy luận mô hình, ghi kết quả qua `PATCH /api/v1/master-profiles/{id}`, cập nhật `model_versions`/`scores_updated_at`.
+- **Pipeline ML cho các cột scoring** (schema đã sẵn sàng: `churn_probability`, `predictive_clv`, `lead_conversion_probability`, `engagement_score`, `identity_confidence_score`…): huấn luyện + suy luận mô hình, ghi kết quả qua `PATCH /api/v1/master-profiles/{id}`, cập nhật `model_versions`/`scores_updated_at`. Riêng CLV (`predictive_clv`, `clv_segment`, `clv_percentile`) **không** ghi qua PATCH: scorer ghi snapshot vào `cdp_customer_valuation` và chiếu sang master profile trong cùng một transaction; PATCH từ chối các trường này (xem [CLV Regression Agent](../action-plans/PLAN-CLV-REGRESSION-AGENT.md)).
 - **Job sinh embedding tự động** cho `persona_embedding` (master profile) và `embedding` (CRM entities, `graph_edges`) — gọi LLM embedding API theo lịch hoặc theo event.
 - **Dashboard vận hành CIR** dựa trên `/api/v1/reporting/*` (funnel xử lý, độ phủ identity graph, cảnh báo raw profile bị kẹt ở `status_code=1`).
 - **Mở rộng quy tắc khớp**: thêm fuzzy matching thật (`fuzzy_trgm`/`fuzzy_dmetaphone`, cần `pg_trgm`/`fuzzystrmatch`) cho các trường không hash được (hiện chỉ hỗ trợ `exact` do PII đã hash).

@@ -242,6 +242,7 @@ class WorkflowRunSummary:
     recommendations_written: int = 0
     eligibility_profiles_updated: int = 0
     unsupported_steps: int = 0
+    clv_profiles_scored: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -256,6 +257,7 @@ class WorkflowRunSummary:
             "recommendations_written": self.recommendations_written,
             "eligibility_profiles_updated": self.eligibility_profiles_updated,
             "unsupported_steps": self.unsupported_steps,
+            "clv_profiles_scored": self.clv_profiles_scored,
         }
 
 
@@ -291,6 +293,12 @@ def _execute_agent_pipeline_batch(
     from ai_agents_runners.agent_pipeline import execute_agent_pipeline_batch
 
     return execute_agent_pipeline_batch(payloads, run_id=run_id)
+
+
+def _default_clv_scorer() -> Any:
+    from ai_agents_runners.clv.service import ClvService
+
+    return ClvService()
 
 
 def _candidate_content_ids_from_db(value: Any) -> list[str]:
@@ -332,8 +340,10 @@ class AgentWorkflowMasterTask:
         pipeline_batch_executor: (
             Callable[[Sequence[dict[str, Any]], str], Sequence[Any]] | None
         ) = None,
+        clv_scorer_factory: Callable[[], Any] | None = None,
     ) -> None:
         self._connection_factory = connection_factory
+        self._clv_scorer_factory = clv_scorer_factory or _default_clv_scorer
         self._pipeline_executor = pipeline_executor or _execute_agent_pipeline
         self._embedding_function = embedding_function
         self._pipeline_batch_executor = pipeline_batch_executor
@@ -405,14 +415,19 @@ class AgentWorkflowMasterTask:
         recommendations_written = 0
         eligibility_profiles_updated = 0
         unsupported_steps = 0
+        clv_profiles_scored = 0
         ranking_steps_by_segment: dict[tuple[str, str], list[dict[str, Any]]] = {}
         eligibility_steps: list[dict[str, Any]] = []
+        clv_steps: list[dict[str, Any]] = []
         for step in summary.plan:
             if (
                 step["model_type"] == "rules_engine"
                 and step["agent_code"] == "eligibility_policy"
             ):
                 eligibility_steps.append(step)
+                continue
+            if step["model_type"] == "regression" and step["agent_code"] == "clv_prediction":
+                clv_steps.append(step)
                 continue
             if step["model_type"] != "ranking_recommendation":
                 unsupported_steps += 1
@@ -428,6 +443,10 @@ class AgentWorkflowMasterTask:
         for step in eligibility_steps:
             updated = self._evaluate_eligibility_step(step, run_id=run_id)
             eligibility_profiles_updated += updated
+            executed_steps += 1
+
+        for step in clv_steps:
+            clv_profiles_scored += self._score_clv_step(step, run_id=run_id)
             executed_steps += 1
 
         for (tenant_id, segment_id), steps in ranking_steps_by_segment.items():
@@ -751,7 +770,38 @@ class AgentWorkflowMasterTask:
             recommendations_written=recommendations_written,
             eligibility_profiles_updated=eligibility_profiles_updated,
             unsupported_steps=unsupported_steps,
+            clv_profiles_scored=clv_profiles_scored,
         )
+
+    def _score_clv_step(self, step: dict[str, Any], *, run_id: str) -> int:
+        """Re-score a segment's profiles against the tenant-wide frozen cut-offs.
+
+        Ranking stays population-wide: the nightly CLV job ranks every profile
+        in (tenant, domain); a segment step only refreshes its members.
+        """
+        profiles = self._load_segment_profiles(
+            tenant_id=step["tenant_id"], segment_id=step["segment_id"]
+        )
+        if not profiles:
+            return 0
+        scored = self._clv_scorer_factory().score_profiles(
+            step["tenant_id"],
+            [str(profile["master_profile_id"]) for profile in profiles],
+            configuration=step["configuration"],
+        )
+        computed = sum(
+            1 for result in scored.values() if result.calculation_status == "COMPUTED"
+        )
+        logger.info(
+            "CLV segment step scored %d/%d profile(s) "
+            "(run_id=%s tenant_id=%s segment_id=%s)",
+            computed,
+            len(profiles),
+            run_id,
+            step["tenant_id"],
+            step["segment_id"],
+        )
+        return computed
 
     def _evaluate_eligibility_step(
         self, step: dict[str, Any], *, run_id: str

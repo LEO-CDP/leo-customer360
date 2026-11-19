@@ -846,6 +846,7 @@ def _iter_profile_rows(connection, tenant_id: str, segment_tag: str, batch_size:
                        p.email, p.phone_number, p.push_tokens, p.communication_preferences,
                        p.segmentation_tags, p.domain, p.engagement_score,
                        p.churn_probability, p.lead_conversion_probability, p.historical_clv, p.predictive_clv,
+                       p.clv_percentile, p.scores_updated_at,
                        p.latest_nps_score, p.average_csat, p.overall_sentiment_score,
                        p.profile_completeness_score, p.identity_confidence_score,
                        p.status_code
