@@ -116,6 +116,8 @@ class CdpMasterProfile(Base):
     historical_clv: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2), server_default="0.00")
     predictive_clv: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2))
     clv_segment: Mapped[Optional[str]] = mapped_column(Text)
+    clv_percentile: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
+    current_valuation_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True))
 
     engagement_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
     latest_nps_score: Mapped[Optional[int]] = mapped_column(Integer)

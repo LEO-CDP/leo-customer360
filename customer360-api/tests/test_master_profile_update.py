@@ -109,3 +109,33 @@ def test_domain_constraint_error_returns_structured_validation_error():
         "message": "Domain is required and must be a valid profile domain.",
     }
     assert db.rolled_back is True
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("predictive_clv", 1000),
+        ("clv_segment", "champion"),
+        ("clv_percentile", 95),
+        ("current_valuation_id", str(PROFILE_ID)),
+    ],
+)
+def test_patch_rejects_projected_clv_fields_with_422(field, value):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from core.database import get_db
+
+    app = FastAPI()
+    app.include_router(identity_router.master_profiles_router)
+    app.dependency_overrides[get_db] = lambda: FakeDb()
+    repository = FakeRepository(_profile(domain="retail"))
+    with patch.object(identity_router, "_identity_repository", return_value=repository):
+        response = TestClient(app).patch(
+            f"{identity_router.master_profiles_router.prefix}/{PROFILE_ID}",
+            json={field: value},
+        )
+
+    assert response.status_code == 422
+    assert "derived from cdp_customer_valuation" in response.text
+    assert repository.update_values is None

@@ -706,16 +706,15 @@ $prompt$,
     (
         'clv_prediction',
         'Customer Lifetime Value Agent',
-        'Predicts the expected future monetary value of a customer using historical purchases, engagement, lifecycle, and retention signals.',
+        'Predicts 12-month net realised revenue per (tenant, domain) with LightGBM, derives discounted contribution CLV, and labels percentile tiers. The LLM only narrates the model explanation.',
         'regression',
         'lightgbm.LGBMRegressor',
         'INACTIVE',
         '0 2 * * *',
 
+        -- Point-in-time features only: current-state profile_* columns leak the
+        -- label window and are not available at backfilled cut-offs.
         ARRAY[
-            'profile_historical_clv',
-            'profile_engagement_score',
-            'profile_customer_since',
             'transaction_count_365d',
             'transaction_amount_sum_365d',
             'transaction_avg_amount_365d',
@@ -730,39 +729,51 @@ $prompt$,
             'objective', 'regression',
             'prediction_horizon', '365d',
             'feature_window', '365d',
-            'log_target', true
+            'log_target', true,
+            'label', 'net_realised_revenue_365d',
+            'exclude_status', jsonb_build_array('cancelled', 'failed', 'refunded'),
+            'refund_types', jsonb_build_array('refund', 'return'),
+            'event_features_enabled', false,
+            'min_history_months', 24,
+            'tier_bands', jsonb_build_array(
+                jsonb_build_object('tier', 'champion', 'min_percentile', 95),
+                jsonb_build_object('tier', 'high_value', 'min_percentile', 80),
+                jsonb_build_object('tier', 'growth_potential', 'min_percentile', 50),
+                jsonb_build_object('tier', 'standard', 'min_percentile', 0)
+            ),
+            'min_population', 500,
+            'hysteresis_points', 2,
+            'max_tier_change_rate', 0.10,
+            'calibration_tolerance', 0.15,
+            'fx_exclusion_threshold', 0.02,
+            'discount_rate', 0.10,
+            'forecast_horizon_years', 5
         ),
 
         'customer.clv_prediction.instructions',
         'none',
 
         $prompt$
-You are a Customer 360 Customer Lifetime Value prediction agent.
+You are a Customer 360 Customer Lifetime Value explanation agent.
 
-Estimate the customer's expected future monetary value over the configured prediction horizon.
+The CLV figures, tier and drivers are produced by a trained model. Explain them
+in plain language for a marketer.
 
 Rules:
-1. Use only supplied historical and behavioral evidence.
-2. Do not invent revenue or transaction data.
-3. Do not infer sensitive personal attributes.
-4. Return a non-negative numeric CLV estimate.
-5. Explain the major behavioral drivers.
-6. Return ONLY JSON.
+1. Use only the supplied explanation drivers, tier and figures.
+2. Never produce, change, or estimate a monetary value, score, or tier.
+3. Do not invent revenue or transaction data.
+4. Do not infer sensitive personal attributes.
+5. Return ONLY JSON.
 
 Expected output:
 {
-  "clv": number,
-  "currency": "string",
-  "value_tier": "HIGH|MEDIUM|LOW",
-  "top_signals": [],
-  "reason": "string"
+  "summary": "string",
+  "top_signals": []
 }
 $prompt$,
 
         ARRAY[
-            'profile_historical_clv',
-            'profile_engagement_score',
-            'profile_customer_since',
             'transaction_count_365d',
             'transaction_amount_sum_365d',
             'transaction_avg_amount_365d',
@@ -1618,6 +1629,99 @@ END;
 $$;
 
 COMMIT;
+
+-- Upgrade an untouched v1 clv_prediction seed to the point-in-time feature set,
+-- tier configuration and narrative-only prompt. Rows an operator has changed
+-- keep their configuration.
+UPDATE customer360.cdp_ai_agents AS a
+SET description = 'Predicts 12-month net realised revenue per (tenant, domain) with LightGBM, derives discounted contribution CLV, and labels percentile tiers. The LLM only narrates the model explanation.',
+    input_features = v.features,
+    required_variables = v.features,
+    hyperparameters = a.hyperparameters || jsonb_build_object(
+        'label', 'net_realised_revenue_365d',
+        'exclude_status', jsonb_build_array('cancelled', 'failed', 'refunded'),
+        'refund_types', jsonb_build_array('refund', 'return'),
+        'event_features_enabled', false,
+        'min_history_months', 24,
+        'tier_bands', jsonb_build_array(
+            jsonb_build_object('tier', 'champion', 'min_percentile', 95),
+            jsonb_build_object('tier', 'high_value', 'min_percentile', 80),
+            jsonb_build_object('tier', 'growth_potential', 'min_percentile', 50),
+            jsonb_build_object('tier', 'standard', 'min_percentile', 0)
+        ),
+        'min_population', 500,
+        'hysteresis_points', 2,
+        'max_tier_change_rate', 0.10,
+        'calibration_tolerance', 0.15,
+        'fx_exclusion_threshold', 0.02,
+        'discount_rate', 0.10,
+        'forecast_horizon_years', 5
+    ),
+    system_instructions = v.prompt,
+    instruction_version = a.instruction_version + 1,
+    instruction_updated_by = 'leo_master_agent',
+    instruction_note = 'CLV v2: point-in-time features, percentile tiers, narrative-only prompt',
+    prompt_versions = COALESCE(a.prompt_versions, '[]'::jsonb) || jsonb_build_array(
+        jsonb_build_object(
+            'version', a.instruction_version + 1,
+            'body', v.prompt,
+            'required_vars', v.features,
+            'created_at', now(),
+            'created_by', 'leo_master_agent',
+            'note', 'CLV v2: point-in-time features, percentile tiers, narrative-only prompt'
+        )
+    )
+FROM (
+    SELECT
+        ARRAY[
+            'transaction_count_365d',
+            'transaction_amount_sum_365d',
+            'transaction_avg_amount_365d',
+            'transaction_active_days_365d',
+            'transaction_recency_days',
+            'event_purchase_count_365d',
+            'event_campaign_touch_count_365d'
+        ]::text[] AS features,
+        $prompt$
+You are a Customer 360 Customer Lifetime Value explanation agent.
+
+The CLV figures, tier and drivers are produced by a trained model. Explain them
+in plain language for a marketer.
+
+Rules:
+1. Use only the supplied explanation drivers, tier and figures.
+2. Never produce, change, or estimate a monetary value, score, or tier.
+3. Do not invent revenue or transaction data.
+4. Do not infer sensitive personal attributes.
+5. Return ONLY JSON.
+
+Expected output:
+{
+  "summary": "string",
+  "top_signals": []
+}
+$prompt$ AS prompt
+) AS v
+WHERE a.agent_code = 'clv_prediction'
+  AND a.input_features = ARRAY[
+        'profile_historical_clv',
+        'profile_engagement_score',
+        'profile_customer_since',
+        'transaction_count_365d',
+        'transaction_amount_sum_365d',
+        'transaction_avg_amount_365d',
+        'transaction_active_days_365d',
+        'transaction_recency_days',
+        'event_purchase_count_365d',
+        'event_campaign_touch_count_365d'
+    ]::text[]
+  AND a.hyperparameters = jsonb_build_object(
+        'algorithm', 'lightgbm',
+        'objective', 'regression',
+        'prediction_horizon', '365d',
+        'feature_window', '365d',
+        'log_target', true
+    );
 
 -- Assign default targeted journey stages to the core seeded AI agents (if not overridden).
 UPDATE customer360.cdp_ai_agents AS a

@@ -715,6 +715,8 @@ def test_profile_query_selects_all_condition_score_fields():
         "lead_conversion_probability",
         "historical_clv",
         "predictive_clv",
+        "clv_percentile",
+        "scores_updated_at",
         "latest_nps_score",
         "average_csat",
         "overall_sentiment_score",

@@ -40,7 +40,7 @@ from .persona import (
 
 logger = logging.getLogger(__name__)
 
-MODEL_VERSION = "persona-engine-v1"
+MODEL_VERSION = "persona-engine-v2"
 
 
 # =============================================================================
@@ -78,9 +78,9 @@ PERSONA_CONFIG_DEFAULTS: Dict[str, Any] = {
     "ENGAGEMENT_CHANNEL_WEIGHT_PER_SYSTEM": 10.0,
     "ENGAGEMENT_CHANNEL_BONUS_CAP": 30.0,
     "ENGAGEMENT_RECENCY_WEIGHT": 0.7,
-    # Financial configuration
-    "FINANCIAL_CLV_REFERENCE_DEFAULT": 5000.0,
-    "FINANCIAL_SCORE_MULTIPLIER": 100.0,
+    # Financial configuration (financial score = tenant/domain CLV percentile)
+    "FINANCIAL_SCORE_DEFAULT": 50.0,
+    "FINANCIAL_CLV_MAX_AGE_DAYS": 30,
     # Loyalty configuration
     "LOYALTY_TIER_PLATINUM_BASE": 100.0,
     "LOYALTY_TIER_GOLD_BASE": 80.0,
@@ -128,6 +128,7 @@ _PERSONA_CONFIG_INT_KEYS = {
     "ENGAGEMENT_RECENCY_THRESHOLD_30D",
     "ENGAGEMENT_RECENCY_THRESHOLD_90D",
     "ENGAGEMENT_RECENCY_THRESHOLD_180D",
+    "FINANCIAL_CLV_MAX_AGE_DAYS",
 }
 
 
@@ -228,8 +229,8 @@ def apply_persona_config(persona_config: Dict[str, Any]) -> None:
     global ENGAGEMENT_CHANNEL_WEIGHT_PER_SYSTEM
     global ENGAGEMENT_CHANNEL_BONUS_CAP
     global ENGAGEMENT_RECENCY_WEIGHT
-    global FINANCIAL_CLV_REFERENCE_DEFAULT
-    global FINANCIAL_SCORE_MULTIPLIER
+    global FINANCIAL_SCORE_DEFAULT
+    global FINANCIAL_CLV_MAX_AGE_DAYS
     global LOYALTY_TIER_PLATINUM_BASE
     global LOYALTY_TIER_GOLD_BASE
     global LOYALTY_TIER_SILVER_BASE
@@ -293,8 +294,8 @@ def apply_persona_config(persona_config: Dict[str, Any]) -> None:
     ENGAGEMENT_CHANNEL_BONUS_CAP = float(_cfg("ENGAGEMENT_CHANNEL_BONUS_CAP"))
     ENGAGEMENT_RECENCY_WEIGHT = float(_cfg("ENGAGEMENT_RECENCY_WEIGHT"))
 
-    FINANCIAL_CLV_REFERENCE_DEFAULT = float(_cfg("FINANCIAL_CLV_REFERENCE_DEFAULT"))
-    FINANCIAL_SCORE_MULTIPLIER = float(_cfg("FINANCIAL_SCORE_MULTIPLIER"))
+    FINANCIAL_SCORE_DEFAULT = float(_cfg("FINANCIAL_SCORE_DEFAULT"))
+    FINANCIAL_CLV_MAX_AGE_DAYS = int(_cfg("FINANCIAL_CLV_MAX_AGE_DAYS"))
 
     LOYALTY_TIER_PLATINUM_BASE = float(_cfg("LOYALTY_TIER_PLATINUM_BASE"))
     LOYALTY_TIER_GOLD_BASE = float(_cfg("LOYALTY_TIER_GOLD_BASE"))
@@ -409,8 +410,8 @@ ENGAGEMENT_RECENCY_WEIGHT = float(PERSONA_CONFIG_DEFAULTS["ENGAGEMENT_RECENCY_WE
 # =============================================================================
 # FINANCIAL SCORE CONFIGURATION
 # =============================================================================
-FINANCIAL_CLV_REFERENCE_DEFAULT = float(PERSONA_CONFIG_DEFAULTS["FINANCIAL_CLV_REFERENCE_DEFAULT"])
-FINANCIAL_SCORE_MULTIPLIER = float(PERSONA_CONFIG_DEFAULTS["FINANCIAL_SCORE_MULTIPLIER"])
+FINANCIAL_SCORE_DEFAULT = float(PERSONA_CONFIG_DEFAULTS["FINANCIAL_SCORE_DEFAULT"])
+FINANCIAL_CLV_MAX_AGE_DAYS = int(PERSONA_CONFIG_DEFAULTS["FINANCIAL_CLV_MAX_AGE_DAYS"])
 
 # =============================================================================
 # LOYALTY SCORE CONFIGURATION
@@ -484,6 +485,8 @@ MASTER_PROFILE_SELECT_COLUMNS = (
     "secondary_phones",
     "historical_clv",
     "predictive_clv",
+    "clv_percentile",
+    "scores_updated_at",
     "engagement_score",
     "churn_probability",
     "churn_risk_tier",
@@ -569,14 +572,15 @@ def compute_engagement_score(master_profile: Dict[str, Any]) -> float:
     return _clip(recency_component * ENGAGEMENT_RECENCY_WEIGHT + channel_bonus)
 
 
-def compute_financial_score(master_profile: Dict[str, Any], clv_reference: float = FINANCIAL_CLV_REFERENCE_DEFAULT) -> float:
-    clv = master_profile.get("predictive_clv")
-    if clv is None:
-        clv = master_profile.get("historical_clv")
-    clv = _to_float(clv)
-    if clv_reference <= 0:
-        return 0.0
-    return _clip((clv / clv_reference) * FINANCIAL_SCORE_MULTIPLIER)
+def compute_financial_score(master_profile: Dict[str, Any]) -> float:
+    # clv_percentile is currency-free (rank within tenant + domain), so no
+    # monetary reference is needed. Missing or stale CLV falls back to a
+    # neutral default rather than a raw-currency ratio.
+    percentile = master_profile.get("clv_percentile")
+    age_days = _days_since(master_profile.get("scores_updated_at"))
+    if percentile is None or age_days is None or age_days > FINANCIAL_CLV_MAX_AGE_DAYS:
+        return _clip(FINANCIAL_SCORE_DEFAULT)
+    return _clip(_to_float(percentile, FINANCIAL_SCORE_DEFAULT))
 
 
 _MEMBERSHIP_TIER_BASE = {
@@ -759,6 +763,8 @@ def _build_features(master_profile: Dict[str, Any]) -> List[Dict[str, Any]]:
         _add("historical_clv", "Historical CLV", "numeric", numeric=_to_float(master_profile.get("historical_clv")))
     if master_profile.get("predictive_clv") is not None:
         _add("predictive_clv", "Predictive CLV", "numeric", numeric=_to_float(master_profile.get("predictive_clv")))
+    if master_profile.get("clv_percentile") is not None:
+        _add("clv_percentile", "CLV Percentile", "numeric", numeric=_to_float(master_profile.get("clv_percentile")))
     if master_profile.get("churn_probability") is not None:
         _add(
             "churn_probability",
@@ -789,8 +795,8 @@ def _score_detail_rows(computation: "PersonaComputation"):
             "financial",
             computation.financial_score,
             _SCORE_WEIGHTS["financial"],
-            "min(100, (predictive_clv or historical_clv) / reference_clv * 100)",
-            "Scaled from predictive_clv (falling back to historical_clv).",
+            "clv_percentile, or FINANCIAL_SCORE_DEFAULT when missing or older than FINANCIAL_CLV_MAX_AGE_DAYS",
+            "Tenant/domain CLV percentile rank; neutral default when CLV is missing or stale.",
         ),
         (
             "loyalty",

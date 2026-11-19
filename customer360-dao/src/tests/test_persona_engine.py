@@ -48,6 +48,8 @@ def _profile(**overrides):
         "secondary_phones": [],
         "historical_clv": 2000.0,
         "predictive_clv": 3000.0,
+        "clv_percentile": 70.0,
+        "scores_updated_at": datetime.now() - timedelta(days=1),
         "engagement_score": 60.0,
         "churn_probability": 0.2,
         "churn_risk_tier": "low",
@@ -104,21 +106,33 @@ class TestComponentScores:
         )
         assert many_channels <= 100.0
 
-    def test_financial_score_prefers_predictive_over_historical(self):
-        score = compute_financial_score(_profile(predictive_clv=5000.0, historical_clv=1.0))
-        assert score == 100.0
+    def test_financial_score_uses_clv_percentile(self):
+        score = compute_financial_score(
+            _profile(clv_percentile=87.5, scores_updated_at=datetime.now(), predictive_clv=1.0)
+        )
+        assert score == 87.5
 
-    def test_financial_score_falls_back_to_historical(self):
-        score = compute_financial_score(_profile(predictive_clv=None, historical_clv=2500.0))
-        assert score == 50.0
+    def test_financial_score_ignores_raw_currency_amounts(self):
+        # A VND-scale CLV must not saturate the score; only the percentile counts.
+        score = compute_financial_score(
+            _profile(clv_percentile=20.0, scores_updated_at=datetime.now(), predictive_clv=50_000_000.0)
+        )
+        assert score == 20.0
 
-    def test_financial_score_clipped_to_100(self):
-        score = compute_financial_score(_profile(predictive_clv=50000.0))
-        assert score == 100.0
+    def test_financial_score_defaults_when_percentile_missing(self):
+        score = compute_financial_score(
+            _profile(clv_percentile=None, scores_updated_at=datetime.now(), predictive_clv=5000.0)
+        )
+        assert score == PERSONA_CONFIG_DEFAULTS["FINANCIAL_SCORE_DEFAULT"]
 
-    def test_financial_score_zero_when_no_clv(self):
-        score = compute_financial_score(_profile(predictive_clv=None, historical_clv=None))
-        assert score == 0.0
+    def test_financial_score_defaults_when_scores_stale(self):
+        stale = datetime.now() - timedelta(days=PERSONA_CONFIG_DEFAULTS["FINANCIAL_CLV_MAX_AGE_DAYS"] + 1)
+        score = compute_financial_score(_profile(clv_percentile=95.0, scores_updated_at=stale))
+        assert score == PERSONA_CONFIG_DEFAULTS["FINANCIAL_SCORE_DEFAULT"]
+
+    def test_financial_score_defaults_when_scores_never_updated(self):
+        score = compute_financial_score(_profile(clv_percentile=95.0, scores_updated_at=None))
+        assert score == PERSONA_CONFIG_DEFAULTS["FINANCIAL_SCORE_DEFAULT"]
 
     def test_loyalty_score_platinum_beats_bronze(self):
         platinum = compute_loyalty_score(_profile(membership_tier="platinum", customer_since=None))

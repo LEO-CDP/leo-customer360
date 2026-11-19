@@ -2,6 +2,7 @@
 
 import unittest
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from pydantic import ValidationError
 
@@ -208,6 +209,7 @@ class RunSemanticsTests(unittest.TestCase):
             "lead_conversion_probability": (0.8, "ge", 0.7),
             "historical_clv": (1500, "ge", 1000),
             "predictive_clv": (3000, "ge", 2500),
+            "clv_percentile": (92.5, "ge", 90),
             "latest_nps_score": (9, "ge", 8),
             "average_csat": (4.5, "ge", 4),
             "overall_sentiment_score": (0.6, "ge", 0.2),
@@ -239,9 +241,74 @@ class RunSemanticsTests(unittest.TestCase):
                 )
                 engine = FlowEngine(flow)
                 self.assertEqual(engine.problems(), [])
-                result = engine.run(_profile(**{field: actual}))
+                result = engine.run(
+                    _profile(**{field: actual, "scores_updated_at": datetime.now(timezone.utc)})
+                )
                 self.assertEqual(result.end, "goal")
                 self.assertEqual(result.steps[1].branch, "yes")
+
+    def test_stale_or_unscored_clv_conditions_fail_closed(self):
+        stale = datetime.now(timezone.utc) - timedelta(days=31)
+        for field, operator, threshold in (
+            ("predictive_clv", "ge", 100),
+            ("predictive_clv", "lt", 1_000_000),
+            ("clv_percentile", "ge", 10),
+            ("clv_percentile", "lt", 99),
+        ):
+            for updated_at in (stale, None):
+                with self.subTest(field=field, op=operator, updated_at=updated_at):
+                    flow = FlowDefinition.model_validate(
+                        {
+                            "schema_version": 2,
+                            "root": _node(
+                                "n1",
+                                "trigger",
+                                {"event": "signup"},
+                                [
+                                    _node(
+                                        "n2",
+                                        "condition",
+                                        {"field": field, "op": operator, "value": threshold},
+                                        [
+                                            _node("n3", "exit", {"kind": "goal"}, branch="yes"),
+                                            _node("n4", "exit", {"kind": "exit"}, branch="no"),
+                                        ],
+                                    )
+                                ],
+                            ),
+                        }
+                    )
+                    result = FlowEngine(flow).run(
+                        _profile(predictive_clv=5000, clv_percentile=50, scores_updated_at=updated_at)
+                    )
+                    self.assertEqual(result.steps[1].branch, "no")
+
+    def test_fresh_clv_condition_within_max_age_still_matches(self):
+        flow = FlowDefinition.model_validate(
+            {
+                "schema_version": 2,
+                "root": _node(
+                    "n1",
+                    "trigger",
+                    {"event": "signup"},
+                    [
+                        _node(
+                            "n2",
+                            "condition",
+                            {"field": "clv_percentile", "op": "ge", "value": 90},
+                            [
+                                _node("n3", "exit", {"kind": "goal"}, branch="yes"),
+                                _node("n4", "exit", {"kind": "exit"}, branch="no"),
+                            ],
+                        )
+                    ],
+                ),
+            }
+        )
+        result = FlowEngine(flow).run(
+            _profile(clv_percentile=95, scores_updated_at=datetime.now(timezone.utc) - timedelta(days=29))
+        )
+        self.assertEqual(result.steps[1].branch, "yes")
 
     def test_operational_profile_status_is_not_a_marketing_condition(self):
         flow = FlowDefinition.model_validate(
