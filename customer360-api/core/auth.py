@@ -40,6 +40,7 @@ DEFAULT_TOKEN_EXPIRES_MINUTES = 60
 CLOCK_SKEW_LEEWAY_SECONDS = 60
 TENANT_ADMIN_ROLES = {"platform_admin", "super_admin", "system_admin", "tenant_admin", "admin", "root"}
 ROOT_EQUIVALENT_ROLES = {"platform_admin", "root"}
+ATTRIBUTE_MANAGER_ROLES = ROOT_EQUIVALENT_ROLES | {"super_admin", "admin"}
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=True)
 
 # Failed-auth rate limiter, keyed by client IP.
@@ -421,6 +422,17 @@ def require_admin(request: Request) -> None:
         raise HTTPException(
             status_code=403,
             detail="This action requires the admin, root, or platform_admin role.",
+        )
+
+
+def require_attribute_manager(request: Request) -> None:
+    """Require Root / Super Admin or Admin for attribute catalog mutations."""
+    if not isinstance(getattr(request.state, "user", None), dict):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if not ATTRIBUTE_MANAGER_ROLES.intersection(get_current_roles(request)):
+        raise HTTPException(
+            status_code=403,
+            detail="Attribute management requires the Root / Super Admin or Admin role.",
         )
 
 

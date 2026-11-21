@@ -14,7 +14,13 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.testclient import TestClient
 
-from core.auth import auth_middleware, get_current_roles, is_root_user, require_admin
+from core.auth import (
+    auth_middleware,
+    get_current_roles,
+    is_root_user,
+    require_admin,
+    require_attribute_manager,
+)
 from conftest import FakeDBSession, FakeQueryResult, FakeRedis
 
 
@@ -109,6 +115,18 @@ class AuthMiddlewareTests(unittest.TestCase):
             request.state.user = {"roles": ["viewer"]}
             with self.assertRaises(HTTPException) as caught:
                 require_admin(request)
+            self.assertEqual(caught.exception.status_code, 403)
+
+    def test_attribute_management_accepts_only_root_super_admin_and_admin(self):
+        request = Request({"type": "http", "headers": []})
+        for role in ("root", "platform_admin", "super_admin", "admin"):
+            request.state.user = {"roles": [role]}
+            require_attribute_manager(request)
+
+        for role in ("operator", "developer", "tenant_admin", "system_admin", "viewer"):
+            request.state.user = {"roles": [role]}
+            with self.assertRaises(HTTPException) as caught:
+                require_attribute_manager(request)
             self.assertEqual(caught.exception.status_code, 403)
 
     def test_malformed_roles_are_not_accepted_as_roles(self):

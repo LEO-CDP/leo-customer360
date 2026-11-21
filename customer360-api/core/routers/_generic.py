@@ -4,7 +4,7 @@ CRM-style entities don't each need hand-written boilerplate endpoints.
 """
 
 import uuid
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -36,6 +36,8 @@ def build_crud_router(
     integrity_error_detail: Optional[Callable[[IntegrityError], Optional[str]]] = None,
     create_hook: Optional[Callable[[Any], None]] = None,
     update_hook: Optional[Callable[[Any], None]] = None,
+    delete_hook: Optional[Callable[[Any], None]] = None,
+    write_dependencies: Optional[Sequence[Any]] = None,
     read_hook: Optional[Callable[[Session, Any], None]] = None,
     cache_reads: bool = True,
 ) -> APIRouter:
@@ -85,8 +87,10 @@ def build_crud_router(
             read_hook(db, obj)
         return obj
 
-    @router.post("", response_model=read_schema, status_code=201, include_in_schema=False)
-    @router.post("/", response_model=read_schema, status_code=201)
+    mutation_dependencies = list(write_dependencies or [])
+
+    @router.post("", response_model=read_schema, status_code=201, include_in_schema=False, dependencies=mutation_dependencies)
+    @router.post("/", response_model=read_schema, status_code=201, dependencies=mutation_dependencies)
     def create_item(payload: create_schema, db: Session = Depends(get_db)):  # type: ignore[valid-type]
         obj_in = payload.model_dump()
         if create_transform is not None:
@@ -111,7 +115,7 @@ def build_crud_router(
             create_hook(obj)
         return obj
 
-    @router.patch("/{item_id}", response_model=read_schema)
+    @router.patch("/{item_id}", response_model=read_schema, dependencies=mutation_dependencies)
     def update_item(item_id: pk_type, payload: update_schema, db: Session = Depends(get_db)):  # type: ignore[valid-type]
         crud = get_crud(db)
         obj = crud.get(db, item_id)
@@ -140,7 +144,7 @@ def build_crud_router(
             update_hook(obj)
         return obj
 
-    @router.delete("/{item_id}", status_code=204)
+    @router.delete("/{item_id}", status_code=204, dependencies=mutation_dependencies)
     def delete_item(item_id: pk_type, db: Session = Depends(get_db)):  # type: ignore[valid-type]
         crud = get_crud(db)
         obj = crud.get(db, item_id)
@@ -148,6 +152,8 @@ def build_crud_router(
             raise HTTPException(status_code=404, detail=f"{model.__name__} '{item_id}' not found")
         crud.delete(db, obj)
         invalidate_prefix(cache_prefix)
+        if delete_hook is not None:
+            delete_hook(obj)
 
     return router
 

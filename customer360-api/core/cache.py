@@ -114,6 +114,17 @@ def invalidate_prefix(prefix: str) -> None:
         logger.warning("Redis SCAN/DELETE failed for prefix=%s.", prefix, exc_info=True)
 
 
+def invalidate_key(key: str) -> None:
+    """Deletes one externally owned cache entry without failing the write."""
+    client = get_redis_client()
+    if client is None:
+        return
+    try:
+        client.delete(key)
+    except redis.RedisError:
+        logger.warning("Redis DELETE failed for key=%s.", key, exc_info=True)
+
+
 def cache_response(prefix: str, ttl: Optional[int] = None, *, enabled: bool = True) -> Callable:
     """Decorator: caches a GET route's JSON-encoded result in Redis.
 

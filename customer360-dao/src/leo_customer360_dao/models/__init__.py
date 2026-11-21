@@ -29,6 +29,7 @@ from leo_customer360_dao.models.graph import GraphEdge
 from leo_customer360_dao.models.identity import (
     CdpCustomerPersona,
     CdpDomainProfile,
+    CdpEventCatalog,
     CdpIdentityIndex,
     CdpIdResolutionStatus,
     CdpMasterProfile,
@@ -82,6 +83,7 @@ __all__ = [
     "GraphEdge",
     "CdpCustomerPersona",
     "CdpDomainProfile",
+    "CdpEventCatalog",
     "CdpIdentityIndex",
     "CdpIdResolutionStatus",
     "CdpMasterProfile",

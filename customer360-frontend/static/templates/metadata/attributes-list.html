@@ -1,221 +1,257 @@
-<!-- 
-  =============================================================================
-  ATTRIBUTE CATALOG VIEW CARD
-  =============================================================================
-  Features:
-  - Polished container with rounded-2xl corners and hover shadow transitions
-  - Integrated header icon and structured typography for title/subtitle
-  - Modernized search and filter dropdown controls with focus states
-  - Styled data table container with sticky header and clean border dividers
-  - Refined loading state and empty state feedback
--->
-<div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden">
-  
-  <!-- Header Section -->
-  <div class="p-6 border-b border-slate-100 bg-white flex flex-wrap items-center justify-between gap-4">
-    
-    <!-- Title & Icon -->
-    <div class="flex items-center gap-3">
-      <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 ring-1 ring-indigo-100">
-        <i class="bi bi-database text-lg leading-none" aria-hidden="true"></i>
-      </div>
-      <div>
-        <h1 class="text-base font-bold text-slate-900 tracking-tight">Attribute Catalog</h1>
-        <p class="text-xs text-slate-400 mt-0.5">Identity resolution &amp; segmentation metadata</p>
-      </div>
-    </div>
-   
-    <!-- Filter Controls -->
-    <div class="flex flex-wrap items-center gap-2">
-      
-      <!-- Search Input with Icon -->
-      <div class="relative">
-        <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
-          <i class="bi bi-search text-sm leading-none" aria-hidden="true"></i>
-        </span>
-        <input id="attributes-search-input" type="search" name="attribute_search"
-          placeholder="Search name, code, description…" autocomplete="off" autocorrect="off" spellcheck="false" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl pl-9 pr-3.5 py-2 w-64 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
-      </div>
-
-      <!-- Group Filter -->
-      <select id="attributes-group-filter" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
-        <option value="">All groups</option>
-      </select>
-
-      <!-- Domain Filter -->
-      <select id="attributes-domain-filter" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
-        <option value="">All domains</option>
-        <option value="all">Global</option>
-      </select>
-
-      <!-- Source Filter: cdp_master_profiles vs cdp_domain_profiles vs cdp_raw_profiles_stage (see attributes-view.js sourceLabel) -->
-      <select id="attributes-source-filter" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
-        <option value="">All sources</option>
-        <option value="cdp_master_profiles">Master Profile</option>
-        <option value="cdp_domain_profiles">Domain Profile</option>
-        <option value="cdp_raw_profiles_stage">Raw Profile</option>
-      </select>
-
-      <!-- Add Attribute -->
-      <button id="btn-attributes-add" type="button" class="inline-flex items-center gap-1.5 bg-indigo-600 text-white rounded-xl px-3.5 py-2 text-xs font-semibold hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 transition-colors shadow-sm shadow-indigo-100">
-        <i class="bi bi-plus-lg text-sm leading-none" aria-hidden="true"></i>
-        <span>Add Attribute</span>
-      </button>
-
-    </div>
-
-  </div>
-
-  <!-- Table Container -->
-  <div class="overflow-x-auto">
-    <table class="w-full text-sm text-left">
-      <thead id="attributes-thead" class="bg-slate-50/80 text-slate-400 text-[11px] uppercase tracking-wider font-semibold border-b border-slate-100 sticky top-0 z-10"></thead>
-      <tbody id="attributes-tbody" class="divide-y divide-slate-100"></tbody>
-    </table>
-  </div>
-
-  <!-- Loading State -->
-  <div id="attributes-loading" class="p-12 flex justify-center">
-    <div class="spinner"></div>
-  </div>
-
-  <!-- Empty State -->
-  <div id="attributes-empty" class="hidden p-12 text-center text-sm text-slate-400">
-    <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-slate-50 flex items-center justify-center text-xl">🔍</div>
-    <div class="font-medium text-slate-600">No attributes matched your filters</div>
-    <p class="text-xs text-slate-400 mt-1">Try adjusting your search query or filter selections.</p>
-  </div>
-
-  <!-- Footer Count -->
-  <div class="p-4 px-6 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 bg-slate-50/30">
-    <span id="attributes-count-label" class="font-medium"></span>
-  </div>
-
-</div>
-
-<!--
-  =============================================================================
-  ATTRIBUTE FORM MODAL
-  Creates a new customer360.cdp_profile_attributes catalog row via
-  POST /profile-attributes/ (see attributes-view.js).
-  =============================================================================
--->
-<div id="attribute-form-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="attribute-form-title">
-  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 border border-slate-100 max-h-[90vh] overflow-y-auto">
-
-    <!-- Modal Header -->
-    <div class="flex items-center gap-3 mb-5 pb-3 border-b border-slate-100">
-      <div class="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-      </div>
-      <div>
-        <h2 id="attribute-form-title" class="text-base font-bold text-slate-900 tracking-tight">Add Attribute</h2>
-        <p id="attribute-form-subtitle" class="text-xs text-slate-400">Registers a new row in the cdp_profile_attributes catalog</p>
-      </div>
-    </div>
-
-    <!-- Form Fields -->
-    <div class="space-y-4">
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Attribute Code *</label>
-          <input id="attribute-add-code" type="text" placeholder="e.g. preferred_language" class="w-full text-xs font-mono border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+<div class="min-h-full space-y-5">
+  <div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
+    <div class="px-6 py-5 flex flex-wrap items-start justify-between gap-5">
+      <div class="flex items-center gap-3">
+        <div class="h-11 w-11 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-sm shadow-indigo-200">
+          <i class="bi bi-stack text-lg" aria-hidden="true"></i>
         </div>
         <div>
-          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Display Name *</label>
-          <input id="attribute-add-name" type="text" placeholder="e.g. Preferred Language" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+          <h1 class="text-xl font-bold text-slate-900 tracking-tight">Attribute Management</h1>
+          <p class="text-sm text-slate-500 mt-1">Manage customer profile metadata and governed behavioral events.</p>
         </div>
       </div>
-
-      <div>
-        <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Description</label>
-        <textarea id="attribute-add-description" rows="3" placeholder="What this attribute represents..." class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none resize-none"></textarea>
+      <div class="flex items-center gap-8">
+        <div class="text-center">
+          <div id="attributes-profile-total" class="text-xl font-bold text-slate-900">—</div>
+          <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Profile attributes</div>
+        </div>
+        <div class="h-9 w-px bg-slate-200"></div>
+        <div class="text-center">
+          <div id="attributes-behavior-total" class="text-xl font-bold text-slate-900">—</div>
+          <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Behavior events</div>
+        </div>
+        <button id="btn-attributes-add" type="button" class="hidden inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-semibold text-white shadow-sm shadow-indigo-200 hover:bg-indigo-700 transition-colors">
+          <i class="bi bi-plus-lg" aria-hidden="true"></i>
+          <span id="attributes-add-label">Add Profile Attribute</span>
+        </button>
       </div>
+    </div>
 
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Group</label>
-          <select id="attribute-add-group" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer">
-            <option value="GENERAL">General</option>
-            <option value="IDENTITY">Identity</option>
-            <option value="IDENTITY_GRAPH">Identity Graph</option>
-            <option value="RETAIL">Retail</option>
-            <option value="BANKING">Banking</option>
-            <option value="REAL_ESTATE">Real Estate</option>
-            <option value="TRAVEL">Travel</option>
-            <option value="MEDIA">Media</option>
-            <option value="EDUCATION">Education</option>
-            <option value="MARKETING">Marketing</option>
-            <option value="LINEAGE">Lineage</option>
-            <option value="LIFECYCLE">Lifecycle</option>
+    <div class="px-6 border-t border-slate-100 bg-slate-50/50">
+      <div class="grid gap-3 py-4 sm:grid-cols-2" role="tablist" aria-label="Attribute sections">
+        <button id="attributes-tab-profile" type="button" role="tab" aria-selected="true" aria-controls="attributes-table-panel" data-attributes-tab="profile"
+          class="attributes-section-tab flex items-center gap-3 rounded-xl border border-indigo-200 bg-white px-4 py-3 text-left shadow-sm ring-1 ring-indigo-100">
+          <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
+            <i class="bi bi-person-lines-fill" aria-hidden="true"></i>
+          </span>
+          <span>
+            <span class="block text-sm font-bold text-slate-900">Customer Profile Attributes</span>
+            <span class="block text-xs text-slate-500">Identity, demographics, PII, traits and stable traits</span>
+          </span>
+        </button>
+        <button id="attributes-tab-behavior" type="button" role="tab" aria-selected="false" aria-controls="attributes-table-panel" data-attributes-tab="behavior"
+          class="attributes-section-tab flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-left hover:border-indigo-200 hover:bg-indigo-50/30 transition-colors">
+          <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-sky-50 text-sky-600">
+            <i class="bi bi-activity" aria-hidden="true"></i>
+          </span>
+          <span>
+            <span class="block text-sm font-bold text-slate-900">Customer Behavior Attributes</span>
+            <span class="block text-xs text-slate-500">Interactions, engagement, transactions and conversions</span>
+          </span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="attributes-table-panel" class="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden" role="tabpanel">
+    <div class="p-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
+      <div>
+        <h2 id="attributes-section-title" class="text-base font-bold text-slate-900">Customer Profile Attributes</h2>
+        <p id="attributes-section-subtitle" class="text-xs text-slate-500 mt-1">Attributes stored in cdp_profile_attributes.</p>
+      </div>
+      <div class="flex flex-wrap items-center justify-end gap-2">
+        <div class="relative">
+          <i class="bi bi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs" aria-hidden="true"></i>
+          <input id="attributes-search-input" type="search" placeholder="Search profile attributes…" autocomplete="off"
+            class="w-64 rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-xs text-slate-700 outline-none placeholder-slate-400 focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-500/15" />
+        </div>
+        <div id="attributes-profile-filters" class="flex flex-wrap gap-2">
+          <select id="attributes-group-filter" class="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs text-slate-700 outline-none focus:border-indigo-500">
+            <option value="">All groups</option>
           </select>
-        </div>
-        <div>
-          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Source Table</label>
-          <select id="attribute-add-source" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer">
-            <option value="cdp_domain_profiles" selected>Domain Profile</option>
+          <select id="attributes-domain-filter" class="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs text-slate-700 outline-none focus:border-indigo-500">
+            <option value="">All domains</option>
+            <option value="all">Global</option>
+          </select>
+          <select id="attributes-source-filter" class="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs text-slate-700 outline-none focus:border-indigo-500">
+            <option value="">All sources</option>
             <option value="cdp_master_profiles">Master Profile</option>
+            <option value="cdp_domain_profiles">Domain Profile</option>
             <option value="cdp_raw_profiles_stage">Raw Profile</option>
           </select>
         </div>
+        <div id="attributes-behavior-filters" class="hidden flex-wrap gap-2">
+          <select id="behavior-category-filter" class="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs text-slate-700 outline-none focus:border-indigo-500">
+            <option value="">All categories</option>
+            <option value="GENERAL">General</option>
+            <option value="EDUCATION">Education</option>
+            <option value="COMMERCE">Commerce</option>
+            <option value="FEEDBACK">Feedback</option>
+            <option value="FINANCE">Finance</option>
+            <option value="STOCK_TRADING">Stock Trading</option>
+            <option value="TRAVEL">Travel</option>
+            <option value="REAL_ESTATE">Real Estate</option>
+            <option value="SERVICE_INDUSTRY">Service Industry</option>
+          </select>
+          <select id="behavior-domain-filter" class="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs text-slate-700 outline-none focus:border-indigo-500">
+            <option value="">All domains</option>
+            <option value="all">Global</option>
+          </select>
+          <select id="behavior-conversion-filter" class="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs text-slate-700 outline-none focus:border-indigo-500">
+            <option value="">All event types</option>
+            <option value="true">Conversion</option>
+            <option value="false">Non-conversion</option>
+          </select>
+        </div>
       </div>
+    </div>
 
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-sm">
+        <thead id="attributes-thead" class="sticky top-0 z-10 border-b border-slate-100 bg-slate-50/90 text-[11px] font-semibold uppercase tracking-wider text-slate-400"></thead>
+        <tbody id="attributes-tbody" class="divide-y divide-slate-100"></tbody>
+      </table>
+    </div>
+    <div id="attributes-loading" class="flex justify-center p-12"><div class="spinner"></div></div>
+    <div id="attributes-empty" class="hidden p-12 text-center">
+      <div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-slate-50 text-slate-400"><i class="bi bi-search"></i></div>
+      <div class="text-sm font-medium text-slate-600">No attributes matched your filters</div>
+      <p class="mt-1 text-xs text-slate-400">Try another search query or filter.</p>
+    </div>
+    <div class="flex items-center justify-between border-t border-slate-100 bg-slate-50/30 px-6 py-4 text-xs text-slate-500">
+      <span id="attributes-count-label" class="font-medium"></span>
+      <span class="text-slate-400">Catalog data is shared across tenants</span>
+    </div>
+  </div>
+</div>
+
+<div id="attribute-form-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="attribute-form-title">
+  <div class="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-slate-100 bg-white p-6 shadow-2xl">
+    <div class="mb-5 flex items-center gap-3 border-b border-slate-100 pb-4">
+      <div id="attribute-form-icon-wrap" class="rounded-xl bg-indigo-50 p-2.5 text-indigo-600"><i id="attribute-form-icon" class="bi bi-person-vcard" aria-hidden="true"></i></div>
+      <div>
+        <div class="flex items-center gap-2">
+          <h2 id="attribute-form-title" class="text-base font-bold text-slate-900">Add Profile Attribute</h2>
+          <span id="attribute-form-mode-badge" class="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-indigo-600">Profile</span>
+        </div>
+        <p id="attribute-form-subtitle" class="text-xs text-slate-400"></p>
+      </div>
+    </div>
+
+    <div class="space-y-4">
       <div class="grid grid-cols-2 gap-3">
         <div>
-          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Domain Scope</label>
-          <select id="attribute-add-domain-scope" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer">
-            <option value="all">All (Global)</option>
-            <option value="_">Unclassified / Not set</option>
-            <option value="banking">Banking &amp; Financial Services</option>
-            <option value="education">Education</option>
-            <option value="healthcare">Healthcare</option>
-            <option value="hospitality">Hospitality &amp; Food Service</option>
-            <option value="insurance">Insurance</option>
-            <option value="manufacturing">Manufacturing</option>
-            <option value="media">Media &amp; Entertainment</option>
-            <option value="real_estate">Real Estate</option>
-            <option value="retail">Retail &amp; E-Commerce</option>
-            <option value="telecom">Telecommunications</option>
-            <option value="travel">Travel &amp; Hospitality</option>
+          <label id="attribute-code-label" class="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-slate-400" for="attribute-add-code">Attribute Code *</label>
+          <input id="attribute-add-code" type="text" placeholder="preferred_language" maxlength="100" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 font-mono text-xs text-slate-700 outline-none focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-500/15" />
+        </div>
+        <div id="attribute-name-field">
+          <label class="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-slate-400" for="attribute-add-name">Display Name *</label>
+          <input id="attribute-add-name" type="text" placeholder="Preferred Language" maxlength="255" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-700 outline-none focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-500/15" />
+        </div>
+        <div id="behavior-category-field" class="hidden">
+          <label class="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-slate-400" for="behavior-add-category">Event Category *</label>
+          <select id="behavior-add-category" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-700 outline-none focus:border-indigo-500">
+            <option value="GENERAL">General</option><option value="EDUCATION">Education</option><option value="COMMERCE">Commerce</option><option value="FEEDBACK">Feedback</option><option value="FINANCE">Finance</option><option value="STOCK_TRADING">Stock Trading</option><option value="TRAVEL">Travel</option><option value="REAL_ESTATE">Real Estate</option><option value="SERVICE_INDUSTRY">Service Industry</option>
+          </select>
+        </div>
+      </div>
+
+      <div>
+        <label class="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-slate-400" for="attribute-add-description">Description</label>
+        <textarea id="attribute-add-description" rows="3" maxlength="2000" placeholder="Describe what this item represents…" class="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-700 outline-none focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-500/15"></textarea>
+      </div>
+
+      <div id="attribute-profile-fields" class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-slate-400" for="attribute-add-group">Group</label>
+          <select id="attribute-add-group" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs outline-none focus:border-indigo-500">
+            <option value="GENERAL">General</option><option value="IDENTITY">Identity</option><option value="IDENTITY_GRAPH">Identity Graph</option><option value="RETAIL">Retail</option><option value="BANKING">Banking</option><option value="REAL_ESTATE">Real Estate</option><option value="TRAVEL">Travel</option><option value="MEDIA">Media</option><option value="EDUCATION">Education</option><option value="MARKETING">Marketing</option><option value="LINEAGE">Lineage</option><option value="LIFECYCLE">Lifecycle</option><option value="LEAD_SCORING">Lead Scoring</option><option value="CHURN_SCORING">Churn Scoring</option><option value="CLV_SCORING">CLV Scoring</option><option value="CX_SCORING">CX Scoring</option><option value="DATA_QUALITY">Data Quality</option>
           </select>
         </div>
         <div>
-          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Data Type</label>
-          <select id="attribute-add-data-type" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer">
-            <option value="TEXT">Text</option>
-            <option value="NUMERIC">Numeric</option>
-            <option value="BOOLEAN">Boolean</option>
-            <option value="DATE">Date</option>
-            <option value="TIMESTAMP">Timestamp</option>
-            <option value="ARRAY">Array</option>
-            <option value="JSONB">JSONB</option>
+          <label class="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-slate-400" for="attribute-add-source">Source Table</label>
+          <select id="attribute-add-source" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs outline-none focus:border-indigo-500">
+            <option value="cdp_domain_profiles">Domain Profile</option><option value="cdp_master_profiles">Master Profile</option><option value="cdp_raw_profiles_stage">Raw Profile</option>
+          </select>
+        </div>
+        <div>
+          <label class="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-slate-400" for="attribute-add-data-type">Data Type</label>
+          <select id="attribute-add-data-type" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs outline-none focus:border-indigo-500">
+            <option value="TEXT">Text</option><option value="NUMERIC">Numeric</option><option value="BOOLEAN">Boolean</option><option value="DATE">Date</option><option value="TIMESTAMP">Timestamp</option><option value="ARRAY">Array</option><option value="JSONB">JSONB</option>
+          </select>
+        </div>
+        <div>
+          <label class="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-slate-400" for="attribute-add-domain-scope">Domain Scope</label>
+          <select id="attribute-add-domain-scope" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs outline-none focus:border-indigo-500">
+            <option value="all">All (Global)</option><option value="_">Unclassified / Not set</option><option value="banking">Banking &amp; Financial Services</option><option value="education">Education</option><option value="healthcare">Healthcare</option><option value="hospitality">Hospitality &amp; Food Service</option><option value="insurance">Insurance</option><option value="manufacturing">Manufacturing</option><option value="media">Media &amp; Entertainment</option><option value="real_estate">Real Estate</option><option value="retail">Retail &amp; E-Commerce</option><option value="telecom">Telecommunications</option><option value="travel">Travel &amp; Hospitality</option>
           </select>
         </div>
       </div>
 
-      <div class="flex items-center gap-5">
-        <label class="inline-flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
-          <input id="attribute-add-is-pii" type="checkbox" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/30" />
-          Contains PII
-        </label>
-        <label class="inline-flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
-          <input id="attribute-add-is-segmentable" type="checkbox" checked class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/30" />
-          Segmentable
-        </label>
+      <div id="attribute-behavior-fields" class="hidden grid-cols-2 gap-3">
+        <div>
+          <label class="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-slate-400" for="behavior-add-domain">Domain Scope</label>
+          <select id="behavior-add-domain" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs outline-none focus:border-indigo-500">
+            <option value="all">All (Global)</option><option value="_">Unclassified / Not set</option><option value="banking">Banking</option><option value="education">Education</option><option value="healthcare">Healthcare</option><option value="hospitality">Hospitality</option><option value="insurance">Insurance</option><option value="manufacturing">Manufacturing</option><option value="media">Media</option><option value="real_estate">Real Estate</option><option value="retail">Retail</option><option value="telecom">Telecommunications</option><option value="travel">Travel</option>
+          </select>
+        </div>
+        <div>
+          <label class="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-slate-400" for="behavior-add-value-field">Value Field</label>
+          <input id="behavior-add-value-field" type="text" maxlength="100" placeholder="order_total" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 font-mono text-xs outline-none focus:border-indigo-500" />
+        </div>
+        <div>
+          <label class="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-slate-400" for="attribute-add-status">Status</label>
+          <select id="attribute-add-status" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs outline-none focus:border-indigo-500"><option value="ACTIVE">Active</option><option value="INACTIVE">Inactive</option></select>
+        </div>
+        <div class="flex items-end pb-2">
+          <label class="inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-700">
+            <input id="behavior-add-conversion" type="checkbox" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/30" />Default conversion event
+          </label>
+        </div>
       </div>
 
-      <div id="attribute-add-error" class="hidden text-xs text-red-600 bg-red-50 border border-red-100 rounded-xl px-3.5 py-2.5"></div>
+      <div id="attribute-profile-checkboxes" class="flex items-center gap-5">
+        <label class="inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-700"><input id="attribute-add-is-pii" type="checkbox" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/30" />Contains PII</label>
+        <label class="inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-700"><input id="attribute-add-is-segmentable" type="checkbox" checked class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/30" />Segmentable</label>
+      </div>
+      <div id="attribute-add-error" class="hidden rounded-xl border border-red-100 bg-red-50 px-3.5 py-2.5 text-xs text-red-600"></div>
     </div>
 
-    <!-- Action Buttons -->
-    <div class="flex items-center justify-end gap-2.5 mt-6 pt-4 border-t border-slate-100">
-      <button id="btn-attribute-add-cancel" type="button" class="border border-slate-200/80 bg-white rounded-xl px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm">
-        Cancel
-      </button>
-      <button id="btn-attribute-add-save" type="button" class="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-4 py-2 text-xs font-semibold transition-colors shadow-sm shadow-indigo-100">
-        <span id="attribute-form-save-label">Save Attribute</span>
-      </button>
+    <div class="mt-6 flex items-center justify-end gap-2.5 border-t border-slate-100 pt-4">
+      <button id="btn-attribute-add-cancel" type="button" class="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"><i class="bi bi-x-lg" aria-hidden="true"></i>Cancel</button>
+      <button id="btn-attribute-add-save" type="button" class="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white shadow-sm shadow-indigo-100 hover:bg-indigo-700"><i class="bi bi-check2-circle" aria-hidden="true"></i><span id="attribute-form-save-label">Save Attribute</span></button>
     </div>
+  </div>
+</div>
 
+<div id="attribute-delete-modal" class="hidden fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="attribute-delete-title" aria-describedby="attribute-delete-warning">
+  <div class="w-full max-w-md overflow-hidden rounded-2xl border border-red-100 bg-white shadow-2xl">
+    <div class="flex items-start gap-4 bg-red-50/70 p-6">
+      <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-red-100 text-red-600">
+        <i class="bi bi-exclamation-triangle-fill text-lg" aria-hidden="true"></i>
+      </div>
+      <div>
+        <h2 id="attribute-delete-title" class="text-base font-bold text-slate-900">Delete catalog item?</h2>
+        <p id="attribute-delete-warning" class="mt-1 text-sm leading-5 text-slate-600">This action permanently removes the selected item. It cannot be undone.</p>
+      </div>
+    </div>
+    <div class="p-6">
+      <div class="mb-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-xs leading-5 text-red-700">
+        <i class="bi bi-shield-exclamation mr-1.5" aria-hidden="true"></i>
+        <span id="attribute-delete-impact">Deleting catalog metadata may affect identity, segmentation, analytics, or ingestion behavior.</span>
+      </div>
+      <label class="block text-xs font-semibold text-slate-700" for="attribute-delete-confirmation">
+        Type <span class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-red-600">yes</span> to confirm
+      </label>
+      <div class="relative mt-2">
+        <i class="bi bi-keyboard absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true"></i>
+        <input id="attribute-delete-confirmation" type="text" autocomplete="off" placeholder="yes" class="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 font-mono text-sm text-slate-800 outline-none focus:border-red-400 focus:bg-white focus:ring-2 focus:ring-red-100" />
+      </div>
+      <div id="attribute-delete-error" class="mt-2 hidden text-xs font-medium text-red-600" role="alert"></div>
+      <div class="mt-6 flex items-center justify-end gap-2.5">
+        <button id="btn-attribute-delete-cancel" type="button" class="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"><i class="bi bi-arrow-left" aria-hidden="true"></i>Keep item</button>
+        <button id="btn-attribute-delete-confirm" type="button" disabled class="inline-flex items-center gap-1.5 rounded-xl bg-red-600 px-4 py-2 text-xs font-semibold text-white shadow-sm shadow-red-100 transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"><i class="bi bi-trash3" aria-hidden="true"></i>Delete permanently</button>
+      </div>
+    </div>
   </div>
 </div>

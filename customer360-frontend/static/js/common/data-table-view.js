@@ -44,8 +44,10 @@ window.C360 = window.C360 || {};
     if (col.type === "identity") {
       cell.name = vm[col.nameField];
       cell.sub = col.subField ? vm[col.subField] : null;
+      cell.description = col.descriptionField ? vm[col.descriptionField] : null;
       cell.isTagSub = col.subStyle === "tag";
       cell.avatarContent = (col.avatarField ? vm[col.avatarField] : null) || "";
+      cell.avatarIcon = (col.avatarIconField ? vm[col.avatarIconField] : null) || col.avatarIcon || "";
       cell.avatarBg = (col.avatarBgField ? vm[col.avatarBgField] : null) || col.avatarBg || "bg-indigo-100";
       cell.avatarColor = (col.avatarColorField ? vm[col.avatarColorField] : null) || col.avatarColor || "text-indigo-700";
       cell.avatarTextClass = col.avatarTextClass || "font-semibold text-xs";
@@ -77,6 +79,7 @@ window.C360 = window.C360 || {};
       clientSide: false,
       clientSideLimit: 500,
       rowClickable: true,
+      compactActions: true,
       actionLabel: "View",
       resourceLabel: "item",
       rowClass: "border-t border-slate-100 hover:bg-slate-50 transition-colors",
@@ -104,7 +107,9 @@ window.C360 = window.C360 || {};
       if (!o.el.thead) return;
       $(o.el.thead).html(C360.templates.render("data-table-head", {
         columns: o.columns,
-        showActionColumn: o.rowClickable || !!o.onEdit || !!o.onSecondaryAction,
+        showActionColumn: typeof o.actionsVisible === "function"
+          ? !!o.actionsVisible()
+          : (o.rowClickable || !!o.onEdit || !!o.onSecondaryAction),
         compactTable: !!o.compactTable
       }));
     }
@@ -121,17 +126,24 @@ window.C360 = window.C360 || {};
       var rowSelectorClass = o.rowClickable && o.rowSelectorClass ? " cursor-pointer " + o.rowSelectorClass : "";
       var rows = items.map(function (item) {
         var vm = rowVm(item);
+        var editable = !!o.onEdit && (!o.canEdit || o.canEdit(item));
+        var secondaryAction = !!o.onSecondaryAction && (!o.canSecondaryAction || o.canSecondaryAction(item));
         return {
           id: o.rowId ? o.rowId(vm) : vm.id,
           rowClass: o.rowClass + rowSelectorClass,
           clickable: o.rowClickable,
           actionLabel: o.actionLabel,
-          editable: !!o.onEdit,
-          hasActions: !!o.onEdit || !!o.onSecondaryAction,
+          editable: editable,
+          compactActions: o.compactActions !== false,
+          hasActions: editable || secondaryAction,
           editLabel: o.editLabel || "Edit",
-          secondaryAction: !!o.onSecondaryAction && (!o.canSecondaryAction || o.canSecondaryAction(item)),
+          secondaryAction: secondaryAction,
           secondaryActionLabel: o.secondaryActionLabel || "Action",
           secondaryActionAria: o.secondaryActionAria ? o.secondaryActionAria(item) : (o.secondaryActionLabel || "Action"),
+          secondaryActionIcon: o.secondaryActionIcon || "bi-megaphone",
+          secondaryActionClass: o.secondaryActionClass || "text-indigo-600 hover:text-indigo-800",
+          secondaryActionButtonClass: o.secondaryActionButtonClass ||
+            "border-indigo-100 bg-indigo-50 text-indigo-600 hover:border-indigo-200 hover:bg-indigo-100 focus:ring-indigo-400",
           cells: o.columns.map(function (col) { return buildCellVm(col, vm); })
         };
       });
@@ -447,6 +459,7 @@ window.C360 = window.C360 || {};
       bindPagination: bindPagination,
       bindRowClick: bindRowClick,
       bindRowEdit: bindRowEdit,
+      renderHead: renderHead,
       rowVm: rowVm
     };
   }

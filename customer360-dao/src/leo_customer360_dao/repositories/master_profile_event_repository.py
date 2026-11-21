@@ -10,6 +10,7 @@ from botocore.client import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
 from leo_customer360_dao.config import Settings
+from leo_customer360_dao.utils.s3_tls import suppress_insecure_request_warning
 
 
 class MasterProfileEventStoreError(RuntimeError):
@@ -129,6 +130,7 @@ class MasterProfileEventStore:
             ) from exc
 
     def _build_s3_client(self) -> Any:
+        suppress_insecure_request_warning(self.settings.event_s3_verify_ssl)
         kwargs: dict[str, Any] = {
             "region_name": self.settings.event_s3_region,
             "verify": self.settings.event_s3_verify_ssl,

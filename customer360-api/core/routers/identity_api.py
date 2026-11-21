@@ -14,7 +14,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from core.cache import cache_response, invalidate_prefix
+from core.cache import cache_response, invalidate_key, invalidate_prefix
+from core.auth import require_attribute_manager
 from core.repositories.identity_repository import IdentityRepository
 from leo_customer360_dao.config import settings
 from leo_customer360_dao.crud import identity as identity_crud
@@ -24,6 +25,7 @@ from core.database import get_db
 from leo_customer360_dao.models.identity import (
     CdpCustomerPersona,
     CdpDomainProfile,
+    CdpEventCatalog,
     CdpIdentityIndex,
     CdpIdResolutionStatus,
     CdpMasterProfile,
@@ -40,6 +42,9 @@ from leo_customer360_dao.schemas.identity import (
     DomainProfileCreate,
     DomainProfileRead,
     DomainProfileUpdate,
+    EventCatalogCreate,
+    EventCatalogRead,
+    EventCatalogUpdate,
     IdentityIndexCreate,
     IdentityIndexRead,
     IdentityIndexUpdate,
@@ -689,6 +694,31 @@ profile_attributes_router = build_crud_router(
     update_validator=lambda db, obj, payload: validate_domain_value(
         db, payload.get("domain_scope"), field_name="domain_scope", allow_all=True
     ),
+    write_dependencies=[Depends(require_attribute_manager)],
+)
+
+
+# --- Behavioral Event Catalog ---------------------------------------------------
+
+event_catalog_router = build_crud_router(
+    model=CdpEventCatalog,
+    pk_field="id",
+    pk_type=uuid.UUID,
+    create_schema=EventCatalogCreate,
+    update_schema=EventCatalogUpdate,
+    read_schema=EventCatalogRead,
+    prefix="/event-catalog",
+    tags=["Metadata - Behavioral Event Catalog"],
+    create_validator=lambda db, payload: validate_domain_value(
+        db, payload.get("domain_scope"), field_name="domain_scope", allow_all=True
+    ),
+    update_validator=lambda db, obj, payload: validate_domain_value(
+        db, payload.get("domain_scope"), field_name="domain_scope", allow_all=True
+    ),
+    create_hook=lambda obj: invalidate_key("analytics:event-catalog:v1"),
+    update_hook=lambda obj: invalidate_key("analytics:event-catalog:v1"),
+    delete_hook=lambda obj: invalidate_key("analytics:event-catalog:v1"),
+    write_dependencies=[Depends(require_attribute_manager)],
 )
 
 
@@ -772,6 +802,7 @@ all_identity_routers = [
     profile_links_router,
     domain_profiles_router,
     profile_attributes_router,
+    event_catalog_router,
     identity_index_router,
     profile_merge_history_router,
     resolution_status_router,

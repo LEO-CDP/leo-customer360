@@ -3,10 +3,13 @@
 from datetime import datetime, timezone
 from io import BytesIO
 from uuid import UUID
+import warnings
 
 from botocore.exceptions import ClientError
+from urllib3.exceptions import InsecureRequestWarning
 from leo_customer360_dao.config import Settings
 from leo_customer360_dao.repositories.master_profile_event_repository import MasterProfileEventStore
+from leo_customer360_dao.utils.s3_tls import suppress_insecure_request_warning
 
 
 MASTER_ID = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
@@ -67,3 +70,19 @@ def test_projection_returns_empty_when_file_is_missing():
     store = MasterProfileEventStore(Settings(master_profile_s3_bucket="c360-master-profiles"), FakeS3())
 
     assert store.query(TENANT_ID, MASTER_ID) == []
+
+
+def test_insecure_s3_warning_is_suppressed_only_when_verification_is_disabled():
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        suppress_insecure_request_warning(False)
+        warnings.warn("Unverified HTTPS request is being made.", InsecureRequestWarning)
+
+    assert not [warning for warning in recorded if warning.category is InsecureRequestWarning]
+
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        suppress_insecure_request_warning(True)
+        warnings.warn("Unverified HTTPS request is being made.", InsecureRequestWarning)
+
+    assert any(warning.category is InsecureRequestWarning for warning in recorded)

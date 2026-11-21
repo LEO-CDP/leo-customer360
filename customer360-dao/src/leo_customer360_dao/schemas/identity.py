@@ -484,6 +484,59 @@ class ProfileAttributeRead(ProfileAttributeBase):
     updated_at: Optional[datetime] = None
 
 
+EVENT_CATEGORY_PATTERN = (
+    "^(GENERAL|EDUCATION|COMMERCE|FEEDBACK|FINANCE|STOCK_TRADING|"
+    "TRAVEL|REAL_ESTATE|SERVICE_INDUSTRY)$"
+)
+
+
+class EventCatalogBase(BaseModel):
+    """Validated representation of a governed behavioral event."""
+
+    event_name: str = Field(
+        ...,
+        min_length=1,
+        max_length=255,
+        pattern=r"^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
+    )
+    event_category: str = Field(..., pattern=EVENT_CATEGORY_PATTERN)
+    domain_scope: str = "all"
+    description: Optional[str] = Field(default=None, max_length=2000)
+    is_conversion_default: bool = False
+    value_field: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
+    )
+    display_order: int = Field(default=0, ge=0, le=100000)
+    status: str = Field(default="ACTIVE", pattern="^(ACTIVE|INACTIVE)$")
+
+
+class EventCatalogCreate(EventCatalogBase):
+    pass
+
+
+class EventCatalogUpdate(BaseModel):
+    event_category: Optional[str] = Field(default=None, pattern=EVENT_CATEGORY_PATTERN)
+    domain_scope: Optional[str] = None
+    description: Optional[str] = Field(default=None, max_length=2000)
+    is_conversion_default: Optional[bool] = None
+    value_field: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
+    )
+    display_order: Optional[int] = Field(default=None, ge=0, le=100000)
+    status: Optional[str] = Field(default=None, pattern="^(ACTIVE|INACTIVE)$")
+
+
+class EventCatalogRead(EventCatalogBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
 class IdResolutionStatusRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: bool

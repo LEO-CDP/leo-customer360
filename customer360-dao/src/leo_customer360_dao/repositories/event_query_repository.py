@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from leo_customer360_dao.config import Settings
 from leo_customer360_dao.models.system import SysDataSource
+from leo_customer360_dao.utils.s3_tls import suppress_insecure_request_warning
 
 
 class EventQueryError(RuntimeError):
@@ -273,6 +274,7 @@ class EventQueryRepository:
         return lower_bound, now
 
     def _build_s3_client(self) -> Any:
+        suppress_insecure_request_warning(self.settings.event_s3_verify_ssl)
         client_kwargs: dict[str, Any] = {
             # Must be a valid AWS region token; boto3 rejects any other value.
             "region_name": self.settings.event_s3_region,

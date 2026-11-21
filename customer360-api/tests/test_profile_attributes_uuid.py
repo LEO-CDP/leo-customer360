@@ -8,6 +8,7 @@ from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from core.auth import require_attribute_manager
 from core.database import get_db
 from leo_customer360_dao.schemas.identity import ProfileAttributeRead
 
@@ -99,6 +100,7 @@ class ProfileAttributesUUIDRouterTests(unittest.TestCase):
                 app = FastAPI()
                 app.include_router(identity_router.profile_attributes_router)
                 app.dependency_overrides[get_db] = lambda: None
+                app.dependency_overrides[require_attribute_manager] = lambda: None
                 return TestClient(app)
 
     def test_profile_attribute_read_schema_accepts_uuid_ids(self):
