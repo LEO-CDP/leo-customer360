@@ -43,6 +43,7 @@ window.C360 = window.C360 || {};
     // Docs Assistant (RAG chatbot). docsAiBase is the same-origin proxy in app.py
     // (forwards to tools/docs-vector-search); docsSiteBase is where citations link.
     docsAiBase: "/ai",
+    errorCollectorPath: "/client-errors",
     docsSiteBase: "https://leo-cdp.github.io/leo-customer360"
   };
 
@@ -134,6 +135,7 @@ window.C360 = window.C360 || {};
       leoObserverTrackingEndpoint: serverConfig.leoObserverTrackingEndpoint || DEFAULTS.leoObserverTrackingEndpoint,
       leoObserverCdnJS: serverConfig.leoObserverCdnJS || DEFAULTS.leoObserverCdnJS,
       docsAiBase: serverConfig.docsAiBase || DEFAULTS.docsAiBase,
+      errorCollectorPath: serverConfig.errorCollectorPath || DEFAULTS.errorCollectorPath,
       docsSiteBase: serverConfig.docsSiteBase || DEFAULTS.docsSiteBase,
       templateCacheBust: serverConfig.cacheBust || ""
     };
@@ -702,6 +704,21 @@ window.C360 = window.C360 || {};
     return roles.some(function (r) { return adminRoles.indexOf(String(r).toLowerCase()) !== -1; });
   }
 
+  // --- API error reporting: failed calls (4xx/5xx) go to the frontend's own /client-errors ---
+  function reportApiError(method, url, status) {
+    try {
+      if (!(status >= 400) || String(url).indexOf(CONFIG.errorCollectorPath) !== -1) return;
+      var body = JSON.stringify({ method: String(method || "GET"), url: String(url), status: status });
+      navigator.sendBeacon(CONFIG.errorCollectorPath, new Blob([body], { type: "application/json" }));
+    } catch (e) { /* reporting must never affect the UI */ }
+  }
+
+  if (typeof $ === "function") {
+    $(document).ajaxError(function (e, xhr, settings) {
+      reportApiError(settings.type, settings.url, xhr.status);
+    });
+  }
+
   // --- Docs Assistant (RAG chatbot) client -------------------------------------
   // Deliberately NOT api(): that helper targets customer360-api and injects
   // tenant/auth headers the docs proxy neither needs nor wants. These hit the
@@ -719,6 +736,7 @@ window.C360 = window.C360 || {};
       signal: signal
     }).then(function (resp) {
       if (!resp.ok) {
+        reportApiError("POST", CONFIG.docsAiBase + path, resp.status);
         var err = new Error("HTTP " + resp.status);
         err.status = resp.status;
         throw err;

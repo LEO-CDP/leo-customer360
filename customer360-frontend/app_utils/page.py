@@ -48,6 +48,7 @@ class AdminPageRenderer:
             "leo_observer_tracking_endpoint": self.settings.observer_tracking_endpoint,
             "leo_observer_cdn_js": self.settings.observer_cdn_js,
             "docs_ai_base": self.settings.docs_ai_base,
+            "error_collector_path": self.settings.error_collector_path,
             "docs_site_base": self.settings.docs_site_base,
         }
 
