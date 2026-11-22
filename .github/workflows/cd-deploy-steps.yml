@@ -167,6 +167,10 @@ jobs:
           AGENT_API_TOKEN: ${{ secrets.AGENT_API_TOKEN }}   # shared bearer token: agent /plan/* auth == customer360-api sender
           DOCS_OPENAI_API_KEY: ${{ secrets.DOCS_OPENAI_API_KEY }}   # docs-vector-search OpenAI embeddings + LLM
           DOCS_INTERNAL_AUTH_SECRET: ${{ secrets.DOCS_INTERNAL_AUTH_SECRET }}   # shared by the frontend /ai proxy and docs-vector-search
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}   # `frontend` step: API error digest -> Telegram (same secrets as the CI notifier)
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ERROR_COLLECTOR_LINK_TEMPLATE: ${{ vars.ERROR_COLLECTOR_LINK_TEMPLATE }}   # `frontend` step: optional per-error link, {method} {path} {status}
+          ERROR_COLLECTOR_BATCH_SIZE: ${{ vars.ERROR_COLLECTOR_BATCH_SIZE }}   # `frontend` step: optional; unset => 10
           PORTAINER_ADMIN_PASSWORD: ${{ secrets.PORTAINER_ADMIN_PASSWORD }}   # monitoring step: auto-registers Portainer agent envs
           GH_TOKEN: ${{ github.token }}   # lets lib/record_deploy.sh call `gh api` (Deployments ledger)
           VKS_KUBECONFIG: ${{ secrets.VKS_KUBECONFIG }}   # `event-api`, `promotions` and `backend` (Dagster) steps: those services run on VKS, not a vServer

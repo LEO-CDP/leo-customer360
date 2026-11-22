@@ -34,7 +34,9 @@ def _now() -> str:
 
 class ErrorCollector:
     # ponytail: in-memory, lost on restart; move to Redis when multi-worker/multi-box
-    def __init__(self) -> None:
+    def __init__(self, batch_size: int = 0, sink: Callable[[dict], None] | None = None) -> None:
+        self.batch_size = batch_size  # 0 = flush on the timer only
+        self.sink = sink or log_sink
         self._reset()
 
     def _reset(self) -> None:
@@ -48,6 +50,10 @@ class ErrorCollector:
             self._dropped += 1
             return
         self._rows[key] = self._rows.get(key, 0) + 1
+
+    @property
+    def pending(self) -> int:
+        return sum(self._rows.values()) + self._dropped
 
     def snapshot(self) -> dict:
         rows = sorted(
@@ -88,15 +94,15 @@ def log_sink(digest: dict) -> None:
     _log.warning("\n%s", format_digest(digest))
 
 
-def flush(collector: ErrorCollector, sink: Callable[[dict], None] = log_sink) -> None:
-    """Hand the current window to the sink; empty windows are skipped."""
+def flush(collector: ErrorCollector, sink: Callable[[dict], None] | None = None) -> None:
+    """Hand the current window to the sink (default: the collector's); empty windows are skipped."""
     digest = collector.drain()
     if digest["rows"] or digest["dropped"]:
-        sink(digest)
+        (sink or collector.sink)(digest)
 
 
 async def run_flush_loop(
-    collector: ErrorCollector, interval: float, sink: Callable[[dict], None] = log_sink
+    collector: ErrorCollector, interval: float, sink: Callable[[dict], None] | None = None
 ) -> None:
     while True:
         await asyncio.sleep(interval)
@@ -124,6 +130,11 @@ def register_error_routes(
 
     async def report(payload: ClientError) -> Response:
         collector.record(payload.method, payload.url, payload.status)
+        if collector.batch_size and collector.pending >= collector.batch_size:
+            try:
+                flush(collector)
+            except Exception:  # reporting must never fail the browser's beacon
+                _log.exception("batch flush failed")
         return Response(status_code=204)
 
     async def summary():

@@ -118,6 +118,24 @@ DOCS_INTERNAL_AUTH_SECRET="${DOCS_INTERNAL_AUTH_SECRET:-${DOCS_INTERNAL_SECRET:-
 [[ -n "$DOCS_INTERNAL_AUTH_SECRET" ]] && DOCS_LINES="DOCS_INTERNAL_AUTH_SECRET=$DOCS_INTERNAL_AUTH_SECRET
 $DOCS_LINES"
 
+# Error digest -> Telegram (+ OpenAI summary). Reuses the CD secrets; each line is emitted only when
+# set, so with no Telegram secrets the collector stays log-only. LEO_OPENAI_* is the same key/model
+# the agent uses (bare model name).
+# Digest links go to the existing Jaeger UI (<origin>/jaeger, SSO); only derivable for an https API URL.
+ERROR_COLLECTOR_JAEGER_URL="${ERROR_COLLECTOR_JAEGER_URL:-$(printf '%s' "$API_HOSTNAME" | sed -nE 's#^(https://[^/]+).*#\1/jaeger#p')}"
+ERROR_LINES=""
+for kv in "TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}" "TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}" \
+          "OPENAI_API_KEY=${LEO_OPENAI_API_KEY:-}" "OPENAI_MODEL=${LEO_OPENAI_MODEL_NAME:-}" \
+          "ERROR_COLLECTOR_JAEGER_URL=${ERROR_COLLECTOR_JAEGER_URL:-}" \
+          "ERROR_COLLECTOR_LINK_TEMPLATE=${ERROR_COLLECTOR_LINK_TEMPLATE:-}" \
+          "ERROR_COLLECTOR_BATCH_SIZE=${ERROR_COLLECTOR_BATCH_SIZE:-}"; do
+  [[ "${kv#*=}" == "" ]] || ERROR_LINES="$ERROR_LINES$kv
+"
+done
+[[ -n "${TELEGRAM_BOT_TOKEN:-}" && -n "${TELEGRAM_CHAT_ID:-}" ]] \
+  && echo "   Error digest -> Telegram enabled" \
+  || echo "   Error digest -> log only (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set)"
+
 # Build the env file locally and ship it base64-encoded as ONE arg (avoids the
 # ssh arg-flattening trap where an empty/space value corrupts positional args).
 ENV_B64="$(printf '%s' "SSO_LOGIN=$SSO_LOGIN
@@ -127,7 +145,7 @@ FRONTEND_ROOT_PATH=$ROOT_PATH
 HOST=0.0.0.0
 PORT=$PORT
 $DOCS_LINES
-$OTEL_LINES" | base64 | tr -d '\n')"
+$ERROR_LINES$OTEL_LINES" | base64 | tr -d '\n')"
 
 echo ">> Building + (re)starting the container ..."
 ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$PORT" "$ENV_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" < <(declare -f docker_pull_retry; cat <<'REMOTE'
