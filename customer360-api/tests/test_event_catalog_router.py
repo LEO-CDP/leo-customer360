@@ -65,18 +65,26 @@ class FakeEventCatalogCRUD:
 
 class EventCatalogRouterTests(unittest.TestCase):
     def build_client(self):
-        sys.modules.pop("core.routers.identity_api", None)
-        with patch("core.routers._generic.CRUDBase", FakeEventCatalogCRUD), patch(
-            "core.cache.get_redis_client", return_value=None
-        ):
-            identity_router = importlib.import_module("core.routers.identity_api")
-            identity_router.validate_domain_value = lambda *args, **kwargs: None
-            identity_router.invalidate_key = lambda *args, **kwargs: None
-            app = FastAPI()
-            app.include_router(identity_router.event_catalog_router)
-            app.dependency_overrides[get_db] = lambda: None
-            app.dependency_overrides[require_attribute_manager] = lambda: None
-            return TestClient(app)
+        module_name = "core.routers.identity_api"
+        original_module = sys.modules.get(module_name)
+        sys.modules.pop(module_name, None)
+        try:
+            with patch("core.routers._generic.CRUDBase", FakeEventCatalogCRUD), patch(
+                "core.cache.get_redis_client", return_value=None
+            ):
+                identity_router = importlib.import_module(module_name)
+                identity_router.validate_domain_value = lambda *args, **kwargs: None
+                identity_router.invalidate_key = lambda *args, **kwargs: None
+                app = FastAPI()
+                app.include_router(identity_router.event_catalog_router)
+                app.dependency_overrides[get_db] = lambda: None
+                app.dependency_overrides[require_attribute_manager] = lambda: None
+                return TestClient(app)
+        finally:
+            if original_module is not None:
+                sys.modules[module_name] = original_module
+                import core.routers as routers_package
+                setattr(routers_package, "identity_api", original_module)
 
     def test_read_schema_accepts_database_event(self):
         item_id = uuid.uuid4()
