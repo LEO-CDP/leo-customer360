@@ -101,7 +101,7 @@ class EndpointBoundaryTests(unittest.TestCase):
         for over, expected in (
             ({"status": 399}, 422), ({"status": 400}, 204),
             ({"status": 599}, 204), ({"status": 600}, 422),
-            ({"method": "M" * 11}, 422), ({"method": "M" * 10}, 204),
+            ({"method": "M" * 11}, 422), ({"method": "GET\nX"}, 422), ({"method": "M" * 10}, 204),
             ({"url": "/" * 500}, 204), ({"url": "/" * 501}, 422),
             ({"status": "500"}, 204),  # pydantic lax mode coerces numeric strings
             ({"status": 500.5}, 422),
@@ -135,6 +135,8 @@ class NormalizePathEdgeTests(unittest.TestCase):
             ("/api/v1/x", "/api/v1/x"),
             ("/a/123abc", "/a/123abc"),
             ("/a//1", "/a//:id"),  # double slash preserved
+            ("http://[", "/invalid"),
+            ("/a\nFAKE LOG LINE\r", "/aFAKE LOG LINE"),
         ):
             with self.subTest(url=url):
                 self.assertEqual(normalize_path(url), expected)

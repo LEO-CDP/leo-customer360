@@ -20,7 +20,11 @@ _ID_SEGMENT = re.compile(
 
 def normalize_path(url: str) -> str:
     """Drop scheme, host and query; replace UUID / numeric segments with ':id'."""
-    path = urlsplit(url).path or "/"
+    try:
+        path = urlsplit(url).path or "/"
+    except ValueError:  # e.g. "http://[" -> would 500 the public endpoint
+        return "/invalid"
+    path = "".join(c for c in path if c.isprintable())  # block log-line injection
     return "/".join(":id" if _ID_SEGMENT.match(s) else s for s in path.split("/"))
 
 
@@ -96,11 +100,14 @@ async def run_flush_loop(
 ) -> None:
     while True:
         await asyncio.sleep(interval)
-        flush(collector, sink)
+        try:
+            flush(collector, sink)
+        except Exception:  # a failing sink must not kill the loop
+            _log.exception("error digest flush failed")
 
 
 class ClientError(BaseModel):
-    method: str = Field(max_length=10)
+    method: str = Field(pattern=r"^[A-Za-z]{1,10}$")
     url: str = Field(max_length=500)
     status: int = Field(ge=400, le=599)
 
