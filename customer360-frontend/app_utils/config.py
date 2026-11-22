@@ -47,6 +47,8 @@ class FrontendSettings:
     error_collector_flush_seconds: float
     error_collector_batch_size: int
     error_collector_link_template: str
+    jaeger_url: str
+    jaeger_service: str
     telegram_bot_token: str
     telegram_chat_id: str
     openai_api_key: str
@@ -111,6 +113,8 @@ class FrontendSettings:
             error_collector_batch_size=int(os.getenv("ERROR_COLLECTOR_BATCH_SIZE", "10")),
             # e.g. https://logs.example.com/search?q={method}%20{path}%20{status}
             error_collector_link_template=os.getenv("ERROR_COLLECTOR_LINK_TEMPLATE", ""),
+            jaeger_url=os.getenv("ERROR_COLLECTOR_JAEGER_URL", "").rstrip("/"),
+            jaeger_service=os.getenv("ERROR_COLLECTOR_JAEGER_SERVICE", "customer360-api"),
             telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
             telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID", ""),
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),

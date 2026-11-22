@@ -5,7 +5,8 @@ import asyncio
 import logging
 import re
 from collections.abc import Callable
-from urllib.parse import quote
+import json
+from urllib.parse import quote, urlencode
 
 import httpx
 
@@ -18,15 +19,26 @@ TOP_ROWS = 5
 TELEGRAM_LIMIT = 4000  # API max is 4096
 
 
-def _link(template: str, row: dict) -> str:
-    if not template:
+def jaeger_link(settings: FrontendSettings, tags: dict) -> str:
+    """Jaeger UI search for failed requests of the API service in the last hour."""
+    if not settings.jaeger_url:
         return ""
-    return template.format(
-        method=quote(row["method"]), path=quote(row["path"], safe=""), status=row["status"]
-    )
+    q = urlencode({"service": settings.jaeger_service, "lookback": "1h", "tags": json.dumps(tags)})
+    return f"{settings.jaeger_url}/search?{q}"
 
 
-def build_message(digest: dict, summary: str | None, link_template: str = "") -> str:
+def _link(settings: FrontendSettings, row: dict) -> str:
+    template = settings.error_collector_link_template
+    if template:
+        return template.format(
+            method=quote(row["method"]), path=quote(row["path"], safe=""), status=row["status"]
+        )
+    # shortcut: path is not filterable (Jaeger records the route template, not our ':id' form);
+    # method+status narrows enough for a drill-down.
+    return jaeger_link(settings, {"http.method": row["method"], "http.status_code": str(row["status"])})
+
+
+def build_message(digest: dict, summary: str | None, settings: FrontendSettings) -> str:
     lines = [
         f"🚨 C360 frontend: {digest['total']} API errors "
         f"(4xx={digest['count_4xx']}, 5xx={digest['count_5xx']})",
@@ -34,10 +46,12 @@ def build_message(digest: dict, summary: str | None, link_template: str = "") ->
     ]
     if summary:
         lines += ["", summary.strip()]
+    if all_errors := jaeger_link(settings, {"error": "true"}):
+        lines += ["", f"All failing traces: {all_errors}"]
     lines.append("")
     for r in digest["rows"][:TOP_ROWS]:
         lines.append(f"{r['count']}x {r['method']} {r['path']} {r['status']}")
-        if link := _link(link_template, r):
+        if link := _link(settings, r):
             lines.append(f"  {link}")
     hidden = len(digest["rows"]) - TOP_ROWS
     if hidden > 0:
@@ -84,7 +98,7 @@ async def notify(settings: FrontendSettings, digest: dict) -> None:
         except Exception as e:
             _log.warning("OpenAI summary failed (%s); sending digest without it", type(e).__name__)
             summary = None
-        text = build_message(digest, summary, settings.error_collector_link_template)
+        text = build_message(digest, summary, settings)
         # TELEGRAM_CHAT_ID may list several ids (the CI notifier allows , ; or whitespace).
         for chat_id in re.split(r"[,;\s]+", settings.telegram_chat_id.strip()):
             try:

@@ -33,15 +33,22 @@ def digest(n=2):
 
 class MessageTests(unittest.TestCase):
     def test_message_has_summary_links_and_limits(self):
-        msg = en.build_message(digest(8), "DB is down.", "https://logs/?q={method}+{path}+{status}")
+        msg = en.build_message(digest(8), "DB is down.", settings())
         self.assertIn("9 API errors (4xx=1, 5xx=8)", msg)
         self.assertIn("DB is down.", msg)
         self.assertIn("https://logs/?q=GET+%2Fapi%2Fv1%2Fp0%2F%3Aid+500", msg)
         self.assertIn("+4 more endpoints", msg)
 
     def test_no_template_no_links_and_truncated(self):
-        self.assertNotIn("https://", en.build_message(digest(), None))
-        self.assertLessEqual(len(en.build_message(digest(), "x" * 9000)), en.TELEGRAM_LIMIT)
+        s = settings(ERROR_COLLECTOR_LINK_TEMPLATE="")
+        self.assertNotIn("https://", en.build_message(digest(), None, s))
+        self.assertLessEqual(len(en.build_message(digest(), "x" * 9000, s)), en.TELEGRAM_LIMIT)
+
+    def test_jaeger_links(self):
+        s = settings(ERROR_COLLECTOR_LINK_TEMPLATE="", ERROR_COLLECTOR_JAEGER_URL="https://h/jaeger/")
+        msg = en.build_message(digest(), None, s)
+        self.assertIn("https://h/jaeger/search?service=customer360-api&lookback=1h&tags=%7B%22error%22%3A+%22true%22%7D", msg)
+        self.assertIn("%22http.method%22%3A+%22GET%22%2C+%22http.status_code%22%3A+%22500%22", msg)
 
 
 def fake_client_factory(calls, openai_ok=True, telegram_ok=True):

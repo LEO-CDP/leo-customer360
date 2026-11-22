@@ -121,9 +121,12 @@ $DOCS_LINES"
 # Error digest -> Telegram (+ OpenAI summary). Reuses the CD secrets; each line is emitted only when
 # set, so with no Telegram secrets the collector stays log-only. LEO_OPENAI_* is the same key/model
 # the agent uses (bare model name).
+# Digest links go to the existing Jaeger UI (<origin>/jaeger, SSO); only derivable for an https API URL.
+ERROR_COLLECTOR_JAEGER_URL="${ERROR_COLLECTOR_JAEGER_URL:-$(printf '%s' "$API_HOSTNAME" | sed -nE 's#^(https://[^/]+).*#\1/jaeger#p')}"
 ERROR_LINES=""
 for kv in "TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}" "TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}" \
           "OPENAI_API_KEY=${LEO_OPENAI_API_KEY:-}" "OPENAI_MODEL=${LEO_OPENAI_MODEL_NAME:-}" \
+          "ERROR_COLLECTOR_JAEGER_URL=${ERROR_COLLECTOR_JAEGER_URL:-}" \
           "ERROR_COLLECTOR_LINK_TEMPLATE=${ERROR_COLLECTOR_LINK_TEMPLATE:-}" \
           "ERROR_COLLECTOR_BATCH_SIZE=${ERROR_COLLECTOR_BATCH_SIZE:-}"; do
   [[ "${kv#*=}" == "" ]] || ERROR_LINES="$ERROR_LINES$kv
