@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse
 from app_utils.config import FrontendSettings, load_environment
 from app_utils.docs_proxy import DocsProxy, register_docs_routes
 from app_utils.error_collector import ErrorCollector, register_error_routes
+from app_utils.error_notifier import build_sink
 from app_utils.lifecycle import SecurityHeadersMiddleware, create_lifespan
 from app_utils.page import AdminPageRenderer
 from app_utils.static_assets import mount_static_assets
@@ -22,7 +23,7 @@ logging.basicConfig(
 BASE_DIR = Path(__file__).resolve().parent
 load_environment(BASE_DIR)
 settings = FrontendSettings.from_environment(BASE_DIR)
-error_collector = ErrorCollector()
+error_collector = ErrorCollector(settings.error_collector_batch_size, build_sink(settings))
 
 app = FastAPI(
     title="Customer 360 Admin Frontend",

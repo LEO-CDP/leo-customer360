@@ -45,6 +45,13 @@ class FrontendSettings:
     app_start_time: str
     error_collector_enabled: bool
     error_collector_flush_seconds: float
+    error_collector_batch_size: int
+    error_collector_link_template: str
+    telegram_bot_token: str
+    telegram_chat_id: str
+    openai_api_key: str
+    openai_model: str
+    openai_base_url: str
 
     @classmethod
     def from_environment(cls, base_dir: Path) -> "FrontendSettings":
@@ -101,6 +108,14 @@ class FrontendSettings:
             error_collector_flush_seconds=float(
                 os.getenv("ERROR_COLLECTOR_FLUSH_SECONDS", "3600")
             ),
+            error_collector_batch_size=int(os.getenv("ERROR_COLLECTOR_BATCH_SIZE", "10")),
+            # e.g. https://logs.example.com/search?q={method}%20{path}%20{status}
+            error_collector_link_template=os.getenv("ERROR_COLLECTOR_LINK_TEMPLATE", ""),
+            telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
+            telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID", ""),
+            openai_api_key=os.getenv("OPENAI_API_KEY", ""),
+            openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            openai_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/"),
         )
 
     @property

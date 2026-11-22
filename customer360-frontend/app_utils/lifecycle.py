@@ -11,6 +11,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from .config import FrontendSettings
 from .error_collector import ErrorCollector, flush, run_flush_loop
+from .error_notifier import wait_pending
 
 _log = logging.getLogger("customer360-frontend")
 WORKFLOW_STUDIO_FRAME_PATH = "/static/js/workflow/workflow-studio-frame.html"
@@ -54,6 +55,7 @@ def create_lifespan(
         if task:
             task.cancel()
             flush(collector)
+            await wait_pending()  # let the Telegram send finish before the loop closes
         _log.info("Shutting down Customer 360 Admin Frontend Service...")
 
     return lifespan
