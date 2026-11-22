@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import Callable
 from urllib.parse import quote
 
@@ -83,18 +84,17 @@ async def notify(settings: FrontendSettings, digest: dict) -> None:
         except Exception as e:
             _log.warning("OpenAI summary failed (%s); sending digest without it", type(e).__name__)
             summary = None
-        try:
-            r = await client.post(
-                f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage",
-                json={
-                    "chat_id": settings.telegram_chat_id,
-                    "text": build_message(digest, summary, settings.error_collector_link_template),
-                    "disable_web_page_preview": True,
-                },
-            )
-            r.raise_for_status()
-        except Exception as e:
-            _log.error("Telegram send failed (%s)", type(e).__name__)
+        text = build_message(digest, summary, settings.error_collector_link_template)
+        # TELEGRAM_CHAT_ID may list several ids (the CI notifier allows , ; or whitespace).
+        for chat_id in re.split(r"[,;\s]+", settings.telegram_chat_id.strip()):
+            try:
+                r = await client.post(
+                    f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage",
+                    json={"chat_id": chat_id, "text": text, "disable_web_page_preview": True},
+                )
+                r.raise_for_status()
+            except Exception as e:
+                _log.error("Telegram send failed (%s)", type(e).__name__)
 
 
 def build_sink(settings: FrontendSettings) -> Callable[[dict], None]:

@@ -62,6 +62,8 @@ name: CD
 #   LEO_OPENAI_API_KEY  -> customer360-agent LLM_API_KEY (OpenAI via LiteLLM)
 #   (var) LEO_OPENAI_MODEL_NAME -> customer360-agent LLM_MODEL (bare name; deploy-agent.sh adds openai/)
 #   AGENT_API_TOKEN     -> shared bearer token gating the agent's /plan/* (agent + api both get it)
+#   TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID -> frontend step: API error digest to Telegram (also LEO_OPENAI_API_KEY / LEO_OPENAI_MODEL_NAME for the summary)
+#   (var) ERROR_COLLECTOR_LINK_TEMPLATE / ERROR_COLLECTOR_BATCH_SIZE -> frontend step, optional
 #   DOCS_INTERNAL_AUTH_SECRET -> shared secret for the customer360-frontend /ai proxy (optional)
 #   VSTORAGE_ACCESS_KEY / VSTORAGE_SECRET_KEY -> S3/vStorage remote-state creds AND
 #                        TF_VAR_access_key / TF_VAR_secret_key (event-api S3 sink)

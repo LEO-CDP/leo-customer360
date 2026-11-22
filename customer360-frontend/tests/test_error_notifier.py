@@ -79,6 +79,13 @@ class NotifyTests(unittest.TestCase):
             self.run_notify(telegram_ok=False)
         self.assertNotIn("SECRET", "".join(logs.output))
 
+    def test_multiple_chat_ids_each_get_the_message(self):
+        calls = []
+        with patch.object(en.httpx, "AsyncClient", fake_client_factory(calls)):
+            asyncio.run(en.notify(settings(TELEGRAM_CHAT_ID="1, 2;3"), digest()))
+        ids = [json.loads(c.content)["chat_id"] for c in calls if "telegram" in c.url.host]
+        self.assertEqual(ids, ["1", "2", "3"])
+
     def test_no_openai_key_skips_summary(self):
         calls = []
         with patch.object(en.httpx, "AsyncClient", fake_client_factory(calls)):
