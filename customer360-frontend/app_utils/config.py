@@ -43,6 +43,8 @@ class FrontendSettings:
     docs_internal_secret: str
     docs_site_base: str
     app_start_time: str
+    error_collector_enabled: bool
+    error_collector_flush_seconds: float
 
     @classmethod
     def from_environment(cls, base_dir: Path) -> "FrontendSettings":
@@ -93,6 +95,12 @@ class FrontendSettings:
                 "DOCS_SITE_BASE", "https://leo-cdp.github.io/leo-customer360"
             ).rstrip("/"),
             app_start_time=datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S"),
+            error_collector_enabled=os.getenv(
+                "ERROR_COLLECTOR_ENABLED", "true"
+            ).lower() not in {"false", "0", "no"},
+            error_collector_flush_seconds=float(
+                os.getenv("ERROR_COLLECTOR_FLUSH_SECONDS", "3600")
+            ),
         )
 
     @property
@@ -110,3 +118,7 @@ class FrontendSettings:
     @property
     def docs_ai_base(self) -> str:
         return f"{self.root_path}/ai" if self.root_path and self.root_path != "/" else "/ai"
+
+    @property
+    def error_collector_path(self) -> str:
+        return f"{self.root_path}/client-errors" if self.root_path and self.root_path != "/" else "/client-errors"
