@@ -100,6 +100,12 @@ class NotifyTests(unittest.TestCase):
         self.assertEqual([c.url.host for c in calls], ["api.telegram.org"])
 
 
+class TokenLeakTests(unittest.TestCase):
+    def test_httpx_request_log_is_silenced(self):
+        import logging
+        self.assertGreaterEqual(logging.getLogger("httpx").getEffectiveLevel(), logging.WARNING)
+
+
 class SinkTests(unittest.TestCase):
     def test_unconfigured_is_log_only(self):
         self.assertIs(en.build_sink(settings(TELEGRAM_BOT_TOKEN="")), en.log_sink)

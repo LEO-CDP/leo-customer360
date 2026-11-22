@@ -14,6 +14,8 @@ from .config import FrontendSettings
 from .error_collector import log_sink
 
 _log = logging.getLogger("customer360-frontend.errors")
+# httpx logs every request URL at INFO, and the Telegram URL contains the bot token.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 _pending: set[asyncio.Task] = set()  # strong refs so fire-and-forget tasks aren't GC'd
 TOP_ROWS = 5
 TELEGRAM_LIMIT = 4000  # API max is 4096
