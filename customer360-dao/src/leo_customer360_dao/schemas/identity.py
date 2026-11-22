@@ -8,8 +8,12 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from leo_customer360_dao.schemas.segmentation import normalize_audience_tag_list
+
+_PROJECTED_CLV_FIELDS = frozenset(
+    {"predictive_clv", "clv_segment", "clv_percentile", "current_valuation_id"}
+)
 
 _SOURCE_CONSENT_FIELDS = {
     "email_opt_in",
@@ -94,6 +98,8 @@ class MasterProfileBase(BaseModel):
     historical_clv: Optional[Decimal] = None
     predictive_clv: Optional[Decimal] = None
     clv_segment: Optional[str] = None
+    clv_percentile: Optional[Decimal] = Field(default=None, ge=0, le=100)
+    current_valuation_id: Optional[uuid.UUID] = None
     engagement_score: Optional[Decimal] = None
     latest_nps_score: Optional[int] = Field(default=None, ge=0, le=10)
     average_csat: Optional[Decimal] = None
@@ -166,8 +172,6 @@ class MasterProfileUpdate(BaseModel):
     churn_probability: Optional[Decimal] = None
     churn_risk_tier: Optional[str] = Field(default=None, pattern="^(low|medium|high|critical)$")
     historical_clv: Optional[Decimal] = None
-    predictive_clv: Optional[Decimal] = None
-    clv_segment: Optional[str] = None
     engagement_score: Optional[Decimal] = None
     latest_nps_score: Optional[int] = Field(default=None, ge=0, le=10)
     average_csat: Optional[Decimal] = None
@@ -177,6 +181,20 @@ class MasterProfileUpdate(BaseModel):
     model_versions: Optional[dict] = None
     scores_updated_at: Optional[datetime] = None
     status_code: Optional[int] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_projected_clv_fields(cls, data: Any) -> Any:
+        # CLV fields are projected from cdp_customer_valuation by the CLV scorer
+        # in the same transaction as the snapshot; a PATCH would break that link.
+        if isinstance(data, dict):
+            blocked = sorted(_PROJECTED_CLV_FIELDS.intersection(data))
+            if blocked:
+                raise ValueError(
+                    f"{', '.join(blocked)} are derived from cdp_customer_valuation "
+                    "and cannot be written through the profile API"
+                )
+        return data
 
     @field_validator("audience_tags")
     @classmethod

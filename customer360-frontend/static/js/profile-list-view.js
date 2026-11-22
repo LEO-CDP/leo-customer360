@@ -21,6 +21,8 @@ window.C360 = window.C360 || {};
     // Real (plaintext) name wins when available; hashed domains (banking)
     // fall back to the AI-computed persona name, then a generic label.
     var displayName = fmt.realName(p) || p.persona_name || ("Profile " + fmt.shortId(p.master_profile_id));
+    // Flag the tier only when it comes from the CLV model, not membership.
+    var clvTierStale = !p.membership_tier && !!p.clv_segment && fmt.clvFreshness(p.scores_updated_at).stale;
     return $.extend({}, p, {
       displayName: displayName,
       initials: fmt.initials(displayName),
@@ -28,8 +30,10 @@ window.C360 = window.C360 || {};
       domainLabel: fmt.domainLabel(p.domain),
       domainIcon: fmt.domainIcon(p.domain),
       domainIconBg: fmt.domainIconBg(p.domain),
-      tierLabel: fmt.titleCase(p.membership_tier || p.clv_segment) || "—",
+      tierLabel: (fmt.titleCase(p.membership_tier || p.clv_segment) || "—") + (clvTierStale ? " (stale)" : ""),
       tierIcon: "🏷️",
+      tierIconBg: clvTierStale ? "bg-red-100" : "bg-amber-100",
+      tierIconColor: clvTierStale ? "text-red-700" : "text-amber-700",
       lastActivityIcon: "🕒",
       lifecycleLabel: fmt.titleCase(p.lifecycle_stage) || "—",
       lifecycleBadgeClass: fmt.lifecycleBadgeClass(p.lifecycle_stage),
@@ -51,7 +55,7 @@ window.C360 = window.C360 || {};
   var COLUMNS = [
     { label: "Profile", type: "identity", nameField: "displayName", subField: "shortId", avatarField: "initials" },
     { label: "Domain", type: "identity", nameField: "domainLabel", avatarField: "domainIcon", avatarBgField: "domainIconBg", avatarColor: "text-slate-600", compact: true },
-    { label: "Tier", type: "identity", nameField: "tierLabel", avatarField: "tierIcon", avatarBg: "bg-amber-100", avatarColor: "text-amber-700", compact: true },
+    { label: "Tier", type: "identity", nameField: "tierLabel", avatarField: "tierIcon", avatarBgField: "tierIconBg", avatarColorField: "tierIconColor", compact: true },
     { label: "Lifecycle", type: "badge", field: "lifecycleLabel", classField: "lifecycleBadgeClass" },
     { label: "Churn Risk", type: "badge", field: "churn_risk_tier", classField: "churnBadgeClass" },
     { label: "Linked Profiles", field: "linkedRawProfileCountLabel" },

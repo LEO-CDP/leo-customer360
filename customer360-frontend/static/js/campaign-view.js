@@ -569,6 +569,14 @@ window.C360 = window.C360 || {};
     return Number.isFinite(number) ? number : null;
   }
 
+  // Mirrors the journey runtime: CLV older than 30 days is treated as missing.
+  var CLV_MAX_AGE_MS = 30 * 86400000;
+  function workflowClvValue(profile, value) {
+    var updatedAt = profile.scores_updated_at ? Date.parse(profile.scores_updated_at) : NaN;
+    if (!Number.isFinite(updatedAt) || Date.now() - updatedAt > CLV_MAX_AGE_MS) return null;
+    return workflowProfileValue(value);
+  }
+
   function workflowProfile(profile, index) {
     var attributes = profile.attributes && typeof profile.attributes === "object"
       ? profile.attributes
@@ -591,7 +599,8 @@ window.C360 = window.C360 || {};
       churn_probability: workflowProfileValue(profile.churn_probability),
       lead_conversion_probability: workflowProfileValue(profile.lead_conversion_probability),
       historical_clv: workflowProfileValue(profile.historical_clv),
-      predictive_clv: workflowProfileValue(profile.predictive_clv),
+      predictive_clv: workflowClvValue(profile, profile.predictive_clv),
+      clv_percentile: workflowClvValue(profile, profile.clv_percentile),
       latest_nps_score: workflowProfileValue(profile.latest_nps_score),
       average_csat: workflowProfileValue(profile.average_csat),
       overall_sentiment_score: workflowProfileValue(profile.overall_sentiment_score),

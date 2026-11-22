@@ -412,8 +412,9 @@ INSERT INTO customer360.cdp_profile_attributes (
 
     -- CUSTOMER LIFETIME VALUE (CLV) SCORING
     ('historical_clv', 'historical_clv', 'Historical CLV', 'Actual realized revenue/profit to date.', 'CLV_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'currency', 0, NULL, 'weekly', 440),
-    ('predictive_clv', 'predictive_clv', 'Predictive CLV', 'ML-predicted future revenue generation.', 'CLV_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, NULL, NULL, 'currency', 0, NULL, 'weekly', 450),
-    ('clv_segment', 'clv_segment', 'CLV Segment', 'Combined or segmented CLV tier (e.g. high/medium/low value).', 'CLV_SCORING', 'cdp_master_profiles', 'TEXT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, NULL, NULL, 'tier', NULL, NULL, 'weekly', 460),
+    ('predictive_clv', 'predictive_clv', 'Predictive CLV', '12-month contribution value (not revenue) in the tenant reporting currency, projected from the champion CLV model.', 'CLV_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, NULL, NULL, 'currency', 0, NULL, 'daily', 450),
+    ('clv_segment', 'clv_segment', 'CLV Segment', 'Percentile CLV tier within tenant and domain (champion/high_value/growth_potential/standard); empty below the minimum population.', 'CLV_SCORING', 'cdp_master_profiles', 'TEXT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, NULL, NULL, 'tier', NULL, NULL, 'daily', 460),
+    ('clv_percentile', 'clv_percentile', 'CLV Percentile', 'Percentile rank (0-100) of predicted CLV within tenant and domain. Currency-free; use for value thresholds such as top 10%.', 'CLV_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, NULL, NULL, 'score', 0, 100, 'daily', 465),
 
     -- CUSTOMER EXPERIENCE (CX) & ENGAGEMENT SCORING
     ('engagement_score', 'engagement_score', 'Engagement Score', 'Overall interaction frequency/depth score.', 'CX_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, NULL, NULL, 'score', 0, 100, 'daily', 470),

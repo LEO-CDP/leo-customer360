@@ -56,10 +56,59 @@ CREATE TABLE IF NOT EXISTS customer360.sys_tenant (
         CONSTRAINT sys_tenant_business_model_check
         CHECK (business_model IN ('B2B', 'B2C', 'B2B2C')),
     status VARCHAR(20) DEFAULT 'ACTIVE' NOT NULL,
+    -- Currency of CLV labels, features and outputs. Transactions in other
+    -- currencies are excluded from CLV until optional FX conversion is enabled.
+    reporting_currency CHAR(3) NOT NULL DEFAULT 'VND'
+        CONSTRAINT sys_tenant_reporting_currency_check
+        CHECK (reporting_currency ~ '^[A-Z]{3}$'),
     created_at TIMESTAMP DEFAULT now(),
     updated_at TIMESTAMP DEFAULT now(),
     metadata JSONB
 );
+
+-- Existing tenants get their dominant transaction currency once, when the
+-- column is first added; later runs keep any operator-set value.
+DO $$
+DECLARE
+    current_tenant_id UUID;
+    dominant_currency CHAR(3);
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'customer360'
+          AND table_name = 'sys_tenant'
+          AND column_name = 'reporting_currency'
+    ) THEN
+        RETURN;
+    END IF;
+
+    ALTER TABLE customer360.sys_tenant
+        ADD COLUMN reporting_currency CHAR(3) NOT NULL DEFAULT 'VND'
+            CONSTRAINT sys_tenant_reporting_currency_check
+            CHECK (reporting_currency ~ '^[A-Z]{3}$');
+
+    IF to_regclass('customer360.crm_transactions') IS NULL THEN
+        RETURN;
+    END IF;
+    FOR current_tenant_id IN SELECT tenant_id FROM customer360.sys_tenant LOOP
+        PERFORM set_config('app.tenant_id', current_tenant_id::text, true);
+        SELECT upper(t.currency)
+          INTO dominant_currency
+          FROM customer360.crm_transactions t
+         WHERE t.tenant_id = current_tenant_id
+           AND upper(t.currency) ~ '^[A-Z]{3}$'
+           AND upper(t.currency) <> 'UNK'
+         GROUP BY upper(t.currency)
+         ORDER BY count(*) DESC, upper(t.currency)
+         LIMIT 1;
+        IF dominant_currency IS NOT NULL THEN
+            UPDATE customer360.sys_tenant
+               SET reporting_currency = dominant_currency
+             WHERE tenant_id = current_tenant_id;
+        END IF;
+    END LOOP;
+    PERFORM set_config('app.tenant_id', '', true);
+END $$;
 
 -- Existing databases may already have sys_tenant without the business-model
 -- column; keep the canonical definition above while making bootstrap upgrades
@@ -944,10 +993,19 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_master_profiles (
     -- 3. Customer Lifetime Value (CLV) Scoring
     -- Actual realized revenue/profit to date
     historical_clv NUMERIC(15, 2) DEFAULT 0.00,
-    -- ML-predicted future revenue generation
+    -- 12-month contribution value, projected from the champion CLV model's
+    -- latest COMPUTED cdp_customer_valuation snapshot (predicted_clv_12m).
     predictive_clv NUMERIC(15, 2),
-    -- Combined or segmented CLV tier
+    -- Percentile CLV tier within (tenant, domain); NULL below the minimum
+    -- population. Written only by the CLV scorer.
     clv_segment TEXT,
+    -- Percentile rank (0-100) of predicted CLV within (tenant, domain).
+    clv_percentile NUMERIC(5, 2)
+        CONSTRAINT ck_cdp_mp_clv_percentile
+        CHECK (clv_percentile IS NULL OR clv_percentile BETWEEN 0 AND 100),
+    -- valuation_id of the snapshot projected above. No FK: the valuation table
+    -- is partitioned and keyed by (valuation_id, as_of_date).
+    current_valuation_id UUID,
 
     -- 4. Customer Experience (CX) & Engagement Scoring
     -- Overall interaction frequency/depth score (0 to 100)
@@ -1855,8 +1913,8 @@ VALUES
     ('ENGAGEMENT_CHANNEL_BONUS_CAP', '30.0', 'NUMERIC', 'Engagement channel bonus cap', TRUE, 'system_seed'),
     ('ENGAGEMENT_RECENCY_WEIGHT', '0.7', 'NUMERIC', 'Engagement recency blend weight', TRUE, 'system_seed'),
 
-    ('FINANCIAL_CLV_REFERENCE_DEFAULT', '5000.0', 'NUMERIC', 'Financial score CLV reference', TRUE, 'system_seed'),
-    ('FINANCIAL_SCORE_MULTIPLIER', '100.0', 'NUMERIC', 'Financial score multiplier', TRUE, 'system_seed'),
+    ('FINANCIAL_SCORE_DEFAULT', '50.0', 'NUMERIC', 'Neutral financial score when clv_percentile is missing or stale', TRUE, 'system_seed'),
+    ('FINANCIAL_CLV_MAX_AGE_DAYS', '30', 'INTEGER', 'Days before clv_percentile is treated as stale for the financial score', TRUE, 'system_seed'),
 
     ('LOYALTY_TIER_PLATINUM_BASE', '100.0', 'NUMERIC', 'Loyalty tier base platinum', TRUE, 'system_seed'),
     ('LOYALTY_TIER_GOLD_BASE', '80.0', 'NUMERIC', 'Loyalty tier base gold', TRUE, 'system_seed'),
@@ -1898,6 +1956,11 @@ VALUES
 
     ('PERSONA_HISTORY_SCORE_DELTA_THRESHOLD', '5.0', 'NUMERIC', 'Minimum absolute score delta for history record', TRUE, 'system_seed')
 ON CONFLICT (config_key) DO NOTHING;
+
+-- The financial score now uses clv_percentile, which is currency-free; the
+-- currency-blind CLV reference and its multiplier no longer have any effect.
+DELETE FROM customer360.cdp_persona_config
+WHERE config_key IN ('FINANCIAL_CLV_REFERENCE_DEFAULT', 'FINANCIAL_SCORE_MULTIPLIER');
 
 ---------------------------------------------------
 -- EVENT CATALOG (governed cross-domain event vocabulary)
@@ -3381,6 +3444,33 @@ CREATE INDEX IF NOT EXISTS idx_cdp_mp_pred_clv ON customer360.cdp_master_profile
     predictive_clv DESC NULLS LAST
 );
 
+-- CLV projection columns for existing databases (see cdp_customer_valuation).
+ALTER TABLE customer360.cdp_master_profiles
+    ADD COLUMN IF NOT EXISTS clv_percentile NUMERIC(5, 2),
+    ADD COLUMN IF NOT EXISTS current_valuation_id UUID;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'customer360.cdp_master_profiles'::regclass
+          AND conname = 'ck_cdp_mp_clv_percentile'
+    ) THEN
+        ALTER TABLE customer360.cdp_master_profiles
+            ADD CONSTRAINT ck_cdp_mp_clv_percentile
+            CHECK (clv_percentile IS NULL OR clv_percentile BETWEEN 0 AND 100);
+    END IF;
+END $$;
+
+COMMENT ON COLUMN customer360.cdp_master_profiles.predictive_clv IS
+'12-month contribution value (not revenue), projected from the champion CLV model''s latest COMPUTED cdp_customer_valuation snapshot. Written only by the CLV scorer; the profile PATCH API rejects it.';
+COMMENT ON COLUMN customer360.cdp_master_profiles.clv_segment IS
+'Percentile CLV tier within (tenant, domain), with hysteresis. NULL below the minimum population. Written only by the CLV scorer.';
+COMMENT ON COLUMN customer360.cdp_master_profiles.clv_percentile IS
+'Percentile rank (0-100) of predicted CLV within (tenant, domain). Currency-free; used by persona financial_score and workflow conditions.';
+COMMENT ON COLUMN customer360.cdp_master_profiles.current_valuation_id IS
+'valuation_id of the cdp_customer_valuation snapshot currently projected onto this profile.';
+
 -- Fast routing of high-probability leads to sales/CRM
 CREATE INDEX IF NOT EXISTS idx_cdp_mp_lead_prob ON customer360.cdp_master_profiles (
     tenant_id,
@@ -4857,11 +4947,87 @@ SELECT cur.tenant_id,
 -- =========================================================================
 -- CUSTOMER VALUE / CLV VALUATION SNAPSHOTS
 -- =========================================================================
+-- Tenant-scoped registry of trained models. Artefacts live in object storage
+-- under models/tenant_id=<uuid>/domain=<code>/<agent_code>/<model_version>/.
+-- At most one CHAMPION per (tenant, domain, agent); promotion is a status flip
+-- followed by re-projection of the champion's snapshots.
+CREATE TABLE IF NOT EXISTS customer360.cdp_model_versions (
+    model_version_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL
+        REFERENCES customer360.sys_tenant (tenant_id) ON DELETE CASCADE,
+    domain_code VARCHAR(50) NOT NULL
+        REFERENCES customer360.sys_domain (domain_code)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    agent_code VARCHAR(100) NOT NULL,
+    model_name VARCHAR(100) NOT NULL,
+    model_version VARCHAR(50) NOT NULL,
+    artifact_uri TEXT,
+    feature_version VARCHAR(50) NOT NULL,
+    feature_keys TEXT[] NOT NULL DEFAULT ARRAY[]::text[],
+    training_window JSONB NOT NULL DEFAULT '{}'::jsonb,
+    label_definition JSONB NOT NULL DEFAULT '{}'::jsonb,
+    metrics JSONB NOT NULL DEFAULT '{}'::jsonb,
+    gate_result JSONB NOT NULL DEFAULT '{}'::jsonb,
+    tier_cutoffs JSONB NOT NULL DEFAULT '{}'::jsonb,
+    status VARCHAR(20) NOT NULL DEFAULT 'CHALLENGER'
+        CONSTRAINT ck_cdp_model_versions_status
+        CHECK (status IN ('CHALLENGER', 'PENDING_APPROVAL', 'CHAMPION', 'REJECTED', 'RETIRED')),
+    promoted_at TIMESTAMPTZ,
+    promoted_by TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT uq_cdp_model_versions_version UNIQUE
+        (tenant_id, domain_code, agent_code, model_version)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_cdp_model_versions_one_champion
+    ON customer360.cdp_model_versions (tenant_id, domain_code, agent_code)
+    WHERE status = 'CHAMPION';
+
+COMMENT ON TABLE customer360.cdp_model_versions IS
+'Tenant-scoped model registry: artefact location, training window, label definition, holdout metrics, promotion-gate result and frozen tier cut-offs per trained model.';
+COMMENT ON COLUMN customer360.cdp_model_versions.tier_cutoffs IS
+'Frozen percentile tier cut-offs from the latest full-population scoring run, used to tier event and segment re-scores between batch runs.';
+
 -- One reproducible valuation snapshot per tenant, profile, business domain,
 -- as-of date, and model version. Shared fields cover common lifecycle and
 -- economics features; JSONB fields hold domain-specific features and outputs.
+-- Range-partitioned by month of as_of_date so retention drops partitions
+-- instead of deleting rows. A pre-partitioning table that is still empty is
+-- recreated; a populated one is left alone and must be migrated manually.
+DO $$
+DECLARE
+    current_tenant_id UUID;
+    has_rows BOOLEAN := FALSE;
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'customer360'
+          AND c.relname = 'cdp_customer_valuation'
+          AND c.relkind = 'r'
+    ) THEN
+        RETURN;
+    END IF;
+    -- Forced RLS hides every row without a tenant context, so check per tenant.
+    FOR current_tenant_id IN SELECT tenant_id FROM customer360.sys_tenant LOOP
+        PERFORM set_config('app.tenant_id', current_tenant_id::text, true);
+        IF EXISTS (SELECT 1 FROM customer360.cdp_customer_valuation LIMIT 1) THEN
+            has_rows := TRUE;
+            EXIT;
+        END IF;
+    END LOOP;
+    PERFORM set_config('app.tenant_id', '', true);
+    IF has_rows THEN
+        RAISE NOTICE 'cdp_customer_valuation has rows and is not partitioned; migrate it manually.';
+    ELSE
+        DROP TABLE customer360.cdp_customer_valuation;
+    END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS customer360.cdp_customer_valuation (
-    valuation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    valuation_id UUID NOT NULL DEFAULT gen_random_uuid(),
 
     tenant_id UUID NOT NULL
         REFERENCES customer360.sys_tenant (tenant_id) ON DELETE CASCADE,
@@ -4880,6 +5046,11 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_customer_valuation (
     model_name VARCHAR(100) NOT NULL DEFAULT 'discounted_contribution_clv',
     model_version VARCHAR(50) NOT NULL DEFAULT '1.0.0',
     feature_version VARCHAR(50) NOT NULL DEFAULT '1.0.0',
+    -- Registry row of the trained model that produced the outputs; NULL for
+    -- feature-only snapshots and cold-start rows.
+    model_version_id UUID
+        REFERENCES customer360.cdp_model_versions (model_version_id)
+        ON DELETE SET NULL,
 
     -- Shared lifecycle and transaction/engagement features.
     customer_tenure_days INTEGER
@@ -4985,11 +5156,15 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_customer_valuation (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
+    CONSTRAINT pk_cdp_customer_valuation PRIMARY KEY (valuation_id, as_of_date),
     CONSTRAINT uq_cdp_customer_valuation_snapshot UNIQUE
         (tenant_id, master_profile_id, domain_code, as_of_date, model_name, model_version)
-);
+) PARTITION BY RANGE (as_of_date);
 
 ALTER TABLE customer360.cdp_customer_valuation
+    ADD COLUMN IF NOT EXISTS model_version_id UUID
+        REFERENCES customer360.cdp_model_versions (model_version_id)
+        ON DELETE SET NULL,
     ADD COLUMN IF NOT EXISTS insights TEXT,
     ADD COLUMN IF NOT EXISTS actions JSONB NOT NULL DEFAULT '[]'::jsonb,
     ADD COLUMN IF NOT EXISTS historical_gross_profit NUMERIC(20, 4),
@@ -5000,18 +5175,40 @@ ALTER TABLE customer360.cdp_customer_valuation
     ADD COLUMN IF NOT EXISTS profile_quality_score NUMERIC(5, 2);
 
 COMMENT ON TABLE customer360.cdp_customer_valuation IS
-'Cross-industry customer lifetime value feature snapshot and model-output table. One row per tenant/profile/domain/as-of-date/model/version.';
+'Cross-industry customer lifetime value feature snapshot and model-output table. One row per tenant/profile/domain/as-of-date/model/version. Written only by the CLV scorer; daily rows are kept 35 days, month-end rows 36 months, older rows are exported to object storage.';
 COMMENT ON COLUMN customer360.cdp_customer_valuation.domain_features IS
 'Industry-specific aggregate features and expected annual economics. Avoid raw PII and unnecessary sensitive data.';
 COMMENT ON COLUMN customer360.cdp_customer_valuation.location_features IS
 'Privacy-minimized derived location features; avoid precise raw location unless justified and authorized.';
 COMMENT ON COLUMN customer360.cdp_customer_valuation.data_quality_score IS
 'Input completeness score (0-100), not statistical model confidence or prediction accuracy.';
+COMMENT ON COLUMN customer360.cdp_customer_valuation.expected_annual_revenue IS
+'LightGBM prediction of net realised revenue in the 365 days after as_of_date, in the tenant reporting currency.';
+COMMENT ON COLUMN customer360.cdp_customer_valuation.predicted_clv_12m IS
+'12-month discounted contribution value derived from expected_annual_revenue, margin, retention and discount inputs.';
+COMMENT ON COLUMN customer360.cdp_customer_valuation.feature_snapshot IS
+'Exact model inputs, plus excluded-currency revenue share and feature provenance.';
+COMMENT ON COLUMN customer360.cdp_customer_valuation.insights IS
+'Optional LLM narrative generated from explanation on view and cached. Never a model input or output.';
+COMMENT ON COLUMN customer360.cdp_customer_valuation.purchase_intent_score IS
+'DEPRECATED: not written. Purchase intent lives in its owner''s catalogued home (cdp_profile_attributes).';
+COMMENT ON COLUMN customer360.cdp_customer_valuation.churn_risk_score IS
+'DEPRECATED: not written. Use cdp_master_profiles.churn_probability.';
+COMMENT ON COLUMN customer360.cdp_customer_valuation.next_best_product_score IS
+'DEPRECATED: not written. Product affinity is owned by product_recommendation.';
+COMMENT ON COLUMN customer360.cdp_customer_valuation.incremental_campaign_value IS
+'DEPRECATED: not written. Incremental value is owned by campaign_uplift (candidate_expected_value).';
+COMMENT ON COLUMN customer360.cdp_customer_valuation.profile_quality_score IS
+'DEPRECATED: not written. Use cdp_master_profiles.profile_completeness_score.';
 COMMENT ON COLUMN customer360.cdp_customer_valuation.actions IS
-'JSON array of LLM-recommended action candidates. Review before activating campaigns.';
+'DEPRECATED: not written. Next best action is owned by the next_best_action agent, with persona rules as fallback.';
 
 CREATE INDEX IF NOT EXISTS idx_cdp_customer_valuation_tenant_domain_profile
     ON customer360.cdp_customer_valuation (tenant_id, domain_code, master_profile_id);
+CREATE INDEX IF NOT EXISTS idx_cdp_customer_valuation_current
+    ON customer360.cdp_customer_valuation
+        (tenant_id, domain_code, master_profile_id, model_name, as_of_date DESC)
+    WHERE calculation_status = 'COMPUTED';
 CREATE INDEX IF NOT EXISTS idx_cdp_customer_valuation_clv_rank
     ON customer360.cdp_customer_valuation
         (tenant_id, domain_code, predicted_clv_horizon_after_cac DESC NULLS LAST)
@@ -5021,6 +5218,60 @@ CREATE INDEX IF NOT EXISTS idx_cdp_customer_valuation_pending
     WHERE calculation_status = 'PENDING';
 CREATE INDEX IF NOT EXISTS idx_cdp_customer_valuation_domain_features
     ON customer360.cdp_customer_valuation USING GIN (domain_features);
+
+-- Creates missing monthly partitions covering [p_from, p_to]. Each partition
+-- carries the same forced tenant policy as the parent, so direct partition
+-- reads stay tenant-scoped. No-op for an unmigrated, unpartitioned table.
+CREATE OR REPLACE FUNCTION customer360.ensure_cdp_customer_valuation_partitions(
+    p_from DATE,
+    p_to DATE
+) RETURNS INTEGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    month_start DATE := date_trunc('month', p_from)::date;
+    partition_name TEXT;
+    created INTEGER := 0;
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'customer360'
+          AND c.relname = 'cdp_customer_valuation'
+          AND c.relkind = 'p'
+    ) THEN
+        RETURN 0;
+    END IF;
+    WHILE month_start <= p_to LOOP
+        partition_name := format('cdp_customer_valuation_p%s', to_char(month_start, 'YYYYMM'));
+        IF to_regclass(format('customer360.%I', partition_name)) IS NULL THEN
+            EXECUTE format(
+                'CREATE TABLE customer360.%I PARTITION OF customer360.cdp_customer_valuation
+                    FOR VALUES FROM (%L) TO (%L)',
+                partition_name, month_start, (month_start + INTERVAL '1 month')::date
+            );
+            EXECUTE format('ALTER TABLE customer360.%I ENABLE ROW LEVEL SECURITY', partition_name);
+            EXECUTE format('ALTER TABLE customer360.%I FORCE ROW LEVEL SECURITY', partition_name);
+            EXECUTE format(
+                'CREATE POLICY tenant_policy ON customer360.%I
+                    USING (tenant_id = NULLIF(btrim(current_setting(''app.tenant_id'', true)), '''')::uuid)
+                    WITH CHECK (tenant_id = NULLIF(btrim(current_setting(''app.tenant_id'', true)), '''')::uuid)',
+                partition_name
+            );
+            created := created + 1;
+        END IF;
+        month_start := (month_start + INTERVAL '1 month')::date;
+    END LOOP;
+    RETURN created;
+END;
+$$;
+
+-- Bootstrap: the previous 36 months through three months ahead. The CLV job
+-- calls the function again before backfills and each nightly run.
+SELECT customer360.ensure_cdp_customer_valuation_partitions(
+    (date_trunc('month', CURRENT_DATE) - INTERVAL '36 months')::date,
+    (date_trunc('month', CURRENT_DATE) + INTERVAL '3 months')::date
+);
 
 CREATE TABLE IF NOT EXISTS customer360.cdp_profile_recommendation_runs (
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id) ON DELETE CASCADE,
@@ -5882,6 +6133,7 @@ DECLARE
         'sys_data_source',
         'sys_user_role',
         'cdp_customer_valuation',
+        'cdp_model_versions',
         'graph_edges',
         'crm_flow',
         'crm_flow_version',
