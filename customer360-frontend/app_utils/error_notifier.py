@@ -5,6 +5,7 @@ import asyncio
 import logging
 import re
 from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
 import json
 from urllib.parse import quote, urlencode
 
@@ -17,47 +18,75 @@ _log = logging.getLogger("customer360-frontend.errors")
 # httpx logs every request URL at INFO, and the Telegram URL contains the bot token.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 _pending: set[asyncio.Task] = set()  # strong refs so fire-and-forget tasks aren't GC'd
-TOP_ROWS = 5
 TELEGRAM_LIMIT = 4000  # API max is 4096
+TZ = timezone(timedelta(hours=7))  # ponytail: fixed UTC+7 (team timezone); make it a setting if another team reads this
 
 
-def jaeger_link(settings: FrontendSettings, tags: dict) -> str:
-    """Jaeger UI search for failed requests of the API service in the last hour."""
+def jaeger_link(settings: FrontendSettings, tags: dict, digest: dict) -> str:
+    """Jaeger UI search for failed requests of the API service in the digest's window (+-5 min)."""
     if not settings.jaeger_url:
         return ""
-    q = urlencode({"service": settings.jaeger_service, "lookback": "1h", "tags": json.dumps(tags)})
+    pad = timedelta(minutes=5)
+    start = datetime.fromisoformat(digest["window_start"]) - pad
+    end = datetime.fromisoformat(digest["window_end"]) + pad
+    q = urlencode({
+        "service": settings.jaeger_service, "lookback": "custom",
+        "start": int(start.timestamp() * 1_000_000), "end": int(end.timestamp() * 1_000_000),
+        "tags": json.dumps(tags),
+    })
     return f"{settings.jaeger_url}/search?{q}"
 
 
-def _link(settings: FrontendSettings, row: dict) -> str:
+def _link(settings: FrontendSettings, row: dict, digest: dict) -> tuple[str, str]:
+    """(label, url) of the drill-down link for a row; url is "" when none is configured."""
     template = settings.error_collector_link_template
     if template:
-        return template.format(
+        return (f"{row['method']} {_short(row['path'])} {row['status']}", template.format(
             method=quote(row["method"]), path=quote(row["path"], safe=""), status=row["status"]
-        )
+        ))
     # shortcut: path is not filterable (Jaeger records the route template, not our ':id' form);
     # method+status narrows enough for a drill-down.
-    return jaeger_link(settings, {"http.method": row["method"], "http.status_code": str(row["status"])})
+    return (f"{row['method']} {row['status']}",
+            jaeger_link(settings, {"http.method": row["method"], "http.status_code": str(row["status"])}, digest))
+
+
+def _short(path: str) -> str:
+    """Drop the proxy prefix (/c360api/api/v1/x -> /api/v1/x); display only."""
+    i = path.find("/api/")
+    return path[i:] if i > 0 else path
+
+
+def _window(digest: dict) -> str:
+    start = datetime.fromisoformat(digest["window_start"]).astimezone(TZ)
+    end = datetime.fromisoformat(digest["window_end"]).astimezone(TZ)
+    end_fmt = "%H:%M" if start.date() == end.date() else "%Y-%m-%d %H:%M"
+    return f"{start:%Y-%m-%d %H:%M} → {end:{end_fmt}} (UTC+7)"
+
+
+def _row(r: dict) -> str:
+    return f"{r['count']}x {r['method']} {_short(r['path'])} {r['status']}"
 
 
 def build_message(digest: dict, summary: str | None, settings: FrontendSettings) -> str:
+    env = f"[{settings.error_collector_env}] " if settings.error_collector_env else ""
     lines = [
-        f"🚨 C360 frontend: {digest['total']} API errors "
+        f"{env}C360 frontend: {digest['total']} API errors "
         f"(4xx={digest['count_4xx']}, 5xx={digest['count_5xx']})",
-        f"{digest['window_start']} → {digest['window_end']}",
+        _window(digest),
     ]
     if summary:
         lines += ["", summary.strip()]
-    if all_errors := jaeger_link(settings, {"error": "true"}):
-        lines += ["", f"All failing traces: {all_errors}"]
     lines.append("")
-    for r in digest["rows"][:TOP_ROWS]:
-        lines.append(f"{r['count']}x {r['method']} {r['path']} {r['status']}")
-        if link := _link(settings, r):
-            lines.append(f"  {link}")
-    hidden = len(digest["rows"]) - TOP_ROWS
-    if hidden > 0:
-        lines.append(f"+{hidden} more endpoints")
+    links = {}  # url -> label, first-seen order
+    if digest["count_5xx"] and (url := jaeger_link(settings, {"error": "true"}, digest)):
+        links[url] = "All 5xx traces"
+    for r in digest["rows"]:
+        lines.append(_row(r))
+        label, url = _link(settings, r, digest)
+        if url:
+            links.setdefault(url, label)
+    if links:
+        lines += [""] + [f"{label}: {url}" for url, label in links.items()]
     if digest["dropped"]:
         lines.append(f"({digest['dropped']} errors dropped: key cap reached)")
     return "\n".join(lines)[:TELEGRAM_LIMIT]
@@ -67,9 +96,7 @@ async def summarize(settings: FrontendSettings, digest: dict, client: httpx.Asyn
     """2-3 line triage from OpenAI; only method/normalized path/status/count are sent."""
     if not settings.openai_api_key:
         return None
-    rows = "\n".join(
-        f"{r['count']}x {r['method']} {r['path']} {r['status']}" for r in digest["rows"][:20]
-    )
+    rows = "\n".join(_row(r) for r in digest["rows"][:20])
     resp = await client.post(
         f"{settings.openai_base_url}/chat/completions",
         headers={"Authorization": f"Bearer {settings.openai_api_key}"},
