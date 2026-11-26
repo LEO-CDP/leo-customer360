@@ -128,7 +128,8 @@ for kv in "TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}" "TELEGRAM_CHAT_ID=${TELEG
           "OPENAI_API_KEY=${LEO_OPENAI_API_KEY:-}" "OPENAI_MODEL=${LEO_OPENAI_MODEL_NAME:-}" \
           "ERROR_COLLECTOR_JAEGER_URL=${ERROR_COLLECTOR_JAEGER_URL:-}" \
           "ERROR_COLLECTOR_LINK_TEMPLATE=${ERROR_COLLECTOR_LINK_TEMPLATE:-}" \
-          "ERROR_COLLECTOR_BATCH_SIZE=${ERROR_COLLECTOR_BATCH_SIZE:-}"; do
+          "ERROR_COLLECTOR_BATCH_SIZE=${ERROR_COLLECTOR_BATCH_SIZE:-}" \
+          "ERROR_COLLECTOR_ENV=${ENV:-}"; do  # only source of the env name inside the container (digest label); keep it if this deploy moves
   [[ "${kv#*=}" == "" ]] || ERROR_LINES="$ERROR_LINES$kv
 "
 done

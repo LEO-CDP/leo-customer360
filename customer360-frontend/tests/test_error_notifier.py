@@ -31,24 +31,76 @@ def digest(n=2):
     return c.drain()
 
 
+def fixed(rows, c4=10, c5=0, start="2026-11-25T10:22:30+00:00", end="2026-11-25T10:44:34+00:00"):
+    return {"total": c4 + c5, "count_4xx": c4, "count_5xx": c5, "window_start": start,
+            "window_end": end, "rows": rows, "dropped": 0}
+
+
+def row(path="/c360api/api/v1/x", status=422, method="GET", count=1):
+    return {"method": method, "path": path, "status": status, "count": count}
+
+
+JAEGER = {"ERROR_COLLECTOR_LINK_TEMPLATE": "", "ERROR_COLLECTOR_JAEGER_URL": "https://h/jaeger/"}
+
+
 class MessageTests(unittest.TestCase):
-    def test_message_has_summary_links_and_limits(self):
+    def test_message_has_summary_links_and_all_rows(self):
         msg = en.build_message(digest(8), "DB is down.", settings())
         self.assertIn("9 API errors (4xx=1, 5xx=8)", msg)
         self.assertIn("DB is down.", msg)
-        self.assertIn("https://logs/?q=GET+%2Fapi%2Fv1%2Fp0%2F%3Aid+500", msg)
-        self.assertIn("+4 more endpoints", msg)
+        self.assertIn("GET /api/v1/p0/:id 500", msg)
+        self.assertEqual(msg.count("x GET /api/v1/p"), 8)
+        self.assertNotIn("more endpoints", msg)
+        self.assertIn("GET /api/v1/p0/:id 500: https://logs/?q=GET+%2Fapi%2Fv1%2Fp0%2F%3Aid+500", msg)
 
     def test_no_template_no_links_and_truncated(self):
         s = settings(ERROR_COLLECTOR_LINK_TEMPLATE="")
         self.assertNotIn("https://", en.build_message(digest(), None, s))
+        self.assertNotIn("http", en.build_message(digest(), None, s))
         self.assertLessEqual(len(en.build_message(digest(), "x" * 9000, s)), en.TELEGRAM_LIMIT)
 
-    def test_jaeger_links(self):
-        s = settings(ERROR_COLLECTOR_LINK_TEMPLATE="", ERROR_COLLECTOR_JAEGER_URL="https://h/jaeger/")
-        msg = en.build_message(digest(), None, s)
-        self.assertIn("https://h/jaeger/search?service=customer360-api&lookback=1h&tags=%7B%22error%22%3A+%22true%22%7D", msg)
-        self.assertIn("%22http.method%22%3A+%22GET%22%2C+%22http.status_code%22%3A+%22500%22", msg)
+    def test_env_label(self):
+        d = fixed([row()])
+        self.assertTrue(en.build_message(d, None, settings(ERROR_COLLECTOR_ENV="beta")).startswith("[beta] C360 frontend: 10"))
+        self.assertTrue(en.build_message(d, None, settings(ERROR_COLLECTOR_ENV="")).startswith("C360 frontend: 10"))
+
+    def test_local_time_line(self):
+        s = settings()
+        self.assertIn("\n2026-11-25 17:22 → 17:44 (UTC+7)\n", en.build_message(fixed([row()]), None, s))
+        d = fixed([row()], end="2026-11-25T18:00:00+00:00")  # 01:00 next day in UTC+7
+        self.assertIn("2026-11-25 17:22 → 2026-11-26 01:00 (UTC+7)", en.build_message(d, None, s))
+
+    def test_prefix_stripped(self):
+        msg = en.build_message(fixed([row("/c360api/api/v1/x"), row("/plain")]), None, settings(**JAEGER))
+        self.assertIn("1x GET /api/v1/x 422", msg)
+        self.assertNotIn("c360api", msg)
+        self.assertIn("1x GET /plain 422", msg)
+
+    def test_identical_links_collapse(self):
+        d = fixed([row("/a/1"), row("/a/2"), row("/a/3")])
+        msg = en.build_message(d, None, settings(**JAEGER))
+        self.assertEqual(msg.count("https://"), 1)
+        self.assertIn("GET 422: https://h/jaeger/search?", msg)
+
+    def test_different_links_are_labelled(self):
+        d = fixed([row(), row(status=500, method="POST")], c4=1, c5=1)
+        msg = en.build_message(d, None, settings(**JAEGER))
+        self.assertIn("GET 422: https://h/jaeger/", msg)
+        self.assertIn("POST 500: https://h/jaeger/", msg)
+
+    def test_jaeger_window_in_microseconds(self):
+        msg = en.build_message(fixed([row()]), None, settings(**JAEGER))
+        # 10:22:30Z - 5min = 10:17:30Z ; 10:44:34Z + 5min = 10:49:34Z
+        self.assertIn("lookback=custom&start=1795601850000000&end=1795603774000000", msg)
+        self.assertNotIn("lookback=1h", msg)
+        self.assertIn("%22http.method%22%3A+%22GET%22%2C+%22http.status_code%22%3A+%22422%22", msg)
+
+    def test_5xx_link_only_when_5xx(self):
+        s = settings(**JAEGER)
+        self.assertNotIn("%22error%22", en.build_message(fixed([row()]), None, s))
+        msg = en.build_message(fixed([row(status=500)], c4=0, c5=3), None, s)
+        self.assertIn("All 5xx traces: https://h/jaeger/search?", msg)
+        self.assertIn("%22error%22%3A+%22true%22", msg)
 
 
 def fake_client_factory(calls, openai_ok=True, telegram_ok=True):

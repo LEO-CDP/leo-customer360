@@ -164,6 +164,16 @@ image's `BUILD_VERSION` value. It is not regenerated for each request.
 
 These values are injected into the browser at render time through `window.C360_SERVER_CONFIG`, and then read by `static/js/common/config.js`.
 
+### API error collector
+
+Failed browser API calls (4xx/5xx) are reported to `POST /client-errors`, grouped in memory, and sent as a digest (log, plus Telegram when configured). Code: `app_utils/error_collector.py`, `app_utils/error_notifier.py`.
+
+- `ERROR_COLLECTOR_ENABLED` (default `true`), `ERROR_COLLECTOR_FLUSH_SECONDS` (default `3600`), `ERROR_COLLECTOR_BATCH_SIZE` (default `10`, send early once this many errors arrive)
+- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`: Telegram sink; the same secrets as the CI notifier, so digests land in the same chat
+- `ERROR_COLLECTOR_JAEGER_URL`, `ERROR_COLLECTOR_JAEGER_SERVICE` (default `customer360-api`), `ERROR_COLLECTOR_LINK_TEMPLATE`: drill-down links in the digest
+- `OPENAI_API_KEY`, `OPENAI_MODEL`: optional one-paragraph summary
+- `ERROR_COLLECTOR_ENV`: label in the digest header (`[uat] C360 frontend: ...`). The frontend has no other setting that carries the environment name: `deploy-frontend.sh` sets this from its `<uat|prod>` argument. If you move the deploy (Helm, another script, a new environment), keep passing it, or digests from different environments look identical in the shared chat.
+
 ## Authentication and session flow
 
 The app has a real client-side auth layer, not a static-only tenant selector.
